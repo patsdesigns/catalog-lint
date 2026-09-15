@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "shopify-dev",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["shopify", "app", "dev", "--use-localhost"],
+      "port": 3458,
+      "url": "https://localhost:3458"
+    }
+  ]
+}
