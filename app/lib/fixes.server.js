@@ -1,46 +1,14 @@
+import { randomUUID } from "node:crypto";
+import prisma from "../db.server";
 import { fetchCatalog } from "./scan.server";
+import { setProductField, setVariantField, setWeight, setAlt, revert } from "./writes.server";
 
 // Every fix re-reads the catalog first so it never acts on stale data.
-// Each fix returns { fixed, skipped, errors } and the caller rescans afterwards.
+// Every change is logged with its previous value so a whole batch can be undone.
 
 const MAX_MUTATIONS_PER_RUN = 100;
 
-async function mutate(graphql, query, variables, pickErrors) {
-  const response = await graphql(query, { variables });
-  const { data, errors } = await response.json();
-  if (errors?.length) return errors.map((e) => e.message);
-  const userErrors = pickErrors(data) || [];
-  return userErrors.map((e) => e.message);
-}
-
-const UPDATE_VENDOR = `#graphql
-  mutation UpdateVendor($product: ProductUpdateInput!) {
-    productUpdate(product: $product) {
-      product { id }
-      userErrors { field message }
-    }
-  }
-`;
-
-const UPDATE_WEIGHT = `#graphql
-  mutation UpdateWeight($id: ID!, $input: InventoryItemInput!) {
-    inventoryItemUpdate(id: $id, input: $input) {
-      inventoryItem { id }
-      userErrors { field message }
-    }
-  }
-`;
-
-const UPDATE_ALT = `#graphql
-  mutation UpdateAlt($productId: ID!, $media: [UpdateMediaInput!]!) {
-    productUpdateMedia(productId: $productId, media: $media) {
-      media { id }
-      mediaUserErrors { field message }
-    }
-  }
-`;
-
-async function fixVendorCasing(graphql, products) {
+async function fixVendorCasing(graphql, products, log) {
   const groups = new Map();
   for (const p of products) {
     const raw = (p.vendor || "").trim();
@@ -57,7 +25,6 @@ async function fixVendorCasing(graphql, products) {
   for (const [key, counts] of groups) {
     if (counts.size < 2) continue;
     const canonical = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
-
     for (const p of products) {
       const raw = (p.vendor || "").trim();
       if (raw.toLowerCase().replace(/\s+/g, " ") !== key || raw === canonical) continue;
@@ -65,20 +32,18 @@ async function fixVendorCasing(graphql, products) {
         result.skipped += 1;
         continue;
       }
-      const errs = await mutate(
-        graphql,
-        UPDATE_VENDOR,
-        { product: { id: p.id, vendor: canonical } },
-        (d) => d.productUpdate?.userErrors,
-      );
+      const errs = await setProductField(graphql, p.id, "vendor", canonical);
       if (errs.length) result.errors.push(`${p.title}: ${errs.join(", ")}`);
-      else result.fixed += 1;
+      else {
+        result.fixed += 1;
+        log({ field: "vendor", targetId: p.id, productId: p.id, title: p.title, before: raw, after: canonical });
+      }
     }
   }
   return result;
 }
 
-async function fixMissingWeight(graphql, products) {
+async function fixMissingWeight(graphql, products, log) {
   const result = { fixed: 0, skipped: 0, errors: [] };
   let budget = MAX_MUTATIONS_PER_RUN;
 
@@ -90,49 +55,80 @@ async function fixMissingWeight(graphql, products) {
       result.skipped += missing.length;
       continue;
     }
-
     for (const v of missing) {
       if (!v.inventoryItemId || budget-- <= 0) {
         result.skipped += 1;
         continue;
       }
-      const errs = await mutate(
-        graphql,
-        UPDATE_WEIGHT,
-        {
-          id: v.inventoryItemId,
-          input: {
-            measurement: { weight: { value: donor.weight, unit: donor.weightUnit } },
-          },
-        },
-        (d) => d.inventoryItemUpdate?.userErrors,
-      );
+      const errs = await setWeight(graphql, v.inventoryItemId, donor.weight, donor.weightUnit);
       if (errs.length) result.errors.push(`${p.title} / ${v.title}: ${errs.join(", ")}`);
-      else result.fixed += 1;
+      else {
+        result.fixed += 1;
+        log({
+          field: "weight",
+          targetId: v.inventoryItemId,
+          productId: p.id,
+          title: `${p.title} / ${v.title}`,
+          before: { value: v.weight || 0, unit: v.weightUnit },
+          after: { value: donor.weight, unit: donor.weightUnit },
+        });
+      }
     }
   }
   return result;
 }
 
-async function fixMissingAltText(graphql, products) {
+async function fixMissingAltText(graphql, products, log) {
   const result = { fixed: 0, skipped: 0, errors: [] };
   let budget = MAX_MUTATIONS_PER_RUN;
 
   for (const p of products) {
     const missing = p.images.filter((img) => !(img.alt || "").trim());
-    if (!missing.length) continue;
-    if (budget-- <= 0) {
-      result.skipped += missing.length;
-      continue;
+    for (const img of missing) {
+      if (budget-- <= 0) {
+        result.skipped += 1;
+        continue;
+      }
+      const errs = await setAlt(graphql, p.id, img.id, p.title);
+      if (errs.length) result.errors.push(`${p.title}: ${errs.join(", ")}`);
+      else {
+        result.fixed += 1;
+        log({ field: "alt", targetId: img.id, productId: p.id, title: p.title, before: img.alt || "", after: p.title });
+      }
     }
-    const errs = await mutate(
-      graphql,
-      UPDATE_ALT,
-      { productId: p.id, media: missing.map((img) => ({ id: img.id, alt: p.title })) },
-      (d) => d.productUpdateMedia?.mediaUserErrors,
+  }
+  return result;
+}
+
+async function fixCompareAt(graphql, products, log) {
+  const result = { fixed: 0, skipped: 0, errors: [] };
+  let budget = MAX_MUTATIONS_PER_RUN;
+  for (const p of products) {
+    const bad = p.variants.filter(
+      (v) =>
+        v.compareAtPrice !== null &&
+        v.compareAtPrice !== undefined &&
+        Number(v.compareAtPrice) <= Number(v.price),
     );
-    if (errs.length) result.errors.push(`${p.title}: ${errs.join(", ")}`);
-    else result.fixed += missing.length;
+    for (const v of bad) {
+      if (budget-- <= 0) {
+        result.skipped += 1;
+        continue;
+      }
+      const errs = await setVariantField(graphql, p.id, v.id, "compareAt", "");
+      if (errs.length) result.errors.push(`${p.title} / ${v.title}: ${errs.join(", ")}`);
+      else {
+        result.fixed += 1;
+        log({
+          field: "compareAt",
+          targetId: v.id,
+          productId: p.id,
+          title: `${p.title} / ${v.title}`,
+          before: v.compareAtPrice,
+          after: "",
+        });
+      }
+    }
   }
   return result;
 }
@@ -141,11 +137,74 @@ const FIXERS = {
   vendor_casing: fixVendorCasing,
   missing_weight: fixMissingWeight,
   missing_alt_text: fixMissingAltText,
+  compare_at_not_higher: fixCompareAt,
 };
 
-export async function applyFix(graphql, ruleId) {
+export async function applyFix(graphql, shop, ruleId) {
   const fixer = FIXERS[ruleId];
   if (!fixer) throw new Error(`No fix available for ${ruleId}`);
+
   const products = await fetchCatalog(graphql);
-  return fixer(graphql, products);
+  const batchId = randomUUID();
+  const entries = [];
+  const log = (e) => entries.push(e);
+
+  const result = await fixer(graphql, products, log);
+
+  if (entries.length) {
+    await prisma.fixLog.createMany({
+      data: entries.map((e) => ({
+        shop,
+        batchId,
+        ruleId,
+        field: e.field,
+        targetId: e.targetId,
+        productId: e.productId,
+        title: e.title,
+        before: JSON.stringify(e.before),
+        after: JSON.stringify(e.after),
+      })),
+    });
+  }
+
+  return { ...result, batchId: entries.length ? batchId : null };
+}
+
+export async function undoFix(graphql, shop, batchId) {
+  const entries = await prisma.fixLog.findMany({
+    where: { shop, batchId, undone: false },
+  });
+  const result = { undone: 0, errors: [] };
+
+  for (const e of entries) {
+    const errs = await revert(graphql, e);
+    if (errs.length) result.errors.push(`${e.title}: ${errs.join(", ")}`);
+    else {
+      result.undone += 1;
+      await prisma.fixLog.update({ where: { id: e.id }, data: { undone: true } });
+    }
+  }
+  return result;
+}
+
+export async function recentFixes(shop, limit = 5) {
+  const rows = await prisma.fixLog.groupBy({
+    by: ["batchId", "ruleId"],
+    where: { shop, undone: false },
+    _count: { _all: true },
+    _max: { createdAt: true },
+    orderBy: { _max: { createdAt: "desc" } },
+    take: limit,
+  });
+  return rows.map((r) => ({
+    batchId: r.batchId,
+    ruleId: r.ruleId,
+    count: r._count._all,
+    at: r._max.createdAt.toISOString(),
+  }));
+}
+
+export async function fixedCount(shop, days = 7) {
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  return prisma.fixLog.count({ where: { shop, undone: false, createdAt: { gte: since } } });
 }

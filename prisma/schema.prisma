@@ -45,3 +45,45 @@ model Scan {
 
   @@index([shop, createdAt])
 }
+model DictionaryWord {
+  id        Int      @id @default(autoincrement())
+  shop      String
+  word      String
+  createdAt DateTime @default(now())
+
+  @@unique([shop, word])
+}
+model FixLog {
+  id        Int      @id @default(autoincrement())
+  shop      String
+  batchId   String
+  ruleId    String
+  field     String
+  targetId  String
+  productId String
+  title     String
+  before    String
+  after     String
+  undone    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([shop, batchId])
+}
+model Ignore {
+  id        Int      @id @default(autoincrement())
+  shop      String
+  key       String
+  ruleId    String
+  productId String
+  title     String
+  detail    String
+  createdAt DateTime @default(now())
+
+  @@unique([shop, key])
+}
+model Setting {
+  shop            String   @id
+  vendorWhitelist String   @default("[]")
+  metafieldRules  String   @default("[]")
+  updatedAt       DateTime @updatedAt
+}
