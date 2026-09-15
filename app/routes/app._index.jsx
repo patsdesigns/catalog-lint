@@ -144,6 +144,10 @@ function scoreLabel(tone) {
   return tone === "success" ? "Good" : tone === "warning" ? "Needs work" : "Poor";
 }
 const TONE_COLOR = { success: "#29845a", warning: "#b98900", critical: "#e51c00" };
+// Light tint of the success color for the "checks passed" row at the end of each category card.
+// Polaris has no tinted-background prop, so it is an inline style.
+const PASSED_BACKGROUND = "rgba(41, 132, 90, 0.08)";
+const PASSED_BORDER = "rgba(41, 132, 90, 0.2)";
 
 // Polaris has no primitive that takes an arbitrary hex color, and the category
 // colors mirror the Shopify product page (app/lib/categories.js), so the dot is
@@ -315,7 +319,7 @@ function ColumnHeader({ track, listSlot, format, children }) {
   );
 }
 
-function IssueRow({ rule, onSelect, onFix, busy }) {
+function IssueRow({ rule, onSelect }) {
   const { main, aside } = splitLabel(rule.label);
   // The aside is context, but it is still part of the rule name for assistive tech.
   const link = (
@@ -325,6 +329,9 @@ function IssueRow({ rule, onSelect, onFix, busy }) {
   );
   return (
     <s-table-row clickDelegate={`rule-${rule.ruleId}`}>
+      <s-table-cell>
+        <s-text fontVariantNumeric="tabular-nums">{rule.count}</s-text>
+      </s-table-cell>
       <s-table-cell>
         {aside ? (
           // An s-box carries the responsive display (s-text ignores `display` at runtime).
@@ -340,40 +347,54 @@ function IssueRow({ rule, onSelect, onFix, busy }) {
       </s-table-cell>
       <s-table-cell><s-badge tone={TONE[rule.severity]}>{rule.severity}</s-badge></s-table-cell>
       <s-table-cell>
-        <s-text fontVariantNumeric="tabular-nums">{rule.count}</s-text>
-      </s-table-cell>
-      <s-table-cell>
-        {/* Every row has one button of the same size, so the column and the row pitch stay even.
-            Rules whose fix guesses a value (reviewFirst) offer the fix on the detail page instead. */}
-        {rule.fixable && !rule.reviewFirst ? (
-          <s-button
-            variant="secondary"
-            onClick={() => onFix(rule.ruleId)}
-            disabled={busy || undefined}
-            accessibilityLabel={`${rule.fixLabel}: ${rule.label}`}
-          >
-            {rule.fixLabel}
-          </s-button>
-        ) : (
-          <s-button
-            variant="secondary"
-            onClick={() => onSelect(rule.ruleId)}
-            accessibilityLabel={`Review and edit: ${rule.label}`}
-          >
-            Review and edit
-          </s-button>
-        )}
+        {/* One button of the same size in every row, so the column and the row pitch stay even.
+            Bulk fixes live on the detail page, where the merchant sees what they would touch. */}
+        <s-button
+          variant="secondary"
+          onClick={() => onSelect(rule.ruleId)}
+          accessibilityLabel={`Review and edit: ${rule.label}`}
+        >
+          Review and edit
+        </s-button>
       </s-table-cell>
     </s-table-row>
   );
 }
 
+// The checks that ran clean for one category, in a light-green row at the end of its card, so the
+// merchant sees what was checked and not only what failed. Checks that need a setting that is empty
+// are listed as not set up instead of passed.
+function PassedChecks({ passed, skipped }) {
+  return (
+    <div style={{ background: PASSED_BACKGROUND, borderTop: `1px solid ${PASSED_BORDER}`, borderRadius: "0 0 12px 12px" }}>
+      <s-box padding="base" paddingBlock="small">
+        <s-stack gap="small-300">
+          {passed.length > 0 ? (
+            <s-grid gridTemplateColumns="auto auto minmax(0, 1fr)" gap="small" alignItems="baseline">
+              <s-icon type="check-circle" tone="success" />
+              <s-text type="strong">{passed.length === 1 ? "1 check passed" : `${passed.length} checks passed`}</s-text>
+              <s-text color="subdued">{passed.map((c) => c.label).join(" · ")}</s-text>
+            </s-grid>
+          ) : null}
+          {skipped.length > 0 ? (
+            <s-text color="subdued">
+              Not set up: {skipped.map((c) => c.label).join(" · ")}. <s-link href="/app/settings">Add them in Settings</s-link>.
+            </s-text>
+          ) : null}
+        </s-stack>
+      </s-box>
+    </div>
+  );
+}
+
 // One card per product-page section, color coded with the section's color (app/lib/categories.js).
-// Every card's table uses the shared header skeleton, so Issue / Severity / Findings / Action sit at
+// Every card's table uses the shared header skeleton, so Findings / Issue / Severity / Action sit at
 // the same x from card to card. The visible heading names the section (no accessibilityLabel, which
-// would add a second hidden heading to the outline).
-function CategoryCard({ cat, rules, onSelect, onFix, busy }) {
+// would add a second hidden heading to the outline). `checks` are this category's non-failing checks.
+function CategoryCard({ cat, rules, checks, onSelect, busy }) {
   const total = rules.reduce((n, r) => n + r.count, 0);
+  const passed = checks.filter((c) => c.status === "passed");
+  const skipped = checks.filter((c) => c.status === "skipped");
   return (
     <s-section padding="none">
       {/* Polaris has no prop for an arbitrary accent color, so the stripe is a plain div. Its radius
@@ -385,31 +406,34 @@ function CategoryCard({ cat, rules, onSelect, onFix, busy }) {
               <Dot color={cat.color} />
               <s-heading>{cat.label}</s-heading>
             </s-stack>
-            <s-text color="subdued" fontVariantNumeric="tabular-nums">{total} findings</s-text>
+            <s-text color="subdued" fontVariantNumeric="tabular-nums">{rules.length ? `${total} findings` : "No findings"}</s-text>
           </s-stack>
         </s-box>
       </div>
-      {/* The query container scopes LABEL_ASIDE_DISPLAY to the table's own width. */}
-      <s-query-container>
-        <s-table loading={busy || undefined}>
-          <s-table-header-row>
-            <ColumnHeader track="primary" listSlot="primary">Issue</ColumnHeader>
-            <ColumnHeader track="inline" listSlot="inline">Severity</ColumnHeader>
-            <ColumnHeader track="numeric" listSlot="labeled" format="numeric">Findings</ColumnHeader>
-            <ColumnHeader track="action" listSlot="secondary">Action</ColumnHeader>
-          </s-table-header-row>
-          <s-table-body>
-            {rules.map((rule) => (
-              <IssueRow key={rule.ruleId} rule={rule} onSelect={onSelect} onFix={onFix} busy={busy} />
-            ))}
-          </s-table-body>
-        </s-table>
-      </s-query-container>
+      {rules.length > 0 ? (
+        // The query container scopes LABEL_ASIDE_DISPLAY to the table's own width.
+        <s-query-container>
+          <s-table loading={busy || undefined}>
+            <s-table-header-row>
+              <ColumnHeader track="numeric" listSlot="labeled" format="numeric">Findings</ColumnHeader>
+              <ColumnHeader track="primary" listSlot="primary">Issue</ColumnHeader>
+              <ColumnHeader track="inline" listSlot="inline">Severity</ColumnHeader>
+              <ColumnHeader track="action" listSlot="secondary">Action</ColumnHeader>
+            </s-table-header-row>
+            <s-table-body>
+              {rules.map((rule) => (
+                <IssueRow key={rule.ruleId} rule={rule} onSelect={onSelect} />
+              ))}
+            </s-table-body>
+          </s-table>
+        </s-query-container>
+      ) : null}
+      {passed.length > 0 || skipped.length > 0 ? <PassedChecks passed={passed} skipped={skipped} /> : null}
     </s-section>
   );
 }
 
-function Overview({ result, history, fixes, fixedWeek, onSelect, onFix, onUndo, busy }) {
+function Overview({ result, history, fixes, fixedWeek, onSelect, onUndo, busy }) {
   const tone = scoreTone(result.score);
   const lastScan = `Last scan ${timeAgo(result.scannedAt)}${result.ignoredCount ? `, ${result.ignoredCount} ignored` : ""}`;
 
@@ -447,34 +471,37 @@ function Overview({ result, history, fixes, fixedWeek, onSelect, onFix, onUndo, 
             <s-text color="subdued">No issues found across {result.total} products.</s-text>
           </s-stack>
         </s-section>
-      ) : (
-        CATEGORIES.map((cat) => {
-          const rules = result.rules.filter((r) => r.category === cat.id);
-          if (rules.length === 0) return null;
-          return <CategoryCard key={cat.id} cat={cat} rules={rules} onSelect={onSelect} onFix={onFix} busy={busy} />;
-        })
-      )}
+      ) : null}
+
+      {/* One card per product-page section with anything to show: findings, or checks that ran
+          clean. Scans saved before checks were recorded only have findings. */}
+      {CATEGORIES.map((cat) => {
+        const rules = result.rules.filter((r) => r.category === cat.id);
+        const checks = (result.checks || []).filter((c) => c.category === cat.id && c.status !== "failed");
+        if (rules.length === 0 && checks.length === 0) return null;
+        return <CategoryCard key={cat.id} cat={cat} rules={rules} checks={checks} onSelect={onSelect} busy={busy} />;
+      })}
 
       {fixes && fixes.length > 0 ? (
-        // Same composition and column skeleton as the Issues card, so the Fix / When / Changes /
-        // Action columns sit exactly under Issue / Severity / Findings / Action.
+        // Same composition and column skeleton as the category cards, so the Changes / Fix / When /
+        // Action columns sit exactly under Findings / Issue / Severity / Action.
         <s-section padding="none">
           <s-box padding="base" paddingBlockEnd="small">
             <s-heading>Recent fixes</s-heading>
           </s-box>
           <s-table loading={busy || undefined}>
             <s-table-header-row>
+              <ColumnHeader track="numeric" listSlot="labeled" format="numeric">Changes</ColumnHeader>
               <ColumnHeader track="primary" listSlot="primary">Fix</ColumnHeader>
               <ColumnHeader track="inline" listSlot="inline">When</ColumnHeader>
-              <ColumnHeader track="numeric" listSlot="labeled" format="numeric">Changes</ColumnHeader>
               <ColumnHeader track="action" listSlot="secondary">Action</ColumnHeader>
             </s-table-header-row>
             <s-table-body>
               {fixes.map((f) => (
                 <s-table-row key={f.batchId}>
+                  <s-table-cell><s-text fontVariantNumeric="tabular-nums">{f.count}</s-text></s-table-cell>
                   <s-table-cell><s-text>{ruleLabel(f.ruleId)}</s-text></s-table-cell>
                   <s-table-cell><s-text color="subdued">{timeAgo(f.at)}</s-text></s-table-cell>
-                  <s-table-cell><s-text fontVariantNumeric="tabular-nums">{f.count}</s-text></s-table-cell>
                   <s-table-cell>
                     <s-button
                       variant="secondary"
@@ -761,7 +788,6 @@ export default function Index() {
           fixes={fixes}
           fixedWeek={fixedWeek}
           onSelect={setSelected}
-          onFix={runFix}
           onUndo={runUndo}
           busy={busy}
         />

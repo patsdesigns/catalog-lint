@@ -205,7 +205,7 @@ export async function scanCatalog(graphql, shop) {
   const ctx = { speller, customWords: seedWords(products, storeWords), settings, locale };
   const all = runRules(products, ctx);
   const findings = all.filter((f) => !ignored.has(ignoreKey(f)));
-  const summary = summarize(products, findings);
+  const summary = summarize(products, findings, settings);
 
   return {
     ...summary,

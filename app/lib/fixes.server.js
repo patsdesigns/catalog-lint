@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import prisma from "../db.server";
 import { fetchCatalog } from "./scan.server";
-import { setProductField, setVariantField, setWeight, setAlt, revert } from "./writes.server";
+import { setProductField, setVariantField, setAlt, revert } from "./writes.server";
 
 // Every fix re-reads the catalog first so it never acts on stale data.
 // Every change is logged with its previous value so a whole batch can be undone.
@@ -37,41 +37,6 @@ async function fixVendorCasing(graphql, products, log) {
       else {
         result.fixed += 1;
         log({ field: "vendor", targetId: p.id, productId: p.id, title: p.title, before: raw, after: canonical });
-      }
-    }
-  }
-  return result;
-}
-
-async function fixMissingWeight(graphql, products, log) {
-  const result = { fixed: 0, skipped: 0, errors: [] };
-  let budget = MAX_MUTATIONS_PER_RUN;
-
-  for (const p of products) {
-    const donor = p.variants.find((v) => v.weight > 0);
-    const missing = p.variants.filter((v) => !v.weight || v.weight <= 0);
-    if (!missing.length) continue;
-    if (!donor) {
-      result.skipped += missing.length;
-      continue;
-    }
-    for (const v of missing) {
-      if (!v.inventoryItemId || budget-- <= 0) {
-        result.skipped += 1;
-        continue;
-      }
-      const errs = await setWeight(graphql, v.inventoryItemId, donor.weight, donor.weightUnit);
-      if (errs.length) result.errors.push(`${p.title} / ${v.title}: ${errs.join(", ")}`);
-      else {
-        result.fixed += 1;
-        log({
-          field: "weight",
-          targetId: v.inventoryItemId,
-          productId: p.id,
-          title: `${p.title} / ${v.title}`,
-          before: { value: v.weight || 0, unit: v.weightUnit },
-          after: { value: donor.weight, unit: donor.weightUnit },
-        });
       }
     }
   }
@@ -135,7 +100,6 @@ async function fixCompareAt(graphql, products, log) {
 
 const FIXERS = {
   vendor_casing: fixVendorCasing,
-  missing_weight: fixMissingWeight,
   missing_alt_text: fixMissingAltText,
   compare_at_not_higher: fixCompareAt,
 };

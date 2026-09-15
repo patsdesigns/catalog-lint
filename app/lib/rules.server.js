@@ -302,9 +302,6 @@ export const PRODUCT_RULES = [
   },
   {
     id: "missing_weight", category: "shipping", label: "No shipping weight", severity: "medium",
-    // The fix guesses a value from a sibling variant, so it is offered on the detail page only,
-    // after the merchant has seen which variants it would touch.
-    fixable: true, fixLabel: "Copy weight from a sibling variant", reviewFirst: true,
     check(p) {
       const donor = p.variants.find((v) => v.weight > 0);
       return p.variants.filter((v) => !v.weight || v.weight <= 0).map((v) =>
@@ -451,6 +448,7 @@ export const PRODUCT_RULES = [
   },
   {
     id: "vendor_not_allowed", category: "organization", label: "Vendor not on your approved list", severity: "medium",
+    applies: (settings) => (settings.vendorWhitelist || []).length > 0,
     check(p, ctx) {
       const list = ctx?.settings?.vendorWhitelist || [];
       if (!list.length) return [];
@@ -464,6 +462,7 @@ export const PRODUCT_RULES = [
   // Custom rules
   {
     id: "metafield_required", category: "metafields", label: "Required metafield missing", severity: "medium",
+    applies: (settings) => (settings.metafieldRules || []).some((r) => r.key),
     check(p, ctx) {
       const rules = (ctx?.settings?.metafieldRules || []).filter((r) => r.key);
       const out = [];
@@ -477,6 +476,7 @@ export const PRODUCT_RULES = [
   },
   {
     id: "metafield_pattern", category: "metafields", label: "Metafield does not match pattern", severity: "medium",
+    applies: (settings) => (settings.metafieldRules || []).some((r) => r.key && r.pattern),
     check(p, ctx) {
       const rules = (ctx?.settings?.metafieldRules || []).filter((r) => r.key && r.pattern);
       const out = [];
@@ -678,7 +678,9 @@ export function runRules(products, ctx = {}) {
 const WEIGHT = { high: 3, medium: 1.5, low: 0.5 };
 const MAX_PENALTY_PER_PRODUCT = 10;
 
-export function summarize(products, findings) {
+// Rules with an `applies(settings)` guard need something configured in Settings; when it is empty
+// they are reported as skipped rather than passed.
+export function summarize(products, findings, settings = {}) {
   const byRule = {};
   const penalty = new Map();
   for (const f of findings) {
@@ -686,7 +688,7 @@ export function summarize(products, findings) {
       const rule = ALL_RULES.find((r) => r.id === f.ruleId);
       byRule[f.ruleId] = {
         ruleId: f.ruleId, label: f.label, category: rule?.category || "description", severity: f.severity,
-        fixable: Boolean(rule?.fixable), fixLabel: rule?.fixLabel || null, reviewFirst: Boolean(rule?.reviewFirst), count: 0,
+        fixable: Boolean(rule?.fixable), fixLabel: rule?.fixLabel || null, count: 0,
       };
     }
     byRule[f.ruleId].count += 1;
@@ -702,5 +704,11 @@ export function summarize(products, findings) {
   const score = Math.max(0, Math.round(100 - (total ? sum / total : 0) * 10));
   const order = { high: 0, medium: 1, low: 2 };
   const rules = Object.values(byRule).sort((a, b) => order[a.severity] - order[b.severity] || b.count - a.count);
-  return { score, total, clean, rules };
+  // Every rule that ran, so the overview can show what was checked and not only what failed.
+  const checks = ALL_RULES.map((rule) => ({
+    ruleId: rule.id, label: rule.label, category: rule.category, severity: rule.severity,
+    count: byRule[rule.id]?.count || 0,
+    status: byRule[rule.id] ? "failed" : rule.applies && !rule.applies(settings) ? "skipped" : "passed",
+  }));
+  return { score, total, clean, rules, checks };
 }

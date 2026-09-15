@@ -1,7 +1,7 @@
 import prisma from "../db.server";
 
-// One row per scan. Findings and rule summary are stored as JSON strings
-// so the overview can render instantly without re-reading the catalog.
+// One row per scan. Findings, the rule summary and the list of checks that ran are stored as
+// JSON strings so the overview can render instantly without re-reading the catalog.
 
 export async function saveScan(shop, result) {
   const row = await prisma.scan.create({
@@ -13,6 +13,7 @@ export async function saveScan(shop, result) {
       durationMs: result.durationMs,
       rules: JSON.stringify(result.rules),
       findings: JSON.stringify(result.findings),
+      checks: JSON.stringify(result.checks || []),
     },
   });
   return toResult(row);
@@ -49,6 +50,7 @@ function toResult(row) {
     durationMs: row.durationMs,
     rules: JSON.parse(row.rules),
     findings: JSON.parse(row.findings),
+    checks: JSON.parse(row.checks || "[]"), // scans saved before checks were recorded have none
     scannedAt: row.createdAt.toISOString(),
   };
 }

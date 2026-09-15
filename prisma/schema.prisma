@@ -41,6 +41,7 @@ model Scan {
   durationMs Int
   rules      String
   findings   String
+  checks     String   @default("[]")
   createdAt  DateTime @default(now())
 
   @@index([shop, createdAt])
