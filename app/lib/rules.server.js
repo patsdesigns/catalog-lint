@@ -302,7 +302,9 @@ export const PRODUCT_RULES = [
   },
   {
     id: "missing_weight", category: "shipping", label: "No shipping weight", severity: "medium",
-    fixable: true, fixLabel: "Copy weight from a sibling variant",
+    // The fix guesses a value from a sibling variant, so it is offered on the detail page only,
+    // after the merchant has seen which variants it would touch.
+    fixable: true, fixLabel: "Copy weight from a sibling variant", reviewFirst: true,
     check(p) {
       const donor = p.variants.find((v) => v.weight > 0);
       return p.variants.filter((v) => !v.weight || v.weight <= 0).map((v) =>
@@ -684,7 +686,7 @@ export function summarize(products, findings) {
       const rule = ALL_RULES.find((r) => r.id === f.ruleId);
       byRule[f.ruleId] = {
         ruleId: f.ruleId, label: f.label, category: rule?.category || "description", severity: f.severity,
-        fixable: Boolean(rule?.fixable), fixLabel: rule?.fixLabel || null, count: 0,
+        fixable: Boolean(rule?.fixable), fixLabel: rule?.fixLabel || null, reviewFirst: Boolean(rule?.reviewFirst), count: 0,
       };
     }
     byRule[f.ruleId].count += 1;

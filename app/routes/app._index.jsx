@@ -113,10 +113,6 @@ const CURRENT_TRACK = "@container (inline-size > 1100px) 200px, (inline-size > 9
 function actionTracks(count) {
   return Array(count).fill("auto").join(" ");
 }
-// Every control in a table row is a 28px button, so rows share one pitch; text-only cells get the
-// same minimum block size to keep that rhythm.
-const ROW_CONTROL_SIZE = "28px";
-
 function ruleLabel(id) {
   return RULE_LABELS[id] || id.replace(/_/g, " ");
 }
@@ -319,15 +315,6 @@ function ColumnHeader({ track, listSlot, format, children }) {
   );
 }
 
-// Text-only action cell with the same block size as a row button, so every row keeps one pitch.
-function ActionNote({ children }) {
-  return (
-    <s-grid alignItems="center" minBlockSize={ROW_CONTROL_SIZE}>
-      <s-text color="subdued">{children}</s-text>
-    </s-grid>
-  );
-}
-
 function IssueRow({ rule, onSelect, onFix, busy }) {
   const { main, aside } = splitLabel(rule.label);
   // The aside is context, but it is still part of the rule name for assistive tech.
@@ -356,9 +343,9 @@ function IssueRow({ rule, onSelect, onFix, busy }) {
         <s-text fontVariantNumeric="tabular-nums">{rule.count}</s-text>
       </s-table-cell>
       <s-table-cell>
-        {/* Automated fixes are the only buttons in this column. Review-only rows say what the row
-            click does without adding a second control that duplicates the row's link. */}
-        {rule.fixable ? (
+        {/* Every row has one button of the same size, so the column and the row pitch stay even.
+            Rules whose fix guesses a value (reviewFirst) offer the fix on the detail page instead. */}
+        {rule.fixable && !rule.reviewFirst ? (
           <s-button
             variant="secondary"
             onClick={() => onFix(rule.ruleId)}
@@ -368,7 +355,13 @@ function IssueRow({ rule, onSelect, onFix, busy }) {
             {rule.fixLabel}
           </s-button>
         ) : (
-          <ActionNote>Review and edit</ActionNote>
+          <s-button
+            variant="secondary"
+            onClick={() => onSelect(rule.ruleId)}
+            accessibilityLabel={`Review and edit: ${rule.label}`}
+          >
+            Review and edit
+          </s-button>
         )}
       </s-table-cell>
     </s-table-row>
