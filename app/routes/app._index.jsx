@@ -9,6 +9,7 @@ import { addWord } from "../lib/dictionary.server";
 import { addIgnore } from "../lib/ignores.server";
 import { applyEdit } from "../lib/edits.server";
 import { CATEGORIES, categoryOf } from "../lib/categories";
+import { PASS_LABELS, SETUP_LABELS } from "../lib/checkLabels";
 
 // ---------- server ----------
 
@@ -105,16 +106,16 @@ const METRIC_DIVIDER_DISPLAY = "@container (inline-size <= 560px) none, auto";
 // grid with a fixed track. The tracks set each column's intrinsic minimum and maximum, identical in
 // every table, so the table algorithm puts every column boundary in the same place no matter what
 // the rows contain. The primary track has a range rather than one size, so the text column is the
-// one that takes the slack. The action track fits the longest fix label.
+// one that takes the slack. The action track fits the Review and edit button.
 const OVERVIEW_TRACKS = {
   primary: "minmax(240px, 640px)",
   inline: "72px",
   numeric: "56px",
-  action: "240px",
+  action: "160px",
 };
-// Below this container width the Issue column is too narrow for the one label with a parenthetical
-// aside, so the aside is hidden there rather than wrapping that row onto two lines.
-const LABEL_ASIDE_DISPLAY = "@container (inline-size <= 900px) none, auto";
+// Each card splits into the issues table (about three quarters) and, on the right, the checks that
+// ran clean for that section. Below ~1000px of card width the panel moves under the table.
+const CARD_COLUMNS = "@container (inline-size <= 1000px) 1fr, 3fr 1fr";
 
 // Detail view. Polaris sizes table columns from their content and a bare text field has almost no
 // intrinsic width, so the "Corrected" field sits in a one-track grid whose track has a real width:
@@ -167,10 +168,9 @@ function scoreLabel(tone) {
   return tone === "success" ? "Good" : tone === "warning" ? "Needs work" : "Poor";
 }
 const TONE_COLOR = { success: "#29845a", warning: "#b98900", critical: "#e51c00" };
-// Light tint of the success color for the "checks passed" row at the end of each category card.
+// Light tint of the success color for the "checks passed" panel in each category card.
 // Polaris has no tinted-background prop, so it is an inline style.
 const PASSED_BACKGROUND = "rgba(41, 132, 90, 0.08)";
-const PASSED_BORDER = "rgba(41, 132, 90, 0.2)";
 
 // Polaris has no primitive that takes an arbitrary hex color, and the category
 // colors mirror the Shopify product page (app/lib/categories.js), so the dot is
@@ -380,12 +380,10 @@ function IssueRow({ rule, onSelect }) {
       </s-table-cell>
       <s-table-cell>
         {aside ? (
-          // An s-box carries the responsive display (s-text ignores `display` at runtime).
-          <s-stack direction="inline" gap="small-200" alignItems="baseline">
+          // The parenthetical explains the rule; it gets its own line so the label never wraps.
+          <s-stack gap="small-500">
             {link}
-            <s-box display={LABEL_ASIDE_DISPLAY}>
-              <s-text color="subdued">{aside}</s-text>
-            </s-box>
+            <s-text color="subdued">{aside}</s-text>
           </s-stack>
         ) : (
           link
@@ -407,24 +405,38 @@ function IssueRow({ rule, onSelect }) {
   );
 }
 
-// The checks that ran clean for one category, in a light-green row at the end of its card, so the
-// merchant sees what was checked and not only what failed. Checks that need a setting that is empty
-// are listed as not set up instead of passed.
-function PassedChecks({ passed, skipped }) {
+// The checks that ran clean for one category, in a tinted panel beside its table, so the merchant
+// sees what was checked and not only what failed. Checks that need a setting that is empty are
+// listed as not set up instead of passed.
+function PassedChecks({ passed, skipped, failing }) {
+  const total = passed.length + failing;
   return (
-    <div style={{ background: PASSED_BACKGROUND, borderTop: `1px solid ${PASSED_BORDER}`, borderRadius: "0 0 12px 12px" }}>
-      <s-box padding="base" paddingBlock="small">
-        <s-stack gap="small-300">
+    // Polaris has no tinted-background prop, so the tint is an inline style; the card grid stretches
+    // the panel to the full height of the card body.
+    <div style={{ background: PASSED_BACKGROUND }}>
+      <s-box padding="base">
+        <s-stack gap="small-200">
+          <s-stack direction="inline" gap="small-200" alignItems="center">
+            <s-icon type="check-circle" tone="success" />
+            <s-text type="strong">
+              {passed.length} of {total} {total === 1 ? "check" : "checks"} passed
+            </s-text>
+          </s-stack>
           {passed.length > 0 ? (
-            <s-grid gridTemplateColumns="auto auto minmax(0, 1fr)" gap="small" alignItems="baseline">
-              <s-icon type="check-circle" tone="success" />
-              <s-text type="strong">{passed.length === 1 ? "1 check passed" : `${passed.length} checks passed`}</s-text>
-              <s-text color="subdued">{passed.map((c) => c.label).join(" · ")}</s-text>
-            </s-grid>
+            // Numbered, with each check's wording when it passes ("Every product has an image"),
+            // not the problem it looks for.
+            <s-ordered-list>
+              {passed.map((c) => (
+                <s-list-item key={c.ruleId}>
+                  <s-text color="subdued">{PASS_LABELS[c.ruleId] || c.label}</s-text>
+                </s-list-item>
+              ))}
+            </s-ordered-list>
           ) : null}
           {skipped.length > 0 ? (
             <s-text color="subdued">
-              Not set up: {skipped.map((c) => c.label).join(" · ")}. <s-link href="/app/settings">Add them in Settings</s-link>.
+              Needs {skipped.map((c) => SETUP_LABELS[c.ruleId] || c.label).join(" and ")} to run.{" "}
+              <s-link href="/app/settings">Set up in Settings</s-link>.
             </s-text>
           ) : null}
         </s-stack>
@@ -434,13 +446,34 @@ function PassedChecks({ passed, skipped }) {
 }
 
 // One card per product-page section, color coded with the section's color (app/lib/categories.js).
-// Every card's table uses the shared header skeleton, so Findings / Issue / Severity / Action sit at
-// the same x from card to card. The visible heading names the section (no accessibilityLabel, which
-// would add a second hidden heading to the outline). `checks` are this category's non-failing checks.
-function CategoryCard({ cat, rules, checks, onSelect, busy }) {
+// Every card's table uses the shared header skeleton and the same card grid, so Findings / Issue /
+// Severity / Action sit at the same x from card to card. The visible heading names the section (no
+// accessibilityLabel, which would add a second hidden heading to the outline). `checks` are this
+// category's non-failing checks; `showChecks` is false for scans saved before checks were recorded.
+function CategoryCard({ cat, rules, checks, showChecks, onSelect, busy }) {
   const total = rules.reduce((n, r) => n + r.count, 0);
   const passed = checks.filter((c) => c.status === "passed");
   const skipped = checks.filter((c) => c.status === "skipped");
+  const table =
+    rules.length > 0 ? (
+      <s-table loading={busy || undefined}>
+        <s-table-header-row>
+          <ColumnHeader track="numeric" listSlot="labeled" format="numeric">Findings</ColumnHeader>
+          <ColumnHeader track="primary" listSlot="primary">Issue</ColumnHeader>
+          <ColumnHeader track="inline" listSlot="inline">Severity</ColumnHeader>
+          <ColumnHeader track="action" listSlot="secondary">Action</ColumnHeader>
+        </s-table-header-row>
+        <s-table-body>
+          {rules.map((rule) => (
+            <IssueRow key={rule.ruleId} rule={rule} onSelect={onSelect} />
+          ))}
+        </s-table-body>
+      </s-table>
+    ) : (
+      <s-box padding="base">
+        <s-text color="subdued">No open issues in this section.</s-text>
+      </s-box>
+    );
   return (
     <s-section padding="none">
       {/* Polaris has no prop for an arbitrary accent color, so the stripe is a plain div. Its radius
@@ -456,31 +489,24 @@ function CategoryCard({ cat, rules, checks, onSelect, busy }) {
           </s-stack>
         </s-box>
       </div>
-      {rules.length > 0 ? (
-        // The query container scopes LABEL_ASIDE_DISPLAY to the table's own width.
-        <s-query-container>
-          <s-table loading={busy || undefined}>
-            <s-table-header-row>
-              <ColumnHeader track="numeric" listSlot="labeled" format="numeric">Findings</ColumnHeader>
-              <ColumnHeader track="primary" listSlot="primary">Issue</ColumnHeader>
-              <ColumnHeader track="inline" listSlot="inline">Severity</ColumnHeader>
-              <ColumnHeader track="action" listSlot="secondary">Action</ColumnHeader>
-            </s-table-header-row>
-            <s-table-body>
-              {rules.map((rule) => (
-                <IssueRow key={rule.ruleId} rule={rule} onSelect={onSelect} />
-              ))}
-            </s-table-body>
-          </s-table>
-        </s-query-container>
-      ) : null}
-      {passed.length > 0 || skipped.length > 0 ? <PassedChecks passed={passed} skipped={skipped} /> : null}
+      {/* The query container scopes CARD_COLUMNS to the card's own width. */}
+      <s-query-container>
+        {showChecks ? (
+          <s-grid gridTemplateColumns={CARD_COLUMNS}>
+            <div>{table}</div>
+            <PassedChecks passed={passed} skipped={skipped} failing={rules.length} />
+          </s-grid>
+        ) : (
+          table
+        )}
+      </s-query-container>
     </s-section>
   );
 }
 
 function Overview({ result, history, fixes, fixedWeek, onSelect, onUndo, busy }) {
   const tone = scoreTone(result.score);
+  const showChecks = Boolean(result.checks?.length);
   const lastScan = `Last scan ${timeAgo(result.scannedAt)}${result.ignoredCount ? `, ${result.ignoredCount} ignored` : ""}`;
 
   return (
@@ -525,16 +551,19 @@ function Overview({ result, history, fixes, fixedWeek, onSelect, onUndo, busy })
         const rules = result.rules.filter((r) => r.category === cat.id);
         const checks = (result.checks || []).filter((c) => c.category === cat.id && c.status !== "failed");
         if (rules.length === 0 && checks.length === 0) return null;
-        return <CategoryCard key={cat.id} cat={cat} rules={rules} checks={checks} onSelect={onSelect} busy={busy} />;
+        return <CategoryCard key={cat.id} cat={cat} rules={rules} checks={checks} showChecks={showChecks} onSelect={onSelect} busy={busy} />;
       })}
 
       {fixes && fixes.length > 0 ? (
-        // Same composition and column skeleton as the category cards, so the Changes / Fix / When /
-        // Action columns sit exactly under Findings / Issue / Severity / Action.
+        // Same composition, column skeleton and card grid as the category cards, so the Changes /
+        // Fix / When / Action columns sit exactly under Findings / Issue / Severity / Action.
         <s-section padding="none">
           <s-box padding="base" paddingBlockEnd="small">
             <s-heading>Recent fixes</s-heading>
           </s-box>
+          <s-query-container>
+          <s-grid gridTemplateColumns={showChecks ? CARD_COLUMNS : "1fr"}>
+          <div>
           <s-table loading={busy || undefined}>
             <s-table-header-row>
               <ColumnHeader track="numeric" listSlot="labeled" format="numeric">Changes</ColumnHeader>
@@ -562,6 +591,10 @@ function Overview({ result, history, fixes, fixedWeek, onSelect, onUndo, busy })
               ))}
             </s-table-body>
           </s-table>
+          </div>
+          {showChecks ? <div /> : null}
+          </s-grid>
+          </s-query-container>
         </s-section>
       ) : null}
     </>
