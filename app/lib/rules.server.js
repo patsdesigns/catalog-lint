@@ -45,6 +45,28 @@ function median(nums) {
 function cents(price) {
   return Math.round((Number(price) % 1) * 100);
 }
+// GTIN-8/12/13/14 check digit (UPC and EAN are GTINs). Returns null for other formats: no opinion.
+function gtinValid(code) {
+  const digits = (code || "").replace(/[\s-]/g, "");
+  if (!/^\d+$/.test(digits) || ![8, 12, 13, 14].includes(digits.length)) return null;
+  const padded = digits.padStart(14, "0");
+  let sum = 0;
+  for (let i = 0; i < 13; i++) sum += Number(padded[i]) * (i % 2 === 0 ? 3 : 1);
+  return (10 - (sum % 10)) % 10 === Number(padded[13]);
+}
+const KG = { KILOGRAMS: 1, GRAMS: 0.001, POUNDS: 0.45359237, OUNCES: 0.028349523125 };
+const toKg = (value, unit) => Number(value) * (KG[unit] ?? 1);
+// Word and Google Docs pastes leave <font> tags, mso- classes and inline styles behind.
+const PASTED_RE = /<font\b|<o:p>|mso-|<span[^>]+style=|style="[^"]*(font-family|font-size|line-height|color:)/i;
+function cleanFormatting(html) {
+  return html
+    .replace(/<\/?(font|o:p)\b[^>]*>/gi, "")
+    .replace(/\s(style|class|lang)="[^"]*"/gi, "")
+    .replace(/<span>([\s\S]*?)<\/span>/gi, "$1")
+    .replace(/&nbsp;/g, " ");
+}
+const FILENAME_ALT_RE = /\.(jpe?g|png|gif|webp|heic|tiff?|bmp|svg)$|^(img|dsc|dcim|pxl|dscn|screenshot|image|photo)[_ -]?\d+|^\d{4,}[_-]?\d*$/i;
+const MIN_MARGIN = 0.1;
 
 function finding(rule, product, extra = {}) {
   const f = {
@@ -218,7 +240,10 @@ export const PRODUCT_RULES = [
     id: "handle_junk", category: "seo", label: "Messy URL handle", severity: "low",
     check(p) {
       const h = p.handle || "";
-      const bad = /copy-of|-\d+$|^\d+$|untitled/.test(h);
+      // A trailing number is only suspicious when the title does not end with it (part numbers are fine).
+      const tail = /-(\d+)$/.exec(h);
+      const numbered = Boolean(tail) && !norm(p.title).replace(/[^a-z0-9]+$/, "").endsWith(tail[1]);
+      const bad = /copy-of|untitled/.test(h) || /^\d+$/.test(h) || numbered;
       return bad ? [finding(this, p, { detail: `/${h}` })] : [];
     },
   },
@@ -660,6 +685,239 @@ CATALOG_RULES.push(
       for (const p of products) {
         const fixed = p.tags.map((t) => canon.get(norm(t)) || t);
         if (fixed.join("|") !== p.tags.join("|")) out.push(finding(this, p, { detail: p.tags.filter((t, i) => t !== fixed[i]).join(", "), edit: productEdit("tags", p.tags.join(", "), fixed.join(", ")) }));
+      }
+      return out;
+    },
+  },
+);
+
+PRODUCT_RULES.push(
+  // Titles and copy
+  {
+    id: "title_too_short", category: "description", label: "Title is very short", severity: "low",
+    check(p) {
+      const t = p.title.trim();
+      return t && (wordCount(t) < 2 || t.length < 8) ? [finding(this, p, { detail: `"${t}"`, edit: productEdit("title", p.title, p.title) })] : [];
+    },
+  },
+  {
+    id: "pasted_formatting", category: "description", label: "Description has pasted formatting", severity: "low",
+    check(p) {
+      const html = p.descriptionHtml || "";
+      if (!PASTED_RE.test(html)) return [];
+      const marker = /<font\b/i.test(html) ? "<font> tags" : /mso-|<o:p>/i.test(html) ? "Word markup" : "inline styles";
+      return [finding(this, p, { detail: marker, edit: productEdit("descriptionHtml", html, cleanFormatting(html), true) })];
+    },
+  },
+  {
+    id: "description_img_no_alt", category: "description", label: "Image in description without alt text", severity: "low",
+    check(p) {
+      const imgs = (p.descriptionHtml || "").match(/<img\b[^>]*>/gi) || [];
+      const missing = imgs.filter((tag) => !/\balt\s*=\s*"[^"]*\S[^"]*"/i.test(tag));
+      return missing.length ? [finding(this, p, { detail: `${missing.length} of ${imgs.length} images` })] : [];
+    },
+  },
+  {
+    id: "dead_link", category: "description", label: "Dead link in description", severity: "low",
+    check(p) {
+      const links = (p.descriptionHtml || "").match(/<a\b[^>]*>/gi) || [];
+      const dead = links.filter((tag) => !/\bhref\s*=\s*"[^"]+"/i.test(tag) || /\bhref\s*=\s*"(#|javascript:)/i.test(tag));
+      return dead.length ? [finding(this, p, { detail: `${dead.length} of ${links.length} links` })] : [];
+    },
+  },
+  {
+    id: "meta_description_short", category: "seo", label: "Meta description under 50 characters", severity: "low",
+    check(p) {
+      const d = p.seoDescription.trim();
+      return d && d.length < 50
+        ? [finding(this, p, { detail: `${d.length} characters`, edit: productEdit("seoDescription", p.seoDescription, p.seoDescription, true) })] : [];
+    },
+  },
+
+  // Images
+  {
+    id: "alt_is_filename", category: "media", label: "Alt text is a filename", severity: "low",
+    check(p) {
+      const hits = p.images.filter((i) => FILENAME_ALT_RE.test((i.alt || "").trim()));
+      if (!hits.length) return [];
+      const first = hits[0].alt.trim();
+      return [finding(this, p, {
+        detail: `"${first}"${hits.length > 1 ? ` and ${hits.length - 1} more` : ""}`,
+        edit: { kind: "alt", mediaIds: hits.map((i) => i.id), current: first, suggested: p.title },
+      })];
+    },
+  },
+  {
+    id: "alt_too_long", category: "media", label: "Alt text over 125 characters", severity: "low",
+    check(p) {
+      const hits = p.images.filter((i) => (i.alt || "").trim().length > 125);
+      if (!hits.length) return [];
+      const first = hits[0].alt.trim();
+      return [finding(this, p, {
+        detail: `${hits.length} of ${p.images.length} images, longest ${Math.max(...hits.map((i) => i.alt.trim().length))} characters`,
+        edit: { kind: "alt", mediaIds: hits.map((i) => i.id), current: first, suggested: first.slice(0, 125).replace(/\s+\S*$/, "") },
+      })];
+    },
+  },
+  {
+    id: "huge_image", category: "media", label: "Image over 5,000px", severity: "low",
+    check(p) {
+      const big = p.images.filter((i) => Math.max(i.width || 0, i.height || 0) > 5000);
+      return big.length
+        ? [finding(this, p, { detail: `${big.length} image${big.length > 1 ? "s" : ""}, largest ${Math.max(...big.map((i) => Math.max(i.width, i.height)))}px` })] : [];
+    },
+  },
+
+  // Variants and inventory
+  {
+    id: "barcode_invalid", category: "inventory", label: "Barcode fails its check digit", severity: "medium",
+    check(p) {
+      return p.variants.filter((v) => gtinValid(v.barcode) === false)
+        .map((v) => finding(this, p, { variantId: v.id, detail: `${v.title}: ${v.barcode}`, edit: variantEdit(v, "barcode", v.barcode, "") }));
+    },
+  },
+  {
+    id: "inventory_not_tracked", category: "inventory", label: "Inventory not tracked", severity: "low",
+    check(p) {
+      if (p.status !== "ACTIVE") return [];
+      return p.variants.filter((v) => v.inventoryItemId && !v.tracked).map((v) => finding(this, p, { variantId: v.id, detail: v.title }));
+    },
+  },
+  {
+    id: "sells_when_out_of_stock", category: "inventory", label: "Sells when out of stock", severity: "low",
+    check(p) {
+      if (p.status !== "ACTIVE") return [];
+      return p.variants.filter((v) => v.tracked && v.inventoryPolicy === "CONTINUE" && v.inventoryQuantity <= 0)
+        .map((v) => finding(this, p, { variantId: v.id, detail: `${v.title}: ${v.inventoryQuantity} in stock` }));
+    },
+  },
+  {
+    id: "archived_with_stock", category: "status", label: "Archived with stock on hand", severity: "low",
+    check(p) { return p.status === "ARCHIVED" && p.totalInventory > 0 ? [finding(this, p, { detail: `${p.totalInventory} units` })] : []; },
+  },
+
+  // Pricing
+  {
+    id: "thin_margin", category: "pricing", label: "Margin under 10%", severity: "medium",
+    check(p) {
+      const margin = (v) => (Number(v.price) - Number(v.cost)) / Number(v.price);
+      return p.variants
+        .filter((v) => v.cost != null && Number(v.price) > 0 && Number(v.price) >= Number(v.cost) && margin(v) < MIN_MARGIN)
+        .map((v) => finding(this, p, { variantId: v.id, detail: `${v.title}: price ${v.price}, cost ${v.cost} (${Math.round(margin(v) * 100)}% margin)`, edit: variantEdit(v, "price", String(v.price), "") }));
+    },
+  },
+  {
+    id: "deep_discount", category: "pricing", label: "Discount over 80%", severity: "medium",
+    check(p) {
+      const off = (v) => 1 - Number(v.price) / Number(v.compareAtPrice);
+      return p.variants
+        .filter((v) => v.compareAtPrice != null && Number(v.price) > 0 && Number(v.compareAtPrice) > Number(v.price) && off(v) > 0.8)
+        .map((v) => finding(this, p, { variantId: v.id, detail: `${v.title}: ${v.price} was ${v.compareAtPrice} (${Math.round(off(v) * 100)}% off)`, edit: variantEdit(v, "compareAt", String(v.compareAtPrice), "") }));
+    },
+  },
+  {
+    id: "placeholder_price", category: "pricing", label: "Placeholder price", severity: "medium",
+    check(p) {
+      const looksFake = (price) => {
+        const n = Number(price);
+        const whole = String(Math.floor(n));
+        return n > 0 && (n <= 0.01 || n >= 100000 || (whole.length >= 3 && /^(\d)\1+$/.test(whole)) || /^1234(5|56)?$/.test(whole));
+      };
+      return p.variants.filter((v) => looksFake(v.price))
+        .map((v) => finding(this, p, { variantId: v.id, detail: `${v.title}: ${v.price}`, edit: variantEdit(v, "price", String(v.price), "") }));
+    },
+  },
+
+  // Shipping
+  {
+    id: "weight_implausible", category: "shipping", label: "Weight looks wrong", severity: "low",
+    check(p) {
+      return p.variants
+        .filter((v) => v.weight > 0 && (toKg(v.weight, v.weightUnit) < 0.001 || toKg(v.weight, v.weightUnit) > 100))
+        .map((v) => finding(this, p, {
+          variantId: v.id, detail: `${v.title}: ${v.weight} ${v.weightUnit.toLowerCase()}`,
+          edit: v.inventoryItemId ? { kind: "weight", inventoryItemId: v.inventoryItemId, unit: v.weightUnit, current: String(v.weight), suggested: "", hint: v.weightUnit.toLowerCase() } : null,
+        }));
+    },
+  },
+
+  // Metafields
+  {
+    id: "metafield_malformed", category: "metafields", label: "Metafield value is malformed or empty", severity: "low",
+    check(p) {
+      const bad = [];
+      for (const m of p.metafields) {
+        const type = m.type || "";
+        if (type !== "json" && !type.startsWith("list.")) continue;
+        let parsed;
+        try { parsed = JSON.parse(m.value); } catch { bad.push(`${m.key}: invalid JSON`); continue; }
+        if (type.startsWith("list.") && (!Array.isArray(parsed) || parsed.length === 0)) bad.push(`${m.key}: empty list`);
+      }
+      return bad.length ? [finding(this, p, { detail: bad.join(", ") })] : [];
+    },
+  },
+);
+
+CATALOG_RULES.push(
+  {
+    id: "duplicate_barcode", category: "inventory", label: "Duplicate barcode", severity: "medium",
+    check(products) {
+      const by = new Map();
+      for (const p of products) for (const v of p.variants) {
+        const b = (v.barcode || "").trim();
+        if (!b) continue;
+        if (!by.has(b)) by.set(b, []);
+        by.get(b).push({ p, v });
+      }
+      const out = [];
+      for (const [b, hits] of by) {
+        if (hits.length < 2) continue;
+        for (const { p, v } of hits) out.push(finding(this, p, { variantId: v.id, detail: `${v.title}: ${b} used ${hits.length} times`, edit: variantEdit(v, "barcode", b, b) }));
+      }
+      return out;
+    },
+  },
+  {
+    id: "product_type_casing", category: "organization", label: "Product type spelled two ways", severity: "low",
+    check(products) {
+      const groups = new Map();
+      for (const p of products) {
+        const raw = (p.productType || "").trim();
+        if (!raw) continue;
+        const k = norm(raw);
+        if (!groups.has(k)) groups.set(k, new Map());
+        groups.get(k).set(raw, (groups.get(k).get(raw) || 0) + 1);
+      }
+      const out = [];
+      for (const [, counts] of groups) {
+        if (counts.size < 2) continue;
+        const canonical = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+        for (const p of products) {
+          const raw = (p.productType || "").trim();
+          if (counts.has(raw) && raw !== canonical) out.push(finding(this, p, { detail: [...counts.keys()].join(" / "), edit: productEdit("productType", raw, canonical) }));
+        }
+      }
+      return out;
+    },
+  },
+  {
+    id: "weight_units_mixed", category: "shipping", label: "Mixed weight units", severity: "low",
+    check(products) {
+      const counts = new Map();
+      for (const p of products) for (const v of p.variants) if (v.weight > 0) counts.set(v.weightUnit, (counts.get(v.weightUnit) || 0) + 1);
+      const total = [...counts.values()].reduce((a, b) => a + b, 0);
+      if (counts.size < 2 || total < 10) return [];
+      const majority = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+      if (counts.get(majority) / total < 0.8) return []; // no clear convention to enforce
+      const out = [];
+      for (const p of products) for (const v of p.variants) {
+        if (!(v.weight > 0) || v.weightUnit === majority) continue;
+        out.push(finding(this, p, {
+          variantId: v.id, detail: `${v.title}: ${v.weight} ${v.weightUnit.toLowerCase()}, most use ${majority.toLowerCase()}`,
+          edit: v.inventoryItemId
+            ? { kind: "weight", inventoryItemId: v.inventoryItemId, unit: majority, current: String(v.weight), suggested: (toKg(v.weight, v.weightUnit) / KG[majority]).toFixed(2), hint: majority.toLowerCase() }
+            : null,
+        }));
       }
       return out;
     },

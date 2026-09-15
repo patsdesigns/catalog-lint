@@ -82,6 +82,28 @@ export const PASS_LABELS = {
   // Metafields
   metafield_required: "Required metafields are filled in",
   metafield_pattern: "Metafield values match their patterns",
+  metafield_malformed: "Metafield values are well formed",
+
+  // Batch A additions
+  title_too_short: "Titles have at least two words",
+  pasted_formatting: "Descriptions are free of pasted formatting",
+  description_img_no_alt: "Images in descriptions have alt text",
+  dead_link: "Links in descriptions go somewhere",
+  meta_description_short: "Meta descriptions are at least 50 characters",
+  alt_is_filename: "No filenames used as alt text",
+  alt_too_long: "Alt text is 125 characters or fewer",
+  huge_image: "Images are 5,000px or smaller",
+  barcode_invalid: "Barcodes pass their check digit",
+  duplicate_barcode: "Barcodes are unique",
+  inventory_not_tracked: "Inventory is tracked",
+  sells_when_out_of_stock: "Nothing sells while out of stock",
+  archived_with_stock: "No archived products with stock on hand",
+  thin_margin: "Margins are at least 10%",
+  deep_discount: "No discounts over 80%",
+  placeholder_price: "No placeholder prices",
+  weight_implausible: "Weights are plausible",
+  weight_units_mixed: "Weight units are consistent",
+  product_type_casing: "Product types are spelled consistently",
 };
 
 // What a settings-gated check needs before it can run.
