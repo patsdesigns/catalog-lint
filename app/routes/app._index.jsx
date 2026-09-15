@@ -69,13 +69,67 @@ const RULE_LABELS = {
 };
 const MAX_ROWS = 100;
 
+// One responsive track list for the metrics row: five equal columns separated by
+// vertical dividers on wide containers, a single column on narrow ones.
+// (Unquoted minmax() breaks Polaris's responsive parser, since parentheses and commas are
+// delimiters there; quote the whole value if minmax is ever needed in an @container list.)
+const METRIC_COLUMNS = "@container (inline-size <= 560px) 1fr, 1fr auto 1fr auto 1fr auto 1fr auto 1fr";
+const METRIC_DIVIDER_DISPLAY = "@container (inline-size <= 560px) none, auto";
+
+// Overview tables. Polaris has no column-width API: the browser sizes each <s-table> from its own
+// content, so separate tables never share boundaries on their own. Every overview table (one card
+// per category, plus Recent fixes) therefore uses one header skeleton whose header cells carry a
+// grid with a fixed track. The tracks set each column's intrinsic minimum and maximum, identical in
+// every table, so the table algorithm puts every column boundary in the same place no matter what
+// the rows contain. The primary track has a range rather than one size, so the text column is the
+// one that takes the slack. The action track fits the longest fix label.
+const OVERVIEW_TRACKS = {
+  primary: "minmax(240px, 640px)",
+  inline: "72px",
+  numeric: "56px",
+  action: "240px",
+};
+// Below this container width the Issue column is too narrow for the one label with a parenthetical
+// aside, so the aside is hidden there rather than wrapping that row onto two lines.
+const LABEL_ASIDE_DISPLAY = "@container (inline-size <= 900px) none, auto";
+
+// Detail view. Polaris sizes table columns from their content and a bare text field has almost no
+// intrinsic width, so the "Corrected" field sits in a one-track grid whose track has a real width:
+// wide enough for ~30 characters of text, narrower only for numeric values (a price or a weight).
+// (Sizing props such as minInlineSize do not accept the @container syntax at runtime; grid tracks do.)
+const CORRECTED_TRACKS = {
+  text: "@container (inline-size > 1100px) 320px, (inline-size > 900px) and (inline-size <= 1100px) 260px, 160px",
+  numeric: "@container (inline-size > 900px) 120px, 96px",
+};
+const NUMERIC_FIELDS = new Set(["price", "compareAt"]);
+function isNumericEdit(e) {
+  return e.kind === "weight" || e.kind === "cost" || (e.kind === "variant" && NUMERIC_FIELDS.has(e.field));
+}
+// "Current" values longer than one word get a track of their own too, so they are not broken one
+// word per line while the product title keeps most of the row.
+const CURRENT_TRACK = "@container (inline-size > 1100px) 200px, (inline-size > 900px) and (inline-size <= 1100px) 160px, 140px";
+// Row actions sit in one auto track each at every width: auto tracks never shrink, so the table cannot
+// wrap a button mid-row, and the flexible Product column yields instead of the actions breaking 2 + 1.
+function actionTracks(count) {
+  return Array(count).fill("auto").join(" ");
+}
+// Every control in a table row is a 28px button, so rows share one pitch; text-only cells get the
+// same minimum block size to keep that rhythm.
+const ROW_CONTROL_SIZE = "28px";
+
 function ruleLabel(id) {
   return RULE_LABELS[id] || id.replace(/_/g, " ");
+}
+// "Description has junk (raw URL, empty tags, spam phrases)" -> the label and its aside, so the aside
+// can be hidden where the column is narrow. Labels without a trailing parenthetical have no aside.
+function splitLabel(label) {
+  const m = /^(.*\S)\s+(\([^()]*\))$/.exec(label);
+  return m ? { main: m[1], aside: m[2] } : { main: label, aside: "" };
 }
 function adminUrl(gid) {
   return `shopify://admin/products/${gid.split("/").pop()}`;
 }
-function truncate(text, n = 48) {
+function truncate(text, n) {
   const t = String(text ?? "");
   return t.length > n ? `${t.slice(0, n)}...` : t;
 }
@@ -90,8 +144,15 @@ function timeAgo(iso) {
 function scoreTone(score) {
   return score >= 90 ? "success" : score >= 70 ? "warning" : "critical";
 }
+function scoreLabel(tone) {
+  return tone === "success" ? "Good" : tone === "warning" ? "Needs work" : "Poor";
+}
 const TONE_COLOR = { success: "#29845a", warning: "#b98900", critical: "#e51c00" };
 
+// Polaris has no primitive that takes an arbitrary hex color, and the category
+// colors mirror the Shopify product page (app/lib/categories.js), so the dot is
+// the only place that uses an inline style for color. The label next to it stays
+// in the default text color so it keeps AA contrast for every category hue.
 function Dot({ color, size = 10 }) {
   return (
     <span
@@ -104,15 +165,10 @@ function Dot({ color, size = 10 }) {
 function CategoryChip({ id }) {
   const cat = categoryOf(id);
   return (
-    <span
-      style={{
-        display: "inline-flex", alignItems: "center", gap: "6px", padding: "2px 10px", borderRadius: "999px",
-        background: `${cat.color}1a`, color: cat.color, fontSize: "12px", fontWeight: 600, lineHeight: "20px",
-      }}
-    >
+    <s-grid gridTemplateColumns="auto auto" gap="small-200" alignItems="center">
       <Dot color={cat.color} size={8} />
-      {cat.label}
-    </span>
+      <s-text>{cat.label}</s-text>
+    </s-grid>
   );
 }
 function exportCsv(result) {
@@ -177,77 +233,223 @@ function Notices({ data, onUndo, busy }) {
   );
 }
 
-function Stat({ label, value, tone, accent }) {
-  const color = tone ? TONE_COLOR[tone] : accent;
+// Metrics card composition: a label over a heading-sized value, five cells in one grid separated by
+// dividers. The value has heading styling but the presentation role, so the five tiles do not add
+// five h2s next to the section's own (visually hidden) "Catalog health" heading.
+function Metric({ label, value, tone }) {
   return (
-    <div style={{ borderLeft: color ? `4px solid ${color}` : undefined, borderRadius: "8px" }}>
-    <s-box padding="base" border="base" borderRadius="base" background="subdued">
-      <s-stack gap="small-200">
-        <s-text color="subdued">{label}</s-text>
-        {tone ? (
-          <s-stack direction="inline" gap="small" alignItems="center">
-            <s-heading>{value}</s-heading>
-            <s-badge tone={tone}>{tone === "success" ? "Good" : tone === "warning" ? "Needs work" : "Poor"}</s-badge>
-          </s-stack>
-        ) : (
-          <s-heading>{value}</s-heading>
-        )}
+    <s-stack gap="small-300">
+      <s-text>{label}</s-text>
+      <s-stack direction="inline" gap="small" alignItems="center">
+        <s-heading accessibilityRole="presentation">{value}</s-heading>
+        {tone ? <s-badge tone={tone}>{scoreLabel(tone)}</s-badge> : null}
       </s-stack>
+    </s-stack>
+  );
+}
+
+function MetricDivider() {
+  return (
+    <s-box display={METRIC_DIVIDER_DISPLAY}>
+      <s-divider direction="block"></s-divider>
     </s-box>
-    </div>
   );
 }
 
 function Trend({ history }) {
   if (!history || history.length < 2) return <s-text color="subdued">Scan again to build a trend</s-text>;
+  const last = history[history.length - 1].score;
+  const prev = history[history.length - 2].score;
+  const delta = last - prev;
+  // Bars are on an absolute 0-100 axis, so a perfect score is the tallest bar the track allows and
+  // a few points of movement still shows: 4px for 0, 40px for 100.
+  const barHeight = (score) => 4 + Math.round((Math.max(0, Math.min(100, score)) / 100) * 36);
+  // Bar width 12px + 4px gap, sized to the scans on record, so no bare baseline trails the bars.
+  const trackWidth = history.length * 16 - 4;
+  // ISO date, not toLocaleString(): the server and the browser must render the same markup.
+  const dateOf = (iso) => (iso ? String(iso).slice(0, 10) : "");
+  const describe = (h) => `${h.score}${h.at ? ` on ${dateOf(h.at)}` : ""}`;
   return (
-    <div style={{ display: "flex", alignItems: "flex-end", gap: "4px", height: "32px" }}>
-      {history.map((h, i) => (
-        <div
-          key={i}
-          title={`${h.score} on ${new Date(h.at).toLocaleString()}`}
-          style={{
-            width: "10px",
-            height: `${Math.max(3, h.score * 0.32)}px`,
-            borderRadius: "3px",
-            background: h.score >= 90 ? "#29845a" : h.score >= 70 ? "#b98900" : "#e51c00",
-            opacity: i === history.length - 1 ? 1 : 0.45,
-          }}
-        />
-      ))}
-    </div>
+    <s-stack direction="inline" gap="small" alignItems="center">
+      {/* Polaris has no sparkline/bar primitive: the bars are plain boxes on a divider baseline. */}
+      <s-stack gap="small-500">
+        <div aria-hidden="true" style={{ display: "flex", alignItems: "flex-end", gap: "4px", height: "40px", width: `${trackWidth}px` }}>
+          {history.map((h, i) => (
+            <div
+              key={i}
+              title={describe(h)}
+              style={{
+                width: "12px",
+                height: `${barHeight(h.score)}px`,
+                borderRadius: "2px 2px 0 0",
+                background: TONE_COLOR[scoreTone(h.score)],
+                opacity: i === history.length - 1 ? 1 : 0.45,
+              }}
+            />
+          ))}
+        </div>
+        <s-divider></s-divider>
+      </s-stack>
+      <s-text color="subdued">Score over the last {history.length} scans</s-text>
+      {/* The same score-and-date detail the bar tooltips carry, for readers who cannot hover. */}
+      <s-text accessibilityVisibility="exclusive">Scores, oldest first: {history.map(describe).join(", ")}</s-text>
+      {delta !== 0 ? (
+        // The direction is in the text as well as the icon and tone.
+        <s-badge tone={delta > 0 ? "success" : "critical"} icon={delta > 0 ? "arrow-up" : "arrow-down"}>
+          {delta > 0 ? "Up" : "Down"} {Math.abs(delta)} since last scan
+        </s-badge>
+      ) : null}
+    </s-stack>
   );
 }
 
 // ---------- overview ----------
 
+// A header cell of the shared overview column skeleton (see OVERVIEW_TRACKS). Numeric columns keep
+// their track, and the label inside it, at the end of the cell so the header sits over the
+// right-aligned numbers below it.
+function ColumnHeader({ track, listSlot, format, children }) {
+  const end = format === "numeric" ? "end" : undefined;
+  return (
+    <s-table-header listSlot={listSlot} format={format}>
+      <s-grid gridTemplateColumns={OVERVIEW_TRACKS[track]} justifyContent={end} justifyItems={end}>
+        {children}
+      </s-grid>
+    </s-table-header>
+  );
+}
+
+// Text-only action cell with the same block size as a row button, so every row keeps one pitch.
+function ActionNote({ children }) {
+  return (
+    <s-grid alignItems="center" minBlockSize={ROW_CONTROL_SIZE}>
+      <s-text color="subdued">{children}</s-text>
+    </s-grid>
+  );
+}
+
+function IssueRow({ rule, onSelect, onFix, busy }) {
+  const { main, aside } = splitLabel(rule.label);
+  // The aside is context, but it is still part of the rule name for assistive tech.
+  const link = (
+    <s-link id={`rule-${rule.ruleId}`} onClick={() => onSelect(rule.ruleId)} accessibilityLabel={aside ? rule.label : undefined}>
+      {main}
+    </s-link>
+  );
+  return (
+    <s-table-row clickDelegate={`rule-${rule.ruleId}`}>
+      <s-table-cell>
+        {aside ? (
+          // An s-box carries the responsive display (s-text ignores `display` at runtime).
+          <s-stack direction="inline" gap="small-200" alignItems="baseline">
+            {link}
+            <s-box display={LABEL_ASIDE_DISPLAY}>
+              <s-text color="subdued">{aside}</s-text>
+            </s-box>
+          </s-stack>
+        ) : (
+          link
+        )}
+      </s-table-cell>
+      <s-table-cell><s-badge tone={TONE[rule.severity]}>{rule.severity}</s-badge></s-table-cell>
+      <s-table-cell>
+        <s-text fontVariantNumeric="tabular-nums">{rule.count}</s-text>
+      </s-table-cell>
+      <s-table-cell>
+        {/* Automated fixes are the only buttons in this column. Review-only rows say what the row
+            click does without adding a second control that duplicates the row's link. */}
+        {rule.fixable ? (
+          <s-button
+            variant="secondary"
+            onClick={() => onFix(rule.ruleId)}
+            disabled={busy || undefined}
+            accessibilityLabel={`${rule.fixLabel}: ${rule.label}`}
+          >
+            {rule.fixLabel}
+          </s-button>
+        ) : (
+          <ActionNote>Review and edit</ActionNote>
+        )}
+      </s-table-cell>
+    </s-table-row>
+  );
+}
+
+// One card per product-page section, color coded with the section's color (app/lib/categories.js).
+// Every card's table uses the shared header skeleton, so Issue / Severity / Findings / Action sit at
+// the same x from card to card. The visible heading names the section (no accessibilityLabel, which
+// would add a second hidden heading to the outline).
+function CategoryCard({ cat, rules, onSelect, onFix, busy }) {
+  const total = rules.reduce((n, r) => n + r.count, 0);
+  return (
+    <s-section padding="none">
+      {/* Polaris has no prop for an arbitrary accent color, so the stripe is a plain div. Its radius
+          matches the card's so the stripe follows the top corners. */}
+      <div style={{ borderTop: `3px solid ${cat.color}`, borderRadius: "12px 12px 0 0" }}>
+        <s-box padding="base" paddingBlockEnd="small">
+          <s-stack direction="inline" gap="base" alignItems="center" justifyContent="space-between">
+            <s-stack direction="inline" gap="small-200" alignItems="center">
+              <Dot color={cat.color} />
+              <s-heading>{cat.label}</s-heading>
+            </s-stack>
+            <s-text color="subdued" fontVariantNumeric="tabular-nums">{total} findings</s-text>
+          </s-stack>
+        </s-box>
+      </div>
+      {/* The query container scopes LABEL_ASIDE_DISPLAY to the table's own width. */}
+      <s-query-container>
+        <s-table loading={busy || undefined}>
+          <s-table-header-row>
+            <ColumnHeader track="primary" listSlot="primary">Issue</ColumnHeader>
+            <ColumnHeader track="inline" listSlot="inline">Severity</ColumnHeader>
+            <ColumnHeader track="numeric" listSlot="labeled" format="numeric">Findings</ColumnHeader>
+            <ColumnHeader track="action" listSlot="secondary">Action</ColumnHeader>
+          </s-table-header-row>
+          <s-table-body>
+            {rules.map((rule) => (
+              <IssueRow key={rule.ruleId} rule={rule} onSelect={onSelect} onFix={onFix} busy={busy} />
+            ))}
+          </s-table-body>
+        </s-table>
+      </s-query-container>
+    </s-section>
+  );
+}
+
 function Overview({ result, history, fixes, fixedWeek, onSelect, onFix, onUndo, busy }) {
-  const counts = { high: 0, medium: 0, low: 0 };
-  for (const r of result.rules) counts[r.severity] += r.count;
+  const tone = scoreTone(result.score);
+  const lastScan = `Last scan ${timeAgo(result.scannedAt)}${result.ignoredCount ? `, ${result.ignoredCount} ignored` : ""}`;
 
   return (
     <>
-      <s-section>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "12px" }}>
-          <Stat label="Health score" value={`${result.score} / 100`} tone={scoreTone(result.score)} />
-          <Stat label="Products scanned" value={result.total} />
-          <Stat label="Clean products" value={result.clean} />
-          <Stat label="Open issues" value={result.findings.length} />
-          <Stat label="Fixed this week" value={fixedWeek} />
-        </div>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "12px" }}>
-          <Trend history={history} />
-          <s-text color="subdued">
-            Last scan {timeAgo(result.scannedAt)}
-            {result.ignoredCount ? `, ${result.ignoredCount} ignored` : ""}
-          </s-text>
-        </div>
+      <s-section accessibilityLabel="Catalog health">
+        <s-query-container>
+          <s-stack gap="base">
+            <s-grid gridTemplateColumns={METRIC_COLUMNS} gap="base">
+              <Metric label="Health score" value={`${result.score} / 100`} tone={tone} />
+              <MetricDivider />
+              <Metric label="Products scanned" value={result.total} />
+              <MetricDivider />
+              <Metric label="Clean products" value={result.clean} />
+              <MetricDivider />
+              <Metric label="Open issues" value={result.findings.length} />
+              <MetricDivider />
+              <Metric label="Fixed this week" value={fixedWeek} />
+            </s-grid>
+            <s-divider></s-divider>
+            <s-stack direction="inline" gap="base" alignItems="center" justifyContent="space-between">
+              <Trend history={history} />
+              <s-text color="subdued">{lastScan}</s-text>
+            </s-stack>
+          </s-stack>
+        </s-query-container>
       </s-section>
 
       {result.rules.length === 0 ? (
+        // The visible heading names the section; no accessibilityLabel, or the outline gets two headings.
         <s-section>
-          <s-stack alignItems="center" gap="small">
-            <s-icon type="check-circle" tone="success" size="large" />
+          <s-stack alignItems="center" gap="small" paddingBlock="large">
+            <s-icon type="check-circle" tone="success" />
             <s-heading>Your catalog is clean</s-heading>
             <s-text color="subdued">No issues found across {result.total} products.</s-text>
           </s-stack>
@@ -256,68 +458,39 @@ function Overview({ result, history, fixes, fixedWeek, onSelect, onFix, onUndo, 
         CATEGORIES.map((cat) => {
           const rules = result.rules.filter((r) => r.category === cat.id);
           if (rules.length === 0) return null;
-          const total = rules.reduce((n, r) => n + r.count, 0);
-          return (
-            <s-section key={cat.id} padding="none">
-              <div style={{ padding: "16px 16px 8px", display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: `3px solid ${cat.color}`, borderRadius: "8px 8px 0 0" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                  <Dot color={cat.color} />
-                  <s-heading>{cat.label}</s-heading>
-                </div>
-                <s-text color="subdued">{total} findings</s-text>
-              </div>
-              <s-table loading={busy || undefined}>
-                <s-table-header-row>
-                  <s-table-header listSlot="primary">Issue</s-table-header>
-                  <s-table-header listSlot="inline">Severity</s-table-header>
-                  <s-table-header listSlot="labeled" format="numeric">Findings</s-table-header>
-                  <s-table-header listSlot="secondary">Action</s-table-header>
-                </s-table-header-row>
-                <s-table-body>
-                  {rules.map((rule) => (
-                    <s-table-row key={rule.ruleId} clickDelegate={`rule-${rule.ruleId}`}>
-                      <s-table-cell>
-                        <s-link id={`rule-${rule.ruleId}`} onClick={() => onSelect(rule.ruleId)}>{rule.label}</s-link>
-                      </s-table-cell>
-                      <s-table-cell><s-badge tone={TONE[rule.severity]}>{rule.severity}</s-badge></s-table-cell>
-                      <s-table-cell>{rule.count}</s-table-cell>
-                      <s-table-cell>
-                        {rule.fixable ? (
-                          <s-button variant="secondary" onClick={() => onFix(rule.ruleId)} disabled={busy || undefined}>{rule.fixLabel}</s-button>
-                        ) : (
-                          <s-text color="subdued">Review and edit</s-text>
-                        )}
-                      </s-table-cell>
-                    </s-table-row>
-                  ))}
-                </s-table-body>
-              </s-table>
-            </s-section>
-          );
+          return <CategoryCard key={cat.id} cat={cat} rules={rules} onSelect={onSelect} onFix={onFix} busy={busy} />;
         })
       )}
 
       {fixes && fixes.length > 0 ? (
+        // Same composition and column skeleton as the Issues card, so the Fix / When / Changes /
+        // Action columns sit exactly under Issue / Severity / Findings / Action.
         <s-section padding="none">
-          <div style={{ padding: "16px 16px 8px", display: "flex", alignItems: "center", gap: "8px" }}>
-            <Dot color="#8a8f98" />
+          <s-box padding="base" paddingBlockEnd="small">
             <s-heading>Recent fixes</s-heading>
-          </div>
-          <s-table>
+          </s-box>
+          <s-table loading={busy || undefined}>
             <s-table-header-row>
-              <s-table-header listSlot="primary">Fix</s-table-header>
-              <s-table-header listSlot="labeled" format="numeric">Changes</s-table-header>
-              <s-table-header listSlot="secondary">When</s-table-header>
-              <s-table-header listSlot="inline">Undo</s-table-header>
+              <ColumnHeader track="primary" listSlot="primary">Fix</ColumnHeader>
+              <ColumnHeader track="inline" listSlot="inline">When</ColumnHeader>
+              <ColumnHeader track="numeric" listSlot="labeled" format="numeric">Changes</ColumnHeader>
+              <ColumnHeader track="action" listSlot="secondary">Action</ColumnHeader>
             </s-table-header-row>
             <s-table-body>
               {fixes.map((f) => (
                 <s-table-row key={f.batchId}>
-                  <s-table-cell>{ruleLabel(f.ruleId)}</s-table-cell>
-                  <s-table-cell>{f.count}</s-table-cell>
-                  <s-table-cell>{timeAgo(f.at)}</s-table-cell>
+                  <s-table-cell><s-text>{ruleLabel(f.ruleId)}</s-text></s-table-cell>
+                  <s-table-cell><s-text color="subdued">{timeAgo(f.at)}</s-text></s-table-cell>
+                  <s-table-cell><s-text fontVariantNumeric="tabular-nums">{f.count}</s-text></s-table-cell>
                   <s-table-cell>
-                    <s-button variant="tertiary" onClick={() => onUndo(f.batchId)} disabled={busy || undefined}>Undo</s-button>
+                    <s-button
+                      variant="secondary"
+                      onClick={() => onUndo(f.batchId)}
+                      disabled={busy || undefined}
+                      accessibilityLabel={`Undo ${ruleLabel(f.ruleId)}, ${f.count} changes`}
+                    >
+                      Undo
+                    </s-button>
                   </s-table-cell>
                 </s-table-row>
               ))}
@@ -331,64 +504,119 @@ function Overview({ result, history, fixes, fixedWeek, onSelect, onFix, onUndo, 
 
 // ---------- detail ----------
 
-function FindingRow({ f, onSave, onLearn, onIgnore, busy }) {
+// Column plan for one rule: "Current" and "Corrected" exist only when some finding fills them,
+// and their widths follow the values (a weight or price needs far less room than a sentence).
+function detailColumns(findings) {
+  const edits = findings.map((f) => f.edit).filter(Boolean);
+  const currentLen = edits.reduce((n, e) => Math.max(n, String(e.current ?? "").length), 0);
+  const numeric = edits.length > 0 && edits.every(isNumericEdit);
+  return {
+    current: currentLen > 0,
+    corrected: edits.length > 0,
+    currentTrack: currentLen > 16 ? CURRENT_TRACK : undefined,
+    correctedTrack: numeric ? CORRECTED_TRACKS.numeric : CORRECTED_TRACKS.text,
+  };
+}
+
+function FindingRow({ f, columns, onSave, onLearn, onIgnore, busy }) {
   const edit = f.edit;
   const [value, setValue] = useState(edit?.suggested ?? "");
   const canSave = edit && value.trim() !== "" && value !== edit.current;
-  const rowLabel = f.detail && f.detail !== f.productTitle ? f.detail : "";
+  const label = f.detail && f.detail !== f.productTitle ? f.detail : "";
+  const fieldLabel = `Corrected value for ${f.productTitle}`;
+  const actionCount = 1 + (f.word ? 1 : 0) + 1;
+  const current = edit ? (
+    edit.current ? <s-text>{truncate(edit.current, edit.multiline ? 80 : 32)}</s-text> : <s-text color="subdued">(empty)</s-text>
+  ) : null;
 
   return (
     <s-table-row>
       <s-table-cell>
-        <s-link href={adminUrl(f.productId)} target="_blank">{f.productTitle}</s-link>
+        {/* The finding's detail is a secondary line under the product, so it never gets a crushed column of its own. */}
+        <s-stack gap="small-500">
+          <s-link
+            href={adminUrl(f.productId)}
+            target="_blank"
+            accessibilityLabel={`${f.productTitle}, opens in Shopify admin in a new tab`}
+          >
+            {f.productTitle}
+          </s-link>
+          {label ? <s-text color="subdued">{truncate(label, 80)}</s-text> : null}
+        </s-stack>
       </s-table-cell>
-      <s-table-cell><s-text color="subdued">{truncate(rowLabel, 40)}</s-text></s-table-cell>
-      <s-table-cell>
-        {edit ? <s-text>{edit.current ? truncate(edit.current, edit.multiline ? 80 : 32) : "(empty)"}</s-text> : null}
-      </s-table-cell>
-      <s-table-cell>
-        {edit ? (
-          edit.multiline ? (
-            <s-text-area
-              label="Corrected value"
-              labelAccessibilityVisibility="exclusive"
-              rows={2}
-              value={value}
-              onInput={(e) => setValue(e.target.value)}
-            ></s-text-area>
-          ) : (
-            <s-text-field
-              label="Corrected value"
-              labelAccessibilityVisibility="exclusive"
-              placeholder={edit.hint || "Type a value"}
-              value={value}
-              onInput={(e) => setValue(e.target.value)}
-            ></s-text-field>
-          )
-        ) : (
-          <s-link href={adminUrl(f.productId)} target="_blank">Open in Shopify</s-link>
-        )}
-      </s-table-cell>
-      <s-table-cell>
-        <s-stack direction="inline" gap="small-200" alignItems="center">
+      {columns.current ? (
+        <s-table-cell>
+          {/* The one-track grid exists only when the column needs a width of its own. */}
+          {current && columns.currentTrack ? <s-grid gridTemplateColumns={columns.currentTrack}>{current}</s-grid> : current}
+        </s-table-cell>
+      ) : null}
+      {columns.corrected ? (
+        <s-table-cell>
           {edit ? (
-            <s-button variant="primary" onClick={() => onSave(edit, value)} disabled={!canSave || busy || undefined}>
+            <s-grid gridTemplateColumns={columns.correctedTrack}>
+              {edit.multiline ? (
+                <s-text-area
+                  label={fieldLabel}
+                  labelAccessibilityVisibility="exclusive"
+                  rows={2}
+                  placeholder={edit.hint || "Type a value"}
+                  value={value}
+                  onInput={(e) => setValue(e.target.value)}
+                ></s-text-area>
+              ) : (
+                <s-text-field
+                  label={fieldLabel}
+                  labelAccessibilityVisibility="exclusive"
+                  placeholder={edit.hint || "Type a value"}
+                  value={value}
+                  onInput={(e) => setValue(e.target.value)}
+                ></s-text-field>
+              )}
+            </s-grid>
+          ) : null}
+        </s-table-cell>
+      ) : null}
+      <s-table-cell>
+        <s-grid gridTemplateColumns={actionTracks(actionCount)} gap="small-200" alignItems="center" justifyContent="start">
+          {edit ? (
+            // Secondary, not primary: a row full of disabled primary buttons reads as broken, and the
+            // page-level primary action stays the one primary button on the page.
+            <s-button
+              variant="secondary"
+              onClick={() => onSave(edit, value)}
+              disabled={!canSave || busy || undefined}
+              accessibilityLabel={`Save corrected value for ${f.productTitle}`}
+            >
               Save
             </s-button>
-          ) : null}
+          ) : (
+            // A link styled as a tertiary button (s-button with href renders an anchor), so the
+            // cluster keeps the same height and gap as rows that have a Save button.
+            <s-button
+              variant="tertiary"
+              href={adminUrl(f.productId)}
+              target="_blank"
+              icon="external"
+              accessibilityLabel={`Open in Shopify: ${f.productTitle}, new tab`}
+            >
+              Open in Shopify
+            </s-button>
+          )}
           {f.word ? (
-            <s-button variant="tertiary" onClick={() => onLearn(f.word)} disabled={busy || undefined} accessibilityLabel={`Add ${f.word} to dictionary`}>
+            <s-button variant="tertiary" onClick={() => onLearn(f.word)} disabled={busy || undefined} accessibilityLabel={`Trust word ${f.word}: add it to the dictionary`}>
               Trust word
             </s-button>
           ) : null}
-          <s-button variant="tertiary" onClick={() => onIgnore(f)} disabled={busy || undefined}>Ignore</s-button>
-        </s-stack>
+          <s-button variant="tertiary" onClick={() => onIgnore(f)} disabled={busy || undefined} accessibilityLabel={`Ignore ${f.productTitle}`}>
+            Ignore
+          </s-button>
+        </s-grid>
       </s-table-cell>
     </s-table-row>
   );
 }
 
-function Detail({ rule, findings, onBack, onFix, onSave, onLearn, onIgnore, busy }) {
+function Detail({ rule, findings, onSave, onLearn, onIgnore, busy }) {
   const [query, setQuery] = useState("");
   const q = query.trim().toLowerCase();
   const filtered = q
@@ -396,41 +624,61 @@ function Detail({ rule, findings, onBack, onFix, onSave, onLearn, onIgnore, busy
     : findings;
   const rows = filtered.slice(0, MAX_ROWS);
   const hidden = filtered.length - rows.length;
+  const columns = detailColumns(findings);
+  const help = columns.corrected
+    ? "Edit the corrected value and save, or ignore what is intentional."
+    : "Open each product in Shopify to fix it, or ignore what is intentional.";
 
   return (
+    // The visible "N findings" heading names the section (no accessibilityLabel, which would add a
+    // second hidden heading).
     <s-section padding="none">
-      <div style={{ padding: "16px 16px 8px" }}>
-        <s-heading>{rule.count} findings</s-heading>
-      </div>
-      <s-table loading={busy || undefined}>
-        <s-search-field
-          slot="filters"
-          label="Search"
-          labelAccessibilityVisibility="exclusive"
-          placeholder="Search products"
-          value={query}
-          onInput={(e) => setQuery(e.target.value)}
-        ></s-search-field>
-        <s-table-header-row>
-          <s-table-header listSlot="primary">Product</s-table-header>
-          <s-table-header listSlot="secondary">Detail</s-table-header>
-          <s-table-header listSlot="labeled">Current</s-table-header>
-          <s-table-header listSlot="labeled">Corrected</s-table-header>
-          <s-table-header listSlot="inline">Actions</s-table-header>
-        </s-table-header-row>
-        <s-table-body>
-          {rows.map((f, i) => (
-            <FindingRow
-              key={`${f.productId}-${f.variantId || ""}-${f.word || ""}-${i}`}
-              f={f}
-              onSave={onSave}
-              onLearn={onLearn}
-              onIgnore={onIgnore}
-              busy={busy}
-            />
-          ))}
-        </s-table-body>
-      </s-table>
+      <s-box padding="base">
+        <s-stack gap="small">
+          <s-heading>{findings.length} findings</s-heading>
+          <s-stack direction="inline" gap="small" alignItems="center">
+            <CategoryChip id={rule.category} />
+            <s-badge tone={TONE[rule.severity]}>{rule.severity} severity</s-badge>
+            <s-text color="subdued">{help}</s-text>
+          </s-stack>
+        </s-stack>
+      </s-box>
+      <s-query-container>
+        <s-table loading={busy || undefined}>
+          {/* The header row comes first so the table finds it as soon as it upgrades; the filters
+              slot is placed by its slot name, not by position. */}
+          <s-table-header-row>
+            <s-table-header listSlot="primary">Product</s-table-header>
+            {columns.current ? <s-table-header listSlot="labeled">Current</s-table-header> : null}
+            {columns.corrected ? <s-table-header listSlot="labeled">Corrected</s-table-header> : null}
+            <s-table-header listSlot="inline">Actions</s-table-header>
+          </s-table-header-row>
+          <s-search-field
+            slot="filters"
+            label="Search"
+            labelAccessibilityVisibility="exclusive"
+            placeholder="Search products"
+            value={query}
+            onInput={(e) => setQuery(e.target.value)}
+          ></s-search-field>
+          <s-table-body>
+            {rows.map((f, i) => (
+              <FindingRow
+                key={`${f.productId}-${f.variantId || ""}-${f.word || ""}-${i}`}
+                f={f}
+                columns={columns}
+                onSave={onSave}
+                onLearn={onLearn}
+                onIgnore={onIgnore}
+                busy={busy}
+              />
+            ))}
+          </s-table-body>
+        </s-table>
+      </s-query-container>
+      {rows.length === 0 ? (
+        <s-box padding="base"><s-text color="subdued">No products match your search.</s-text></s-box>
+      ) : null}
       {hidden > 0 ? (
         <s-box padding="base"><s-text color="subdued">Showing {rows.length} of {filtered.length}. Use search to narrow down.</s-text></s-box>
       ) : null}
@@ -474,18 +722,9 @@ export default function Index() {
           </s-button>
         ) : null}
         <Notices data={data} onUndo={runUndo} busy={busy} />
-        <s-section>
-          <s-stack direction="inline" gap="base" alignItems="center">
-            <CategoryChip id={rule.category} />
-            <s-badge tone={TONE[rule.severity]}>{rule.severity} severity</s-badge>
-            <s-text color="subdued">{findings.length} findings. Edit the corrected value and save, or ignore what is intentional.</s-text>
-          </s-stack>
-        </s-section>
         <Detail
           rule={rule}
           findings={findings}
-          onBack={() => setSelected(null)}
-          onFix={runFix}
           onSave={saveEdit}
           onLearn={learnWord}
           onIgnore={ignoreFinding}
@@ -507,14 +746,18 @@ export default function Index() {
       <Notices data={data} onUndo={runUndo} busy={busy} />
 
       {!result ? (
+        // The visible "Scan your catalog" heading names the section.
         <s-section>
-          <s-stack alignItems="center" gap="small">
-            <s-icon type="search" size="large" />
+          <s-stack alignItems="center" gap="small" paddingBlock="large">
+            <s-icon type="search" />
             <s-heading>Scan your catalog</s-heading>
-            <s-text color="subdued">
-              Finds missing images, descriptions, SKUs, weights, misspellings, duplicate SKUs, and
-              inconsistent vendors. Nothing changes until you choose to.
-            </s-text>
+            {/* Polaris has no text-align prop, so the wrapping copy is centered by a plain div. */}
+            <div style={{ textAlign: "center", maxWidth: "480px" }}>
+              <s-paragraph color="subdued">
+                Finds missing images, descriptions, SKUs, weights, misspellings, duplicate SKUs, and
+                inconsistent vendors. Nothing changes until you choose to.
+              </s-paragraph>
+            </div>
             <s-button variant="primary" onClick={runScan} loading={busy || undefined}>Run first scan</s-button>
           </s-stack>
         </s-section>
