@@ -675,12 +675,26 @@ export function runRules(products, ctx = {}) {
   return findings;
 }
 
+// Product rules only, for re-checking a handful of products without reading the whole catalog.
+export function runProductRules(products, ctx = {}) {
+  const findings = [];
+  for (const p of products) for (const rule of PRODUCT_RULES) findings.push(...rule.check(p, ctx));
+  return findings;
+}
+export const CATALOG_RULE_IDS = new Set(CATALOG_RULES.map((r) => r.id));
+
 const WEIGHT = { high: 3, medium: 1.5, low: 0.5 };
 const MAX_PENALTY_PER_PRODUCT = 10;
 
 // Rules with an `applies(settings)` guard need something configured in Settings; when it is empty
 // they are reported as skipped rather than passed.
 export function summarize(products, findings, settings = {}) {
+  return summarizeFindings(products.length, findings, settings);
+}
+
+// The same summary from a product count instead of the products themselves, so a stored scan can
+// be re-summarized after an incremental refresh. Products without findings count as clean.
+export function summarizeFindings(total, findings, settings = {}) {
   const byRule = {};
   const penalty = new Map();
   for (const f of findings) {
@@ -694,13 +708,9 @@ export function summarize(products, findings, settings = {}) {
     byRule[f.ruleId].count += 1;
     penalty.set(f.productId, (penalty.get(f.productId) || 0) + WEIGHT[f.severity]);
   }
-  const total = products.length;
-  let sum = 0, clean = 0;
-  for (const p of products) {
-    const pen = Math.min(MAX_PENALTY_PER_PRODUCT, penalty.get(p.id) || 0);
-    sum += pen;
-    if (pen === 0) clean += 1;
-  }
+  let sum = 0;
+  for (const pen of penalty.values()) sum += Math.min(MAX_PENALTY_PER_PRODUCT, pen);
+  const clean = Math.max(0, total - penalty.size);
   const score = Math.max(0, Math.round(100 - (total ? sum / total : 0) * 10));
   const order = { high: 0, medium: 1, low: 2 };
   const rules = Object.values(byRule).sort((a, b) => order[a.severity] - order[b.severity] || b.count - a.count);

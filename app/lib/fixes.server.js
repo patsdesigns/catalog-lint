@@ -1,43 +1,31 @@
 import { randomUUID } from "node:crypto";
 import prisma from "../db.server";
-import { fetchCatalog } from "./scan.server";
+import { fetchProductsByIds } from "./scan.server";
 import { setProductField, setVariantField, setAlt, revert } from "./writes.server";
 
-// Every fix re-reads the catalog first so it never acts on stale data.
+// Every fix re-reads the products it touches first so it never acts on stale data.
 // Every change is logged with its previous value so a whole batch can be undone.
 
 const MAX_MUTATIONS_PER_RUN = 100;
 
-async function fixVendorCasing(graphql, products, log) {
-  const groups = new Map();
-  for (const p of products) {
-    const raw = (p.vendor || "").trim();
-    if (!raw) continue;
-    const key = raw.toLowerCase().replace(/\s+/g, " ");
-    if (!groups.has(key)) groups.set(key, new Map());
-    const counts = groups.get(key);
-    counts.set(raw, (counts.get(raw) || 0) + 1);
-  }
-
+// The canonical spelling was decided at scan time (the most common casing across the catalog) and
+// travels with each finding as edit.suggested, so only the flagged products need re-reading.
+async function fixVendorCasing(graphql, products, log, findingsByProduct) {
   const result = { fixed: 0, skipped: 0, errors: [] };
   let budget = MAX_MUTATIONS_PER_RUN;
-
-  for (const [key, counts] of groups) {
-    if (counts.size < 2) continue;
-    const canonical = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
-    for (const p of products) {
-      const raw = (p.vendor || "").trim();
-      if (raw.toLowerCase().replace(/\s+/g, " ") !== key || raw === canonical) continue;
-      if (budget-- <= 0) {
-        result.skipped += 1;
-        continue;
-      }
-      const errs = await setProductField(graphql, p.id, "vendor", canonical);
-      if (errs.length) result.errors.push(`${p.title}: ${errs.join(", ")}`);
-      else {
-        result.fixed += 1;
-        log({ field: "vendor", targetId: p.id, productId: p.id, title: p.title, before: raw, after: canonical });
-      }
+  for (const p of products) {
+    const edit = (findingsByProduct.get(p.id) || []).map((f) => f.edit).find((e) => e && e.suggested);
+    const raw = (p.vendor || "").trim();
+    if (!edit || raw === edit.suggested) continue;
+    if (raw !== edit.current || budget-- <= 0) {
+      result.skipped += 1; // changed since the scan, or over the per-run budget
+      continue;
+    }
+    const errs = await setProductField(graphql, p.id, "vendor", edit.suggested);
+    if (errs.length) result.errors.push(`${p.title}: ${errs.join(", ")}`);
+    else {
+      result.fixed += 1;
+      log({ field: "vendor", targetId: p.id, productId: p.id, title: p.title, before: raw, after: edit.suggested });
     }
   }
   return result;
@@ -104,16 +92,23 @@ const FIXERS = {
   compare_at_not_higher: fixCompareAt,
 };
 
-export async function applyFix(graphql, shop, ruleId) {
+// findings: the latest scan's findings. Only the products this rule flagged are read and touched.
+export async function applyFix(graphql, shop, ruleId, findings) {
   const fixer = FIXERS[ruleId];
   if (!fixer) throw new Error(`No fix available for ${ruleId}`);
 
-  const products = await fetchCatalog(graphql);
+  const findingsByProduct = new Map();
+  for (const f of findings) {
+    if (f.ruleId !== ruleId) continue;
+    if (!findingsByProduct.has(f.productId)) findingsByProduct.set(f.productId, []);
+    findingsByProduct.get(f.productId).push(f);
+  }
+  const products = await fetchProductsByIds(graphql, [...findingsByProduct.keys()]);
   const batchId = randomUUID();
   const entries = [];
   const log = (e) => entries.push(e);
 
-  const result = await fixer(graphql, products, log);
+  const result = await fixer(graphql, products, log, findingsByProduct);
 
   if (entries.length) {
     await prisma.fixLog.createMany({
@@ -131,7 +126,7 @@ export async function applyFix(graphql, shop, ruleId) {
     });
   }
 
-  return { ...result, batchId: entries.length ? batchId : null };
+  return { ...result, batchId: entries.length ? batchId : null, productIds: [...new Set(entries.map((e) => e.productId))] };
 }
 
 export async function undoFix(graphql, shop, batchId) {
@@ -148,7 +143,7 @@ export async function undoFix(graphql, shop, batchId) {
       await prisma.fixLog.update({ where: { id: e.id }, data: { undone: true } });
     }
   }
-  return result;
+  return { ...result, productIds: [...new Set(entries.map((e) => e.productId))] };
 }
 
 export async function recentFixes(shop, limit = 5) {

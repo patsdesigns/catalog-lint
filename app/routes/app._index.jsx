@@ -1,10 +1,10 @@
 import { useState, useEffect } from "react";
-import { useFetcher, useLoaderData } from "react-router";
+import { useFetcher, useLoaderData, useRevalidator } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
-import { scanCatalog } from "../lib/scan.server";
+import { startScan, advanceJob, refreshAfter } from "../lib/rescan.server";
 import { applyFix, undoFix, recentFixes, fixedCount } from "../lib/fixes.server";
-import { saveScan, latestScan, scanHistory } from "../lib/scans.server";
+import { latestScan, scanHistory } from "../lib/scans.server";
 import { addWord } from "../lib/dictionary.server";
 import { addIgnore } from "../lib/ignores.server";
 import { applyEdit } from "../lib/edits.server";
@@ -23,8 +23,10 @@ async function loadState(shop) {
 }
 
 export async function loader({ request }) {
-  const { session } = await authenticate.admin(request);
-  return loadState(session.shop);
+  const { admin, session } = await authenticate.admin(request);
+  // Moves a background scan along (and finishes it) every time the page loads or polls.
+  const job = await advanceJob(admin.graphql, session.shop);
+  return { ...(await loadState(session.shop)), job };
 }
 
 export async function action({ request }) {
@@ -36,20 +38,41 @@ export async function action({ request }) {
     let fix = null;
     let undo = null;
     let edit = null;
-    if (intent === "fix") {
-      const ruleId = form.get("ruleId");
-      fix = { ruleId, ...(await applyFix(admin.graphql, session.shop, ruleId)) };
+    let job = null;
+    if (intent === "scan") {
+      job = await startScan(admin.graphql, session.shop);
+    } else {
+      // What changed, so the stored scan can be refreshed without re-reading a large catalog.
+      let change = null;
+      if (intent === "fix") {
+        const ruleId = form.get("ruleId");
+        const latest = await latestScan(session.shop);
+        fix = { ruleId, ...(await applyFix(admin.graphql, session.shop, ruleId, latest?.findings || [])) };
+        change = { kind: "products", ids: fix.productIds, ruleId };
+      }
+      if (intent === "undo") {
+        undo = await undoFix(admin.graphql, session.shop, form.get("batchId"));
+        change = { kind: "products", ids: undo.productIds };
+      }
+      if (intent === "learn") {
+        const word = form.get("word");
+        await addWord(session.shop, word);
+        change = { kind: "learn", word };
+      }
+      if (intent === "ignore") {
+        const finding = JSON.parse(form.get("finding"));
+        await addIgnore(session.shop, finding);
+        change = { kind: "ignore", finding };
+      }
+      if (intent === "edit") {
+        const descriptor = JSON.parse(form.get("edit"));
+        edit = await applyEdit(admin.graphql, session.shop, descriptor, form.get("value"));
+        change = { kind: "products", ids: [descriptor.productId], ruleId: descriptor.ruleId };
+      }
+      if (change) await refreshAfter(admin.graphql, session.shop, change);
     }
-    if (intent === "undo") undo = await undoFix(admin.graphql, session.shop, form.get("batchId"));
-    if (intent === "learn") await addWord(session.shop, form.get("word"));
-    if (intent === "ignore") await addIgnore(session.shop, JSON.parse(form.get("finding")));
-    if (intent === "edit") {
-      edit = await applyEdit(admin.graphql, session.shop, JSON.parse(form.get("edit")), form.get("value"));
-    }
-    const fresh = await scanCatalog(admin.graphql, session.shop);
-    await saveScan(session.shop, fresh);
     const state = await loadState(session.shop);
-    return { ok: true, ...state, fix, undo, edit };
+    return { ok: true, ...state, fix, undo, edit, job };
   } catch (err) {
     return { ok: false, error: err.message || String(err) };
   }
@@ -230,6 +253,29 @@ function Notices({ data, onUndo, busy }) {
         </s-banner>
       ) : null}
     </>
+  );
+}
+
+// A background scan (Shopify bulk export) in progress or failed. The page polls the loader while
+// one is running, so the banner updates on its own.
+function ScanProgress({ job }) {
+  if (!job) return null;
+  if (job.status === "failed") {
+    return (
+      <s-banner tone="critical" heading="Scan failed">
+        <s-paragraph>{job.error || "Shopify could not export the catalog."} Run the scan again to retry.</s-paragraph>
+      </s-banner>
+    );
+  }
+  if (job.status !== "running") return null;
+  const n = (v) => Number(v || 0).toLocaleString("en-US");
+  return (
+    <s-banner tone="info" heading={`Scanning ${n(job.expected)} products`}>
+      <s-paragraph>
+        Shopify is exporting the catalog in the background{job.objects ? `: ${n(job.objects)} records so far` : ""}. This
+        page updates by itself, and it is safe to leave and come back.
+      </s-paragraph>
+    </s-banner>
   );
 }
 
@@ -713,9 +759,20 @@ export default function Index() {
   const fetcher = useFetcher();
   const busy = fetcher.state !== "idle";
   const data = fetcher.data;
-  const state = data?.ok ? data : initial;
-  const { result, history, fixes, fixedWeek } = state;
+  // The loader is revalidated after every action and while a background scan runs, so it is the
+  // source of truth for the page; the fetcher's data only carries the action's notices.
+  const { result, history, fixes, fixedWeek, job } = initial;
   const [selected, setSelected] = useState(null);
+  const revalidator = useRevalidator();
+  const scanning = job?.status === "running";
+
+  useEffect(() => {
+    if (!scanning) return undefined;
+    const timer = setInterval(() => {
+      if (revalidator.state === "idle") revalidator.revalidate();
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [scanning, revalidator]);
 
   useEffect(() => {
     if (result && selected && !result.rules.some((r) => r.ruleId === selected)) setSelected(null);
@@ -756,14 +813,15 @@ export default function Index() {
 
   return (
     <s-page heading="Catalog Lint" inlineSize="large">
-      <s-button slot="primary-action" variant="primary" onClick={runScan} loading={busy || undefined}>
-        {result ? "Scan again" : "Run scan"}
+      <s-button slot="primary-action" variant="primary" onClick={runScan} loading={busy || undefined} disabled={scanning || undefined}>
+        {scanning ? "Scanning…" : result ? "Scan again" : "Run scan"}
       </s-button>
       {result ? (
         <s-button slot="secondary-actions" onClick={() => exportCsv(result)}>Export CSV</s-button>
       ) : null}
 
       <Notices data={data} onUndo={runUndo} busy={busy} />
+      <ScanProgress job={job} />
 
       {!result ? (
         // The visible "Scan your catalog" heading names the section.
@@ -778,7 +836,9 @@ export default function Index() {
                 inconsistent vendors. Nothing changes until you choose to.
               </s-paragraph>
             </div>
-            <s-button variant="primary" onClick={runScan} loading={busy || undefined}>Run first scan</s-button>
+            <s-button variant="primary" onClick={runScan} loading={busy || undefined} disabled={scanning || undefined}>
+              {scanning ? "Scanning…" : "Run first scan"}
+            </s-button>
           </s-stack>
         </s-section>
       ) : (
