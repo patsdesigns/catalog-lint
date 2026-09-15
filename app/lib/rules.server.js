@@ -48,6 +48,8 @@ export const PRODUCT_RULES = [
     id: "missing_alt_text",
     label: "Image missing alt text",
     severity: "low",
+    fixable: true,
+    fixLabel: "Set alt text to product title",
     check(p) {
       const missing = p.images.filter((img) => !(img.alt || "").trim());
       return missing.length
@@ -132,6 +134,8 @@ export const PRODUCT_RULES = [
     id: "missing_weight",
     label: "Variant has no weight",
     severity: "medium",
+    fixable: true,
+    fixLabel: "Copy weight from a sibling variant",
     check(p) {
       return p.variants
         .filter((v) => !v.weight || v.weight <= 0)
@@ -204,6 +208,8 @@ export const CATALOG_RULES = [
     id: "vendor_casing",
     label: "Vendor name differs only by casing or spacing",
     severity: "medium",
+    fixable: true,
+    fixLabel: "Use the most common spelling",
     check(products) {
       const groups = new Map();
       for (const p of products) {
@@ -238,21 +244,39 @@ export function runRules(products) {
   return findings;
 }
 
+const WEIGHT = { high: 3, medium: 1.5, low: 0.5 };
+const MAX_PENALTY_PER_PRODUCT = 10;
+
 export function summarize(products, findings) {
   const byRule = {};
+  const penalty = new Map();
+
   for (const f of findings) {
     if (!byRule[f.ruleId]) {
-      byRule[f.ruleId] = { ruleId: f.ruleId, label: f.label, severity: f.severity, count: 0 };
+      const rule = [...PRODUCT_RULES, ...CATALOG_RULES].find((r) => r.id === f.ruleId);
+      byRule[f.ruleId] = {
+        ruleId: f.ruleId,
+        label: f.label,
+        severity: f.severity,
+        fixable: Boolean(rule?.fixable),
+        fixLabel: rule?.fixLabel || null,
+        count: 0,
+      };
     }
     byRule[f.ruleId].count += 1;
+    penalty.set(f.productId, (penalty.get(f.productId) || 0) + WEIGHT[f.severity]);
   }
 
-  const dirty = new Set(
-    findings.filter((f) => f.severity !== "low").map((f) => f.productId),
-  );
   const total = products.length;
-  const clean = total - dirty.size;
-  const score = total === 0 ? 100 : Math.round((clean / total) * 100);
+  let sum = 0;
+  let clean = 0;
+  for (const p of products) {
+    const pen = Math.min(MAX_PENALTY_PER_PRODUCT, penalty.get(p.id) || 0);
+    sum += pen;
+    if (pen === 0) clean += 1;
+  }
+  const avg = total === 0 ? 0 : sum / total;
+  const score = Math.max(0, Math.round(100 - avg * 10));
 
   const order = { high: 0, medium: 1, low: 2 };
   const rules = Object.values(byRule).sort(

@@ -36,13 +36,13 @@ type = "multi_line_text_field"
 [webhooks]
 api_version = "2026-10"
 
-  [[webhooks.subscriptions]]
-  uri = "/webhooks/app/uninstalled"
-  topics = [ "app/uninstalled" ]
+  # [[webhooks.subscriptions]]
+  # uri = "/webhooks/app/uninstalled"
+  # topics = [ "app/uninstalled" ]
 
-  [[webhooks.subscriptions]]
-  uri = "/webhooks/app/scopes_update"
-  topics = [ "app/scopes_update" ]
+  # [[webhooks.subscriptions]]
+  # uri = "/webhooks/app/scopes_update"
+  # topics = [ "app/scopes_update" ]
 
 [auth]
 redirect_urls = [ "https://example.com/api/auth" ]

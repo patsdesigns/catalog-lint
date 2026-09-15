@@ -32,3 +32,16 @@ model Session {
   refreshToken        String?
   refreshTokenExpires DateTime?
 }
+model Scan {
+  id         Int      @id @default(autoincrement())
+  shop       String
+  score      Int
+  total      Int
+  clean      Int
+  durationMs Int
+  rules      String
+  findings   String
+  createdAt  DateTime @default(now())
+
+  @@index([shop, createdAt])
+}

@@ -38,6 +38,7 @@ const QUERY = `#graphql
             price
             compareAtPrice
             inventoryItem {
+              id
               measurement {
                 weight {
                   value
@@ -72,7 +73,9 @@ function normalize(node) {
       barcode: v.barcode,
       price: v.price,
       compareAtPrice: v.compareAtPrice,
+      inventoryItemId: v.inventoryItem?.id,
       weight: v.inventoryItem?.measurement?.weight?.value ?? 0,
+      weightUnit: v.inventoryItem?.measurement?.weight?.unit || "KILOGRAMS",
     })),
   };
 }
