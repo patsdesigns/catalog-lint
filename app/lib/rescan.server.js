@@ -73,9 +73,18 @@ export async function advanceJob(graphql, shop) {
 //   { kind: "ignore", finding }            the finding the merchant chose to ignore
 //   { kind: "learn", word }                a word added to the dictionary
 //   { kind: "products", ids, ruleId }      products that were changed, and the rule acted on
+//   { kind: "settings" }                   checks were turned on or off
 export async function refreshAfter(graphql, shop, change) {
   const latest = await latestScan(shop);
   if (!latest) return;
+
+  // Turning a check off removes its findings right away; one turned back on reports on the next scan.
+  if (change.kind === "settings") {
+    const settings = await getSettings(shop);
+    const off = new Set(settings.disabledRules || []);
+    await saveScan(shop, withFindings(latest, latest.findings.filter((f) => !off.has(f.ruleId)), settings));
+    return;
+  }
 
   // Small catalogs: a full rescan is quick and keeps catalog-wide rules exact.
   if (latest.total <= SYNC_LIMIT) {

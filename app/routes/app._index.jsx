@@ -408,7 +408,7 @@ function IssueRow({ rule, onSelect }) {
 // The checks that ran clean for one category, in a tinted panel beside its table, so the merchant
 // sees what was checked and not only what failed. Checks that need a setting that is empty are
 // listed as not set up instead of passed.
-function PassedChecks({ passed, skipped, failing }) {
+function PassedChecks({ passed, skipped, off, failing }) {
   const total = passed.length + failing;
   return (
     // Polaris has no tinted-background prop, so the tint is an inline style; the card grid stretches
@@ -419,7 +419,7 @@ function PassedChecks({ passed, skipped, failing }) {
           <s-stack direction="inline" gap="small-200" alignItems="center">
             <s-icon type="check-circle" tone="success" />
             <s-text type="strong">
-              {passed.length} of {total} {total === 1 ? "check" : "checks"} passed
+              {total === 0 ? "No checks running" : `${passed.length} of ${total} ${total === 1 ? "check" : "checks"} passed`}
             </s-text>
           </s-stack>
           {passed.length > 0 ? (
@@ -439,6 +439,11 @@ function PassedChecks({ passed, skipped, failing }) {
               <s-link href="/app/settings">Set up in Settings</s-link>.
             </s-text>
           ) : null}
+          {off.length > 0 ? (
+            <s-text color="subdued">
+              {off.length} {off.length === 1 ? "check" : "checks"} turned off. <s-link href="/app/settings">Settings</s-link>
+            </s-text>
+          ) : null}
         </s-stack>
       </s-box>
     </div>
@@ -454,6 +459,7 @@ function CategoryCard({ cat, rules, checks, showChecks, onSelect, busy }) {
   const total = rules.reduce((n, r) => n + r.count, 0);
   const passed = checks.filter((c) => c.status === "passed");
   const skipped = checks.filter((c) => c.status === "skipped");
+  const off = checks.filter((c) => c.status === "off");
   const table =
     rules.length > 0 ? (
       <s-table loading={busy || undefined}>
@@ -494,7 +500,7 @@ function CategoryCard({ cat, rules, checks, showChecks, onSelect, busy }) {
         {showChecks ? (
           <s-grid gridTemplateColumns={CARD_COLUMNS}>
             <div>{table}</div>
-            <PassedChecks passed={passed} skipped={skipped} failing={rules.length} />
+            <PassedChecks passed={passed} skipped={skipped} off={off} failing={rules.length} />
           </s-grid>
         ) : (
           table

@@ -926,17 +926,28 @@ CATALOG_RULES.push(
 
 export const ALL_RULES = [...PRODUCT_RULES, ...CATALOG_RULES];
 
+// What the Settings page needs to offer a switch per check.
+export const RULE_CATALOG = ALL_RULES.map((r) => ({ id: r.id, label: r.label, category: r.category, severity: r.severity }));
+
+// The rules the merchant has not turned off in Settings (settings.disabledRules).
+function enabled(rules, ctx) {
+  const off = new Set(ctx?.settings?.disabledRules || []);
+  return off.size ? rules.filter((r) => !off.has(r.id)) : rules;
+}
+
 export function runRules(products, ctx = {}) {
   const findings = [];
-  for (const p of products) for (const rule of PRODUCT_RULES) findings.push(...rule.check(p, ctx));
-  for (const rule of CATALOG_RULES) findings.push(...rule.check(products, ctx));
+  const productRules = enabled(PRODUCT_RULES, ctx);
+  for (const p of products) for (const rule of productRules) findings.push(...rule.check(p, ctx));
+  for (const rule of enabled(CATALOG_RULES, ctx)) findings.push(...rule.check(products, ctx));
   return findings;
 }
 
 // Product rules only, for re-checking a handful of products without reading the whole catalog.
 export function runProductRules(products, ctx = {}) {
   const findings = [];
-  for (const p of products) for (const rule of PRODUCT_RULES) findings.push(...rule.check(p, ctx));
+  const productRules = enabled(PRODUCT_RULES, ctx);
+  for (const p of products) for (const rule of productRules) findings.push(...rule.check(p, ctx));
   return findings;
 }
 export const CATALOG_RULE_IDS = new Set(CATALOG_RULES.map((r) => r.id));
@@ -972,11 +983,13 @@ export function summarizeFindings(total, findings, settings = {}) {
   const score = Math.max(0, Math.round(100 - (total ? sum / total : 0) * 10));
   const order = { high: 0, medium: 1, low: 2 };
   const rules = Object.values(byRule).sort((a, b) => order[a.severity] - order[b.severity] || b.count - a.count);
-  // Every rule that ran, so the overview can show what was checked and not only what failed.
+  // Every rule, so the overview can show what was checked and not only what failed: failed, passed,
+  // skipped (needs a Setting that is empty) or off (turned off in Settings).
+  const off = new Set(settings.disabledRules || []);
   const checks = ALL_RULES.map((rule) => ({
     ruleId: rule.id, label: rule.label, category: rule.category, severity: rule.severity,
     count: byRule[rule.id]?.count || 0,
-    status: byRule[rule.id] ? "failed" : rule.applies && !rule.applies(settings) ? "skipped" : "passed",
+    status: byRule[rule.id] ? "failed" : off.has(rule.id) ? "off" : rule.applies && !rule.applies(settings) ? "skipped" : "passed",
   }));
   return { score, total, clean, rules, checks };
 }

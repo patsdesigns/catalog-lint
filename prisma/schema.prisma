@@ -86,8 +86,11 @@ model Setting {
   shop            String   @id
   vendorWhitelist String   @default("[]")
   metafieldRules  String   @default("[]")
+  disabledRules   String   @default("[]")
   updatedAt       DateTime @updatedAt
-}model ScanJob {
+}
+
+model ScanJob {
   id          Int      @id @default(autoincrement())
   shop        String
   operationId String

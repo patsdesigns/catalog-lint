@@ -5,6 +5,10 @@ import { authenticate } from "../shopify.server";
 import { listWords, removeWord, addWord } from "../lib/dictionary.server";
 import { getIgnores, removeIgnore } from "../lib/ignores.server";
 import { getSettings, saveSettings } from "../lib/settings.server";
+import { RULE_CATALOG } from "../lib/rules.server";
+import { refreshAfter } from "../lib/rescan.server";
+import { CATEGORIES } from "../lib/categories";
+import { PASS_LABELS } from "../lib/checkLabels";
 
 export async function loader({ request }) {
   const { session } = await authenticate.admin(request);
@@ -13,11 +17,11 @@ export async function loader({ request }) {
     getIgnores(session.shop),
     getSettings(session.shop),
   ]);
-  return { words, ignores: ignores.map((i) => ({ ...i, createdAt: i.createdAt.toISOString() })), settings };
+  return { words, ignores: ignores.map((i) => ({ ...i, createdAt: i.createdAt.toISOString() })), settings, rules: RULE_CATALOG };
 }
 
 export async function action({ request }) {
-  const { session } = await authenticate.admin(request);
+  const { admin, session } = await authenticate.admin(request);
   const form = await request.formData();
   const intent = form.get("intent");
   if (intent === "removeWord") await removeWord(session.shop, form.get("id"));
@@ -30,19 +34,40 @@ export async function action({ request }) {
       next.vendorWhitelist = String(form.get("vendorWhitelist")).split("\n").map((v) => v.trim()).filter(Boolean);
     }
     if (form.has("metafieldRules")) next.metafieldRules = JSON.parse(form.get("metafieldRules"));
+    if (form.has("disabledRules")) next.disabledRules = JSON.parse(form.get("disabledRules"));
     await saveSettings(session.shop, next);
+    // Findings of a check that was just turned off disappear from the stored scan right away.
+    if (form.has("disabledRules")) await refreshAfter(admin.graphql, session.shop, { kind: "settings" });
   }
   return { ok: true };
 }
 
 export default function Settings() {
-  const { words, ignores, settings } = useLoaderData();
+  const { words, ignores, settings, rules: checks } = useLoaderData();
   const fetcher = useFetcher();
   const busy = fetcher.state !== "idle";
   const inputRef = useRef(null);
 
   function submit(payload) {
     fetcher.submit(payload, { method: "post" });
+  }
+
+  // Ids of checks turned off. Kept locally so switches respond at once; every change is saved.
+  const [off, setOff] = useState(() => new Set(settings.disabledRules || []));
+  function saveOff(next) {
+    setOff(next);
+    submit({ intent: "saveSettings", disabledRules: JSON.stringify([...next]) });
+  }
+  function toggleCheck(id, on) {
+    const next = new Set(off);
+    if (on) next.delete(id);
+    else next.add(id);
+    saveOff(next);
+  }
+  function setCategory(list, on) {
+    const next = new Set(off);
+    for (const r of list) if (on) next.delete(r.id); else next.add(r.id);
+    saveOff(next);
   }
 
   const [whitelist, setWhitelist] = useState(settings.vendorWhitelist.join("\n"));
@@ -73,6 +98,47 @@ export default function Settings() {
 
   return (
     <s-page heading="Settings">
+      <s-section heading="Checks">
+        <s-stack gap="large">
+          <s-paragraph>
+            Turn off any check you do not want in your scans. Turning a check off removes its findings right away;
+            turning it back on takes effect on the next scan.
+          </s-paragraph>
+          {CATEGORIES.map((cat) => {
+            const list = checks.filter((r) => r.category === cat.id);
+            if (!list.length) return null;
+            const onCount = list.filter((r) => !off.has(r.id)).length;
+            return (
+              <s-stack key={cat.id} gap="small">
+                <s-stack direction="inline" gap="base" alignItems="center" justifyContent="space-between">
+                  <s-text type="strong">{cat.label}</s-text>
+                  <s-stack direction="inline" gap="small" alignItems="center">
+                    <s-text color="subdued" fontVariantNumeric="tabular-nums">{onCount} of {list.length} on</s-text>
+                    <s-button variant="tertiary" onClick={() => setCategory(list, onCount < list.length)}>
+                      {onCount < list.length ? "Turn all on" : "Turn all off"}
+                    </s-button>
+                  </s-stack>
+                </s-stack>
+                {/* Two columns when the section is wide enough; the switch's details line is the check's passing state. */}
+                <s-query-container>
+                  <s-grid gridTemplateColumns="@container (inline-size > 720px) 1fr 1fr, 1fr" gap="small">
+                    {list.map((r) => (
+                      <s-switch
+                        key={r.id}
+                        label={r.label}
+                        details={PASS_LABELS[r.id]}
+                        checked={!off.has(r.id) || undefined}
+                        onInput={(e) => toggleCheck(r.id, e.target.checked)}
+                      ></s-switch>
+                    ))}
+                  </s-grid>
+                </s-query-container>
+              </s-stack>
+            );
+          })}
+        </s-stack>
+      </s-section>
+
       <s-section heading="Approved vendors">
         <s-stack gap="base">
           <s-paragraph>
