@@ -37,7 +37,6 @@ export const PASS_LABELS = {
   same_alt_text: "Alt text differs between a product's images",
   small_image: "Images are at least 800px",
   image_ratio_inconsistent: "Image shapes are consistent",
-  first_image_banner: "First images aren't banner shaped",
 
   // Inventory
   missing_sku: "Every variant has a SKU",
@@ -57,7 +56,6 @@ export const PASS_LABELS = {
   price_below_cost: "No prices below cost",
   price_outlier: "Variant prices are in line with each other",
   stale_sale: "No sales older than 90 days",
-  odd_cents: "Price endings are consistent",
 
   // Variants
   option_values_inconsistent: "Option values are spelled consistently",
@@ -66,7 +64,6 @@ export const PASS_LABELS = {
   // Status
   draft_stale: "No drafts older than 30 days",
   not_published: "Active products are visible on your store",
-  untouched_year: "Every product was updated in the last year",
 
   // Product organization
   no_collection: "Every product is in a collection",
@@ -85,7 +82,6 @@ export const PASS_LABELS = {
   metafield_malformed: "Metafield values are well formed",
 
   // Batch A additions
-  title_too_short: "Titles have at least two words",
   pasted_formatting: "Descriptions are free of pasted formatting",
   description_img_no_alt: "Images in descriptions have alt text",
   dead_link: "Links in descriptions go somewhere",

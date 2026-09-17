@@ -1,23 +1,30 @@
 import prisma from "../db.server";
+import { DEFAULT_PRESET, PRESET_IDS, disabledForPreset } from "./checkGroups";
 
-// disabledRules: ids of checks the merchant turned off in Settings (see rules.server.js).
-const DEFAULTS = { vendorWhitelist: [], metafieldRules: [], disabledRules: [] };
+// Which checks run is decided by a preset (see checkGroups.js); "custom" uses the merchant's own
+// list, stored in disabledRules. getSettings resolves that into `disabledRules`, the effective set,
+// which is what the rules and the scan summary read.
+const DEFAULTS = { vendorWhitelist: [], metafieldRules: [], preset: DEFAULT_PRESET, customDisabled: [] };
 
 export async function getSettings(shop) {
   const row = await prisma.setting.findUnique({ where: { shop } });
-  if (!row) return { ...DEFAULTS };
-  return {
-    vendorWhitelist: safeParse(row.vendorWhitelist, []),
-    metafieldRules: safeParse(row.metafieldRules, []),
-    disabledRules: safeParse(row.disabledRules, []),
-  };
+  const base = row
+    ? {
+        vendorWhitelist: safeParse(row.vendorWhitelist, []),
+        metafieldRules: safeParse(row.metafieldRules, []),
+        preset: PRESET_IDS.has(row.preset) ? row.preset : DEFAULT_PRESET,
+        customDisabled: safeParse(row.disabledRules, []),
+      }
+    : { ...DEFAULTS };
+  return { ...base, disabledRules: disabledForPreset(base.preset, base.customDisabled) };
 }
 
 export async function saveSettings(shop, settings) {
   const data = {
     vendorWhitelist: JSON.stringify(settings.vendorWhitelist || []),
     metafieldRules: JSON.stringify(settings.metafieldRules || []),
-    disabledRules: JSON.stringify(settings.disabledRules || []),
+    preset: PRESET_IDS.has(settings.preset) ? settings.preset : DEFAULT_PRESET,
+    disabledRules: JSON.stringify(settings.customDisabled || []),
   };
   await prisma.setting.upsert({ where: { shop }, update: data, create: { shop, ...data } });
 }

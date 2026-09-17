@@ -495,7 +495,7 @@ function SeverityBadges({ rules }) {
 // The checks that ran clean for one category, in a tinted panel beside its table, so the merchant
 // sees what was checked and not only what failed. Checks that need a setting that is empty are
 // listed as not set up instead of passed.
-function PassedChecks({ passed, skipped, off, failing }) {
+function PassedChecks({ passed, skipped, off, failing, expanded }) {
   const total = passed.length + failing;
   return (
     // Polaris has no tinted-background prop, so the tint is an inline style; the card grid stretches
@@ -509,9 +509,9 @@ function PassedChecks({ passed, skipped, off, failing }) {
               {total === 0 ? "No checks running" : `${passed.length} of ${total} ${total === 1 ? "check" : "checks"} passed`}
             </s-text>
           </s-stack>
-          {passed.length > 0 ? (
+          {expanded && passed.length > 0 ? (
             // Numbered, with each check's wording when it passes ("Every product has an image"),
-            // not the problem it looks for.
+            // not the problem it looks for. Collapsed to the count unless the merchant asks to see them.
             <s-ordered-list>
               {passed.map((c) => (
                 <s-list-item key={c.ruleId}>
@@ -629,7 +629,7 @@ function CategoryFilter({ result, filter, onChange }) {
 // Severity / Action sit at the same x from card to card. The visible heading names the section (no
 // accessibilityLabel, which would add a second hidden heading to the outline). `checks` are this
 // category's non-failing checks; `showChecks` is false for scans saved before checks were recorded.
-function CategoryCard({ cat, rules, checks, showChecks, onSelect, busy }) {
+function CategoryCard({ cat, rules, checks, showChecks, showPassed, onSelect, busy }) {
   const total = rules.reduce((n, r) => n + r.count, 0);
   const passed = checks.filter((c) => c.status === "passed");
   const skipped = checks.filter((c) => c.status === "skipped");
@@ -664,7 +664,7 @@ function CategoryCard({ cat, rules, checks, showChecks, onSelect, busy }) {
           aside={<s-text color="subdued" fontVariantNumeric="tabular-nums">{rules.length ? `${total} findings` : "No findings"}</s-text>}
         />
       </div>
-      <CardBody table={table} panel={showChecks ? <PassedChecks passed={passed} skipped={skipped} off={off} failing={rules.length} /> : null} />
+      <CardBody table={table} panel={showChecks ? <PassedChecks passed={passed} skipped={skipped} off={off} failing={rules.length} expanded={showPassed} /> : null} />
     </s-section>
   );
 }
@@ -710,11 +710,31 @@ function RecentFixes({ fixes, onUndo, busy, showPanel }) {
   );
 }
 
+// Remembered per browser: whether the cards list every passed check or just the count.
+const SHOW_PASSED_KEY = "catalog-lint:show-passed";
+
 function Overview({ result, history, fixes, fixedWeek, onSelect, onUndo, busy }) {
   const [filter, setFilter] = useState(null);
+  const [showPassed, setShowPassed] = useState(false);
   const checks = result.checks || [];
   const showChecks = checks.length > 0;
   const checksOn = checks.filter((c) => c.status !== "off").length;
+
+  useEffect(() => {
+    try {
+      setShowPassed(window.localStorage.getItem(SHOW_PASSED_KEY) === "1");
+    } catch {
+      // Storage can be unavailable; the default (collapsed) is fine.
+    }
+  }, []);
+  function toggleShowPassed(on) {
+    setShowPassed(on);
+    try {
+      window.localStorage.setItem(SHOW_PASSED_KEY, on ? "1" : "0");
+    } catch {
+      // Same: a preference that cannot be stored just lasts the page view.
+    }
+  }
 
   return (
     <>
@@ -733,7 +753,12 @@ function Overview({ result, history, fixes, fixedWeek, onSelect, onUndo, busy })
         <StartHere result={result} onSelect={onSelect} busy={busy} showPanel={showChecks} />
       )}
 
-      <CategoryFilter result={result} filter={filter} onChange={setFilter} />
+      <s-stack direction="inline" gap="base" alignItems="center" justifyContent="space-between">
+        <CategoryFilter result={result} filter={filter} onChange={setFilter} />
+        {showChecks ? (
+          <s-switch label="Show passed checks" checked={showPassed || undefined} onInput={(e) => toggleShowPassed(e.target.checked)}></s-switch>
+        ) : null}
+      </s-stack>
 
       {/* One card per product-page section with anything to show: findings, or checks that ran
           clean. Scans saved before checks were recorded only have findings. */}
@@ -742,7 +767,7 @@ function Overview({ result, history, fixes, fixedWeek, onSelect, onUndo, busy })
         const rules = result.rules.filter((r) => r.category === cat.id);
         const catChecks = checks.filter((c) => c.category === cat.id && c.status !== "failed");
         if (rules.length === 0 && catChecks.length === 0) return null;
-        return <CategoryCard key={cat.id} cat={cat} rules={rules} checks={catChecks} showChecks={showChecks} onSelect={onSelect} busy={busy} />;
+        return <CategoryCard key={cat.id} cat={cat} rules={rules} checks={catChecks} showChecks={showChecks} showPassed={showPassed} onSelect={onSelect} busy={busy} />;
       })}
 
       {filter ? null : <RecentFixes fixes={fixes} onUndo={onUndo} busy={busy} showPanel={showChecks} />}

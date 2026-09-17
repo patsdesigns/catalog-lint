@@ -7,8 +7,8 @@ import { getIgnores, removeIgnore } from "../lib/ignores.server";
 import { getSettings, saveSettings } from "../lib/settings.server";
 import { RULE_CATALOG } from "../lib/rules.server";
 import { refreshAfter } from "../lib/rescan.server";
-import { CATEGORIES } from "../lib/categories";
 import { PASS_LABELS } from "../lib/checkLabels";
+import { FAMILIES, TIERS, PRESETS, disabledForPreset } from "../lib/checkGroups";
 
 export async function loader({ request }) {
   const { session } = await authenticate.admin(request);
@@ -34,13 +34,20 @@ export async function action({ request }) {
       next.vendorWhitelist = String(form.get("vendorWhitelist")).split("\n").map((v) => v.trim()).filter(Boolean);
     }
     if (form.has("metafieldRules")) next.metafieldRules = JSON.parse(form.get("metafieldRules"));
-    if (form.has("disabledRules")) next.disabledRules = JSON.parse(form.get("disabledRules"));
+    if (form.has("preset")) next.preset = form.get("preset");
+    // Flipping any single check means the merchant has their own list.
+    if (form.has("disabledRules")) {
+      next.customDisabled = JSON.parse(form.get("disabledRules"));
+      next.preset = "custom";
+    }
     await saveSettings(session.shop, next);
-    // Findings of a check that was just turned off disappear from the stored scan right away.
-    if (form.has("disabledRules")) await refreshAfter(admin.graphql, session.shop, { kind: "settings" });
+    // Findings of checks that were just turned off disappear from the stored scan right away.
+    if (form.has("preset") || form.has("disabledRules")) await refreshAfter(admin.graphql, session.shop, { kind: "settings" });
   }
   return { ok: true };
 }
+
+const FAMILY_COLUMNS = "@container (inline-size > 720px) 1fr 1fr, 1fr";
 
 export default function Settings() {
   const { words, ignores, settings, rules: checks } = useLoaderData();
@@ -52,10 +59,30 @@ export default function Settings() {
     fetcher.submit(payload, { method: "post" });
   }
 
-  // Ids of checks turned off. Kept locally so switches respond at once; every change is saved.
+  // Which checks run. `off` is the effective set of disabled ids; kept locally so switches respond
+  // at once, and every change is saved. Flipping one switch turns the preset into Custom.
+  const [preset, setPreset] = useState(settings.preset);
   const [off, setOff] = useState(() => new Set(settings.disabledRules || []));
+  const [expanded, setExpanded] = useState(() => new Set());
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLowerCase();
+  const matches = (r) => !q || r.label.toLowerCase().includes(q) || (PASS_LABELS[r.id] || "").toLowerCase().includes(q);
+  const visibleCount = checks.filter(matches).length;
+
+  function choosePreset(id) {
+    if (!id || id === preset) return;
+    setPreset(id);
+    if (id === "custom") {
+      // Custom starts from whatever runs today, so nothing changes until a switch is flipped.
+      submit({ intent: "saveSettings", preset: "custom", disabledRules: JSON.stringify([...off]) });
+      return;
+    }
+    setOff(new Set(disabledForPreset(id)));
+    submit({ intent: "saveSettings", preset: id });
+  }
   function saveOff(next) {
     setOff(next);
+    setPreset("custom");
     submit({ intent: "saveSettings", disabledRules: JSON.stringify([...next]) });
   }
   function toggleCheck(id, on) {
@@ -64,17 +91,19 @@ export default function Settings() {
     else next.add(id);
     saveOff(next);
   }
-  function setCategory(list, on) {
+  function setMany(list, on) {
     const next = new Set(off);
     for (const r of list) if (on) next.delete(r.id); else next.add(r.id);
     saveOff(next);
   }
-
-  // Narrows the list of switches; matches the check's problem wording or its passing wording.
-  const [query, setQuery] = useState("");
-  const q = query.trim().toLowerCase();
-  const matches = (r) => !q || r.label.toLowerCase().includes(q) || (PASS_LABELS[r.id] || "").toLowerCase().includes(q);
-  const visibleCount = checks.filter(matches).length;
+  function toggleExpanded(id) {
+    const next = new Set(expanded);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setExpanded(next);
+  }
+  const runningCount = checks.length - off.size;
+  const presetCount = (id) => (id === "custom" ? runningCount : checks.length - disabledForPreset(id).length);
 
   const [whitelist, setWhitelist] = useState(settings.vendorWhitelist.join("\n"));
   const [rules, setRules] = useState(settings.metafieldRules);
@@ -104,53 +133,83 @@ export default function Settings() {
 
   return (
     <s-page heading="Settings">
-      <s-section heading={`Checks (${checks.length - off.size} of ${checks.length} on)`}>
+      <s-section heading={`Checks (${runningCount} of ${checks.length} running)`}>
         <s-stack gap="large">
-          <s-paragraph>
-            Turn off any check you do not want in your scans. Turning a check off removes its findings right away;
-            turning it back on takes effect on the next scan.
-          </s-paragraph>
-          <s-search-field
-            label="Filter checks"
-            labelAccessibilityVisibility="exclusive"
-            placeholder="Filter checks, for example barcode or alt text"
-            value={query}
-            onInput={(e) => setQuery(e.target.value)}
-          ></s-search-field>
-          {q && visibleCount === 0 ? <s-text color="subdued">{`No checks match "${query.trim()}".`}</s-text> : null}
-          {CATEGORIES.map((cat) => {
-            const all = checks.filter((r) => r.category === cat.id);
-            const list = all.filter(matches);
-            if (!list.length) return null;
-            const onCount = all.filter((r) => !off.has(r.id)).length;
-            return (
-              <s-stack key={cat.id} gap="small">
-                <s-stack direction="inline" gap="base" alignItems="center" justifyContent="space-between">
-                  <s-text type="strong">{cat.label}</s-text>
-                  <s-stack direction="inline" gap="small" alignItems="center">
-                    <s-text color="subdued" fontVariantNumeric="tabular-nums">{onCount} of {all.length} on</s-text>
-                    <s-button variant="tertiary" onClick={() => setCategory(all, onCount < all.length)}>
-                      {onCount < all.length ? "Turn all on" : "Turn all off"}
-                    </s-button>
-                  </s-stack>
-                </s-stack>
-                {/* Two columns when the section is wide enough; the switch's details line is the check's passing state. */}
-                <s-query-container>
-                  <s-grid gridTemplateColumns="@container (inline-size > 720px) 1fr 1fr, 1fr" gap="small">
-                    {list.map((r) => (
+          <s-stack gap="small">
+            <s-paragraph>
+              Pick how much to check. Turning a check off removes its findings right away; turning one back on takes
+              effect on the next scan.
+            </s-paragraph>
+            {/* Each choice's `selected` is a boolean attribute, so a false value is left off entirely. */}
+            <s-choice-list label="Preset" labelAccessibilityVisibility="exclusive" onInput={(e) => choosePreset(e.target.values?.[0] ?? e.target.value)}>
+              {PRESETS.map((p) => (
+                <s-choice key={p.id} value={p.id} selected={p.id === preset || undefined} details={`${p.description} ${presetCount(p.id)} checks.`}>
+                  {p.label}
+                </s-choice>
+              ))}
+            </s-choice-list>
+          </s-stack>
+
+          <s-stack gap="small">
+            <s-stack direction="inline" gap="base" alignItems="center" justifyContent="space-between">
+              <s-text type="strong">Checks by family</s-text>
+              {preset !== "custom" ? <s-text color="subdued">Flipping any switch turns the preset into Custom.</s-text> : null}
+            </s-stack>
+            <s-search-field
+              label="Filter checks"
+              labelAccessibilityVisibility="exclusive"
+              placeholder="Filter checks, for example barcode or alt text"
+              value={query}
+              onInput={(e) => setQuery(e.target.value)}
+            ></s-search-field>
+            {q && visibleCount === 0 ? <s-text color="subdued">{`No checks match "${query.trim()}".`}</s-text> : null}
+            {FAMILIES.map((fam) => {
+              const all = checks.filter((r) => r.family === fam.id);
+              const list = all.filter(matches);
+              if (!all.length || (q && !list.length)) return null;
+              const onCount = all.filter((r) => !off.has(r.id)).length;
+              const open = Boolean(q) || expanded.has(fam.id);
+              return (
+                <s-box key={fam.id} padding="small" paddingInline="base" border="base" borderRadius="base">
+                  <s-stack gap="small">
+                    <s-stack direction="inline" gap="base" alignItems="center" justifyContent="space-between">
+                      {/* The family switch is on when any of its checks run; turning it off turns them all off. */}
                       <s-switch
-                        key={r.id}
-                        label={r.label}
-                        details={PASS_LABELS[r.id]}
-                        checked={!off.has(r.id) || undefined}
-                        onInput={(e) => toggleCheck(r.id, e.target.checked)}
+                        label={fam.label}
+                        details={onCount === all.length ? `All ${all.length} on` : onCount === 0 ? `All ${all.length} off` : `${onCount} of ${all.length} on`}
+                        checked={onCount > 0 || undefined}
+                        onInput={(e) => setMany(all, e.target.checked)}
                       ></s-switch>
-                    ))}
-                  </s-grid>
-                </s-query-container>
-              </s-stack>
-            );
-          })}
+                      <s-button
+                        variant="tertiary"
+                        icon={open ? "chevron-up" : "chevron-down"}
+                        onClick={() => toggleExpanded(fam.id)}
+                        accessibilityLabel={`${open ? "Hide" : "Show"} the ${all.length} ${fam.label} checks`}
+                      >
+                        {open ? "Hide" : `Show ${all.length}`}
+                      </s-button>
+                    </s-stack>
+                    {open ? (
+                      // Two columns when the section is wide enough; each switch's details line is its tier and passing state.
+                      <s-query-container>
+                        <s-grid gridTemplateColumns={FAMILY_COLUMNS} gap="small">
+                          {list.map((r) => (
+                            <s-switch
+                              key={r.id}
+                              label={r.label}
+                              details={`${TIERS[r.tier]?.label || "Recommended"} · ${PASS_LABELS[r.id] || ""}`}
+                              checked={!off.has(r.id) || undefined}
+                              onInput={(e) => toggleCheck(r.id, e.target.checked)}
+                            ></s-switch>
+                          ))}
+                        </s-grid>
+                      </s-query-container>
+                    ) : null}
+                  </s-stack>
+                </s-box>
+              );
+            })}
+          </s-stack>
         </s-stack>
       </s-section>
 

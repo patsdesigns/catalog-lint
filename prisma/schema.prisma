@@ -87,6 +87,7 @@ model Setting {
   vendorWhitelist String   @default("[]")
   metafieldRules  String   @default("[]")
   disabledRules   String   @default("[]")
+  preset          String   @default("recommended")
   updatedAt       DateTime @updatedAt
 }
 

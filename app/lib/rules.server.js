@@ -3,6 +3,7 @@
 // ctx carries the speller, the store dictionary, and store settings (vendor whitelist, metafield rules).
 
 import { findMisspellings, textFields } from "./spelling.server";
+import { RULE_META } from "./checkGroups";
 
 export { CATEGORIES } from "./categories";
 
@@ -41,9 +42,6 @@ function median(nums) {
   const a = [...nums].sort((x, y) => x - y);
   const m = Math.floor(a.length / 2);
   return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
-}
-function cents(price) {
-  return Math.round((Number(price) % 1) * 100);
 }
 // GTIN-8/12/13/14 check digit (UPC and EAN are GTINs). Returns null for other formats: no opinion.
 function gtinValid(code) {
@@ -302,13 +300,6 @@ export const PRODUCT_RULES = [
       return max / min > 1.25 ? [finding(this, p, { detail: `${ratios.length} images, ratios from ${min.toFixed(2)} to ${max.toFixed(2)}` })] : [];
     },
   },
-  {
-    id: "first_image_banner", category: "media", label: "First image is banner shaped", severity: "low",
-    check(p) {
-      const i = p.images[0];
-      return i && i.width && i.height && i.width / i.height > 2 ? [finding(this, p, { detail: `${i.width} x ${i.height}` })] : [];
-    },
-  },
 
   // Variants
   {
@@ -448,13 +439,6 @@ export const PRODUCT_RULES = [
     check(p) {
       return p.variants.filter((v) => v.tracked && v.locations === 0)
         .map((v) => finding(this, p, { variantId: v.id, detail: v.title }));
-    },
-  },
-  {
-    id: "untouched_year", category: "status", label: "Not updated in over a year", severity: "low",
-    check(p) {
-      const age = (Date.now() - new Date(p.updatedAt).getTime()) / DAY;
-      return p.status === "ACTIVE" && age > 365 ? [finding(this, p, { detail: `${Math.round(age / 30)} months` })] : [];
     },
   },
 
@@ -614,19 +598,6 @@ export const CATALOG_RULES = [
 
 CATALOG_RULES.push(
   {
-    id: "odd_cents", category: "pricing", label: "Price ending differs from the rest of the catalog", severity: "low",
-    check(products) {
-      const all = [];
-      for (const p of products) for (const v of p.variants) if (Number(v.price) > 0) all.push({ p, v, c: cents(v.price) });
-      if (all.length < 20) return [];
-      const common = new Set([0, 95, 99]);
-      const share = all.filter((x) => common.has(x.c)).length / all.length;
-      if (share < 0.8) return [];
-      return all.filter((x) => !common.has(x.c)).map(({ p, v }) =>
-        finding(this, p, { variantId: v.id, detail: `${v.title}: ${v.price}`, edit: variantEdit(v, "price", String(v.price), (Math.floor(Number(v.price)) + 0.99).toFixed(2)) }));
-    },
-  },
-  {
     id: "seo_title_competing", category: "seo", label: "Two products share an SEO title", severity: "medium",
     check(products) {
       const by = new Map();
@@ -693,13 +664,6 @@ CATALOG_RULES.push(
 
 PRODUCT_RULES.push(
   // Titles and copy
-  {
-    id: "title_too_short", category: "description", label: "Title is very short", severity: "low",
-    check(p) {
-      const t = p.title.trim();
-      return t && (wordCount(t) < 2 || t.length < 8) ? [finding(this, p, { detail: `"${t}"`, edit: productEdit("title", p.title, p.title) })] : [];
-    },
-  },
   {
     id: "pasted_formatting", category: "description", label: "Description has pasted formatting", severity: "low",
     check(p) {
@@ -926,8 +890,11 @@ CATALOG_RULES.push(
 
 export const ALL_RULES = [...PRODUCT_RULES, ...CATALOG_RULES];
 
-// What the Settings page needs to offer a switch per check.
-export const RULE_CATALOG = ALL_RULES.map((r) => ({ id: r.id, label: r.label, category: r.category, severity: r.severity }));
+// What the Settings page needs to offer a switch per check: the rule plus its family and tier.
+export const RULE_CATALOG = ALL_RULES.map((r) => ({
+  id: r.id, label: r.label, category: r.category, severity: r.severity,
+  family: RULE_META[r.id]?.family || "other", tier: RULE_META[r.id]?.tier || "recommended",
+}));
 
 // The rules the merchant has not turned off in Settings (settings.disabledRules).
 function enabled(rules, ctx) {
