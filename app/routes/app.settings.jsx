@@ -70,6 +70,12 @@ export default function Settings() {
     saveOff(next);
   }
 
+  // Narrows the list of switches; matches the check's problem wording or its passing wording.
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLowerCase();
+  const matches = (r) => !q || r.label.toLowerCase().includes(q) || (PASS_LABELS[r.id] || "").toLowerCase().includes(q);
+  const visibleCount = checks.filter(matches).length;
+
   const [whitelist, setWhitelist] = useState(settings.vendorWhitelist.join("\n"));
   const [rules, setRules] = useState(settings.metafieldRules);
   const [draft, setDraft] = useState({ key: "", productType: "", pattern: "" });
@@ -98,24 +104,33 @@ export default function Settings() {
 
   return (
     <s-page heading="Settings">
-      <s-section heading="Checks">
+      <s-section heading={`Checks (${checks.length - off.size} of ${checks.length} on)`}>
         <s-stack gap="large">
           <s-paragraph>
             Turn off any check you do not want in your scans. Turning a check off removes its findings right away;
             turning it back on takes effect on the next scan.
           </s-paragraph>
+          <s-search-field
+            label="Filter checks"
+            labelAccessibilityVisibility="exclusive"
+            placeholder="Filter checks, for example barcode or alt text"
+            value={query}
+            onInput={(e) => setQuery(e.target.value)}
+          ></s-search-field>
+          {q && visibleCount === 0 ? <s-text color="subdued">{`No checks match "${query.trim()}".`}</s-text> : null}
           {CATEGORIES.map((cat) => {
-            const list = checks.filter((r) => r.category === cat.id);
+            const all = checks.filter((r) => r.category === cat.id);
+            const list = all.filter(matches);
             if (!list.length) return null;
-            const onCount = list.filter((r) => !off.has(r.id)).length;
+            const onCount = all.filter((r) => !off.has(r.id)).length;
             return (
               <s-stack key={cat.id} gap="small">
                 <s-stack direction="inline" gap="base" alignItems="center" justifyContent="space-between">
                   <s-text type="strong">{cat.label}</s-text>
                   <s-stack direction="inline" gap="small" alignItems="center">
-                    <s-text color="subdued" fontVariantNumeric="tabular-nums">{onCount} of {list.length} on</s-text>
-                    <s-button variant="tertiary" onClick={() => setCategory(list, onCount < list.length)}>
-                      {onCount < list.length ? "Turn all on" : "Turn all off"}
+                    <s-text color="subdued" fontVariantNumeric="tabular-nums">{onCount} of {all.length} on</s-text>
+                    <s-button variant="tertiary" onClick={() => setCategory(all, onCount < all.length)}>
+                      {onCount < all.length ? "Turn all on" : "Turn all off"}
                     </s-button>
                   </s-stack>
                 </s-stack>
@@ -186,7 +201,7 @@ export default function Settings() {
         </s-stack>
       </s-section>
 
-      <s-section heading={`Dictionary (${words.length})`}>
+      <s-section slot="aside" heading={`Dictionary (${words.length})`}>
         <s-stack gap="base">
           <s-paragraph>
             Words here are never flagged as misspellings. Brand names, part codes, and
@@ -216,7 +231,7 @@ export default function Settings() {
         </s-stack>
       </s-section>
 
-      <s-section heading={`Ignored findings (${ignores.length})`}>
+      <s-section slot="aside" heading={`Ignored findings (${ignores.length})`}>
         <s-stack gap="small">
           <s-paragraph>Findings you chose to ignore. Restore one to see it again on the next scan.</s-paragraph>
           {ignores.map((i) => (
