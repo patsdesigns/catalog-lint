@@ -6,7 +6,7 @@
 // file is ready, so a 50k-product catalog scans without request timeouts or API rate limits.
 
 import { runRules, runProductRules, CATALOG_RULE_IDS, summarize, summarizeFindings } from "./rules.server";
-import { loadSpeller, seedWords } from "./spelling.server";
+import { loadSpeller, seedWords, catalogNames } from "./spelling.server";
 import { getWords } from "./dictionary.server";
 import { getIgnoreKeys, ignoreKey } from "./ignores.server";
 import { getSettings } from "./settings.server";
@@ -279,12 +279,14 @@ async function scanContext(graphql, shop) {
 // Runs every rule over an already-read catalog and builds the stored scan result.
 export async function scanProducts(products, graphql, shop, startedAt = Date.now()) {
   const { speller, storeWords, ignored, settings, locale } = await scanContext(graphql, shop);
-  const ctx = { speller, customWords: seedWords(products, storeWords), settings, locale };
+  const names = catalogNames(products, speller);
+  const ctx = { speller, customWords: seedWords(products, storeWords), nameWords: new Set(names), settings, locale };
   const all = runRules(products, ctx);
   const findings = all.filter((f) => !ignored.has(ignoreKey(f)));
   return {
     ...summarize(products, findings, settings),
     findings,
+    names,
     ignoredCount: all.length - findings.length,
     scannedAt: new Date().toISOString(),
     durationMs: Date.now() - startedAt,
@@ -303,7 +305,8 @@ export async function recheckProducts(graphql, shop, latest, ids, dropRuleId = n
   const started = Date.now();
   const products = await fetchProductsByIds(graphql, ids);
   const { speller, storeWords, ignored, settings, locale } = await scanContext(graphql, shop);
-  const ctx = { speller, customWords: seedWords(products, storeWords), settings, locale };
+  const names = latest.names || [];
+  const ctx = { speller, customWords: seedWords(products, storeWords), nameWords: new Set(names), settings, locale };
   const fresh = runProductRules(products, ctx).filter((f) => !ignored.has(ignoreKey(f)));
   const touched = new Set(ids);
   const kept = latest.findings.filter(
@@ -314,6 +317,7 @@ export async function recheckProducts(graphql, shop, latest, ids, dropRuleId = n
   return {
     ...summarizeFindings(total, findings, settings),
     findings,
+    names,
     ignoredCount: latest.ignoredCount || 0,
     scannedAt: new Date().toISOString(),
     durationMs: Date.now() - started,

@@ -112,6 +112,7 @@ function withFindings(latest, findings, settings, ignoredDelta = 0) {
   return {
     ...summarizeFindings(latest.total, findings, settings),
     findings,
+    names: latest.names || [],
     ignoredCount: (latest.ignoredCount || 0) + ignoredDelta,
     scannedAt: new Date().toISOString(),
     durationMs: 0,

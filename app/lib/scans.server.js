@@ -14,6 +14,7 @@ export async function saveScan(shop, result) {
       rules: JSON.stringify(result.rules),
       findings: JSON.stringify(result.findings),
       checks: JSON.stringify(result.checks || []),
+      names: JSON.stringify(result.names || []),
     },
   });
   return toResult(row);
@@ -61,6 +62,7 @@ function toResult(row) {
     rules: JSON.parse(row.rules),
     findings: JSON.parse(row.findings),
     checks: JSON.parse(row.checks || "[]"), // scans saved before checks were recorded have none
+    names: JSON.parse(row.names || "[]"), // catalog names the title spell check trusts
     scannedAt: row.createdAt.toISOString(),
   };
 }
