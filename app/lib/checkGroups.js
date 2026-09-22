@@ -157,7 +157,7 @@ export const PRESETS = [
   { id: "everything", label: "Everything", description: "Adds the house-style consistency checks." },
   { id: "custom", label: "Custom", description: "Pick checks one by one." },
 ];
-export const DEFAULT_PRESET = "recommended";
+export const DEFAULT_PRESET = "everything"; // every check on until the merchant turns some off
 export const PRESET_IDS = new Set(PRESETS.map((p) => p.id));
 
 // The rule ids a preset turns off. "custom" is the merchant's own list.

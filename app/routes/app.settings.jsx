@@ -8,7 +8,7 @@ import { getSettings, saveSettings } from "../lib/settings.server";
 import { RULE_CATALOG } from "../lib/rules.server";
 import { refreshAfter } from "../lib/rescan.server";
 import { PASS_LABELS } from "../lib/checkLabels";
-import { FAMILIES, TIERS, PRESETS, disabledForPreset } from "../lib/checkGroups";
+import { FAMILIES, TIERS } from "../lib/checkGroups";
 import { currentPlan } from "../lib/billing.server";
 import { planFor } from "../lib/plans";
 
@@ -79,9 +79,8 @@ export default function Settings() {
     fetcher.submit(payload, { method: "post" });
   }
 
-  // Which checks run. `off` is the effective set of disabled ids; kept locally so switches respond
-  // at once, and every change is saved. Flipping one switch turns the preset into Custom.
-  const [preset, setPreset] = useState(settings.preset);
+  // Which checks run. `off` is the set of disabled ids; kept locally so switches respond at once,
+  // and every change is saved.
   const [off, setOff] = useState(() => new Set(settings.disabledRules || []));
   const [expanded, setExpanded] = useState(() => new Set());
   const [query, setQuery] = useState("");
@@ -89,20 +88,8 @@ export default function Settings() {
   const matches = (r) => !q || r.label.toLowerCase().includes(q) || (PASS_LABELS[r.id] || "").toLowerCase().includes(q);
   const visibleCount = checks.filter(matches).length;
 
-  function choosePreset(id) {
-    if (!id || id === preset) return;
-    setPreset(id);
-    if (id === "custom") {
-      // Custom starts from whatever runs today, so nothing changes until a switch is flipped.
-      submit({ intent: "saveSettings", preset: "custom", disabledRules: JSON.stringify([...off]) });
-      return;
-    }
-    setOff(new Set(disabledForPreset(id)));
-    submit({ intent: "saveSettings", preset: id });
-  }
   function saveOff(next) {
     setOff(next);
-    setPreset("custom");
     submit({ intent: "saveSettings", disabledRules: JSON.stringify([...next]) });
   }
   function toggleCheck(id, on) {
@@ -123,7 +110,6 @@ export default function Settings() {
     setExpanded(next);
   }
   const runningCount = checks.length - off.size;
-  const presetCount = (id) => (id === "custom" ? runningCount : checks.length - disabledForPreset(id).length);
 
   const [whitelist, setWhitelist] = useState(settings.vendorWhitelist.join("\n"));
   const [rules, setRules] = useState(settings.metafieldRules);
@@ -151,25 +137,14 @@ export default function Settings() {
       ) : null}
       <s-section heading={`Checks (${runningCount} of ${checks.length} running)`}>
         <s-stack gap="large">
-          <s-stack gap="small">
-            <s-paragraph>
-              Pick how much to check. Turning a check off removes its findings right away; turning one back on takes
-              effect on the next scan.
-            </s-paragraph>
-            {/* Each choice's `selected` is a boolean attribute, so a false value is left off entirely. */}
-            <s-choice-list label="Preset" labelAccessibilityVisibility="exclusive" onInput={(e) => choosePreset(e.target.values?.[0] ?? e.target.value)}>
-              {PRESETS.map((p) => (
-                <s-choice key={p.id} value={p.id} selected={p.id === preset || undefined} details={`${p.description} ${presetCount(p.id)} checks.`}>
-                  {p.label}
-                </s-choice>
-              ))}
-            </s-choice-list>
-          </s-stack>
+          <s-paragraph>
+            Turn off any check you do not want. Turning a check off removes its findings right away; turning one back
+            on takes effect on the next scan.
+          </s-paragraph>
 
           <s-stack gap="small">
             <s-stack direction="inline" gap="base" alignItems="center" justifyContent="space-between">
               <s-text type="strong">Checks by family</s-text>
-              {preset !== "custom" ? <s-text color="subdued">Flipping any switch turns the preset into Custom.</s-text> : null}
             </s-stack>
             <s-search-field
               label="Filter checks"
