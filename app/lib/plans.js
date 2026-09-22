@@ -10,8 +10,6 @@ const NONE = {
   customRules: false,
   vendorWhitelist: false,
   scheduledScans: false,
-  emailDigest: false,
-  multiStore: false,
 };
 
 export const PLANS = [
@@ -45,7 +43,6 @@ export const PLANS = [
       customRules: true,
       vendorWhitelist: true,
       scheduledScans: true,
-      emailDigest: true,
     },
     extras: [],
   },
@@ -63,8 +60,6 @@ export const PLANS = [
       customRules: true,
       vendorWhitelist: true,
       scheduledScans: true,
-      emailDigest: true,
-      multiStore: true,
     },
     extras: ["Priority support"],
   },
@@ -82,8 +77,6 @@ export const FEATURE_LABELS = {
   customRules: "Custom metafield rules",
   vendorWhitelist: "Approved vendor list",
   scheduledScans: "Scheduled scans",
-  emailDigest: "Email digest",
-  multiStore: "Multiple stores",
 };
 
 export function planById(id) {
