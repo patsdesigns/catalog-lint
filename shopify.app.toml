@@ -3,7 +3,7 @@
 client_id = "a4108e281b2a36735a7df89a42fef412"
 application_url = "https://example.com"
 embedded = true
-name = "catalog-lint"
+name = "TidyUp"
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes

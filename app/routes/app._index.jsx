@@ -781,7 +781,7 @@ function Welcome({ checkCount, onScan, busy, scanning }) {
             {/* Polaris has no text-align prop, so the wrapping copy is centered by a plain div. */}
             <div style={{ textAlign: "center", maxWidth: "560px" }}>
               <s-paragraph color="subdued">
-                Catalog Lint runs {checkCount || "dozens of"} checks across every section of the product page and shows what to fix, one card
+                TidyUp runs {checkCount || "dozens of"} checks across every section of the product page and shows what to fix, one card
                 per section. Nothing changes until you choose to.
               </s-paragraph>
             </div>
@@ -1089,7 +1089,7 @@ export default function Index() {
   }
 
   return (
-    <s-page heading="Catalog Lint" inlineSize="large">
+    <s-page heading="TidyUp" inlineSize="large">
       <s-button slot="primary-action" variant="primary" onClick={runScan} loading={busy || undefined} disabled={scanning || undefined}>
         {scanning ? "Scanning…" : result ? "Scan again" : "Run scan"}
       </s-button>
