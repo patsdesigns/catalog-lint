@@ -7,9 +7,9 @@ const NONE = {
   export: false,
   dictionary: false,
   ignores: false,
+  newProductScans: false,
   customRules: false,
   vendorWhitelist: false,
-  scheduledScans: false,
 };
 
 export const PLANS = [
@@ -25,31 +25,14 @@ export const PLANS = [
     id: "quick_clean",
     name: "Quick Clean",
     price: 10,
-    productLimit: 500,
-    features: { ...NONE, inlineEdits: true, export: true, dictionary: true, ignores: true },
+    productLimit: null,
+    features: { ...NONE, inlineEdits: true, export: true, dictionary: true, ignores: true, newProductScans: true },
     extras: [],
   },
   {
     id: "deep_clean",
     name: "Deep Clean",
     price: 20,
-    productLimit: 1000,
-    features: {
-      ...NONE,
-      inlineEdits: true,
-      export: true,
-      dictionary: true,
-      ignores: true,
-      customRules: true,
-      vendorWhitelist: true,
-      scheduledScans: true,
-    },
-    extras: [],
-  },
-  {
-    id: "white_glove",
-    name: "White Glove",
-    price: 50,
     productLimit: null,
     features: {
       ...NONE,
@@ -57,9 +40,9 @@ export const PLANS = [
       export: true,
       dictionary: true,
       ignores: true,
+      newProductScans: true,
       customRules: true,
       vendorWhitelist: true,
-      scheduledScans: true,
     },
     extras: ["Priority support"],
   },
@@ -71,13 +54,16 @@ export const PAID_PLANS = PLANS.filter((p) => p.price > 0);
 // What each feature is called on the Plans page.
 export const FEATURE_LABELS = {
   inlineEdits: "Inline edits on issue pages",
-  export: "CSV export",
+  export: "Export issues (coming soon)",
   dictionary: "Spelling dictionary",
   ignores: "Ignore findings",
+  newProductScans: "Scan newly added products",
   customRules: "Custom metafield rules",
   vendorWhitelist: "Approved vendor list",
-  scheduledScans: "Scheduled scans",
 };
+
+// Features a plan includes but that are not built yet; the Plans page lists them last.
+export const COMING_SOON = new Set(["export"]);
 
 export function planById(id) {
   return PLANS.find((p) => p.id === id) || null;

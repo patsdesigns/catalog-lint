@@ -1,10 +1,10 @@
 import { useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
-import { PLANS, FEATURE_LABELS } from "../lib/plans";
+import { PLANS, FEATURE_LABELS, COMING_SOON } from "../lib/plans";
 import { BILLING_TEST, currentPlan } from "../lib/billing.server";
 
-// The four plans. Choosing a paid one sends the merchant to Shopify's approval screen and back;
+// The three plans. Choosing a paid one sends the merchant to Shopify's approval screen and back;
 // choosing Dust Off cancels the current subscription.
 
 export async function loader({ request }) {
@@ -39,11 +39,12 @@ export async function action({ request }) {
   }
 }
 
-const PLAN_COLUMNS = "@container (inline-size > 1000px) 1fr 1fr 1fr 1fr, (inline-size > 600px) and (inline-size <= 1000px) 1fr 1fr, 1fr";
+const PLAN_COLUMNS = "@container (inline-size > 900px) 1fr 1fr 1fr, (inline-size > 560px) and (inline-size <= 900px) 1fr 1fr, 1fr";
 const FEATURE_ORDER = Object.keys(FEATURE_LABELS);
 
 function PlanCard({ plan, current, busy, onChoose }) {
-  const included = FEATURE_ORDER.filter((key) => plan.features[key]);
+  const included = FEATURE_ORDER.filter((key) => plan.features[key] && !COMING_SOON.has(key));
+  const later = FEATURE_ORDER.filter((key) => plan.features[key] && COMING_SOON.has(key));
   return (
     <s-box padding="base" border="base" borderRadius="base">
       <s-stack gap="base">
@@ -62,6 +63,9 @@ function PlanCard({ plan, current, busy, onChoose }) {
           ))}
           {plan.extras.map((extra) => (
             <s-list-item key={extra}>{extra}</s-list-item>
+          ))}
+          {later.map((key) => (
+            <s-list-item key={key}>{FEATURE_LABELS[key]}</s-list-item>
           ))}
         </s-unordered-list>
         <s-button
