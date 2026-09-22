@@ -2,32 +2,40 @@
 // we recommend it), and a preset picks tiers. Kept free of server-only imports so the pages can
 // read it. Rule ids are the `id`s in rules.server.js.
 
+import { CATEGORIES } from "./categories";
+
 export const TIERS = {
   essential: { label: "Essential", description: "Stops products from selling or being found." },
   recommended: { label: "Recommended", description: "Quality, SEO and margin checks." },
   consistency: { label: "Consistency", description: "House-style rules: casing, one-off tags, image shapes." },
 };
 
-export const FAMILIES = [
-  { id: "title", label: "Title" },
-  { id: "description", label: "Description" },
-  { id: "spelling", label: "Spelling" },
-  { id: "seo", label: "SEO Title & Meta Description" },
-  { id: "images", label: "Images" },
-  { id: "alt", label: "Alt Text" },
-  { id: "identifiers", label: "SKUs & Barcodes" },
-  { id: "stock", label: "Stock" },
-  { id: "prices", label: "Prices" },
-  { id: "sales", label: "Sales & Margins" },
-  { id: "weight", label: "Weight" },
-  { id: "variants", label: "Variants" },
-  { id: "category", label: "Product Category" },
-  { id: "vendor_type", label: "Vendor & Product Type" },
-  { id: "tags_collections", label: "Tags & Collections" },
-  { id: "status", label: "Status" },
-  { id: "channels", label: "Sales Channels" },
-  { id: "metafields", label: "Metafields" },
+// Families in the order the home page shows their checks: by area, as categories.js orders the
+// areas, and within an area from the top of the product page down. Each family names its area.
+const FAMILY_LIST = [
+  { id: "title", label: "Title", category: "description" },
+  { id: "description", label: "Description", category: "description" },
+  { id: "spelling", label: "Spelling", category: "description" },
+  { id: "images", label: "Images", category: "media" },
+  { id: "alt", label: "Alt Text", category: "media" },
+  { id: "prices", label: "Prices", category: "pricing" },
+  { id: "sales", label: "Sales & Margins", category: "pricing" },
+  { id: "identifiers", label: "SKUs & Barcodes", category: "inventory" },
+  { id: "stock", label: "Stock", category: "inventory" },
+  { id: "category", label: "Product Category", category: "organization" },
+  { id: "vendor_type", label: "Vendor & Product Type", category: "organization" },
+  { id: "tags_collections", label: "Tags & Collections", category: "organization" },
+  { id: "weight", label: "Weight", category: "shipping" },
+  { id: "variants", label: "Variants", category: "variants" },
+  { id: "seo", label: "SEO Title & Meta Description", category: "seo" },
+  { id: "status", label: "Status", category: "status" },
+  { id: "channels", label: "Sales Channels", category: "publishing" },
+  { id: "metafields", label: "Metafields", category: "metafields" },
 ];
+
+// Sorted by area so the list above follows the home page even when the areas are reordered.
+const areaIndex = (id) => CATEGORIES.findIndex((c) => c.id === id);
+export const FAMILIES = [...FAMILY_LIST].sort((a, b) => areaIndex(a.category) - areaIndex(b.category));
 
 const E = "essential";
 const R = "recommended";
