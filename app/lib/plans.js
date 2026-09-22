@@ -2,6 +2,13 @@
 // named exactly as in the billing config (app/shopify.server.js builds it from PAID_PLANS), so a
 // subscription can be matched to a plan by name. No server imports: the pages read this too.
 
+import { CATEGORIES } from "./categories";
+
+// Check areas (the home page cards) by id. Dust Off and Quick Clean cover the core five; Deep Clean
+// covers every area. The scan runs every check regardless, so counts stay accurate.
+export const ALL_AREAS = CATEGORIES.map((c) => c.id);
+const CORE_AREAS = ["description", "media", "pricing", "inventory", "organization"];
+
 const NONE = {
   inlineEdits: false,
   export: false,
@@ -20,6 +27,7 @@ export const PLANS = [
     name: "Dust Off",
     price: 0,
     productLimit: 20,
+    areas: CORE_AREAS,
     features: { ...NONE },
     extras: [],
   },
@@ -28,6 +36,7 @@ export const PLANS = [
     name: "Quick Clean",
     price: 10,
     productLimit: null,
+    areas: CORE_AREAS,
     features: { ...NONE, inlineEdits: true, export: true, dictionary: true, ignores: true, newProductScans: true, autoRescan: true, weeklyDigest: true },
     extras: [],
   },
@@ -36,6 +45,7 @@ export const PLANS = [
     name: "Deep Clean",
     price: 20,
     productLimit: null,
+    areas: ALL_AREAS,
     features: {
       ...NONE,
       inlineEdits: true,
@@ -82,4 +92,15 @@ export function planByName(name) {
 // The cheapest plan that includes a feature, for "Upgrade to ..." links.
 export function planFor(feature) {
   return PLANS.find((p) => p.features[feature]) || null;
+}
+
+// The areas a plan does not cover, and the cheapest plan that covers every area.
+export function lockedAreas(plan) {
+  return ALL_AREAS.filter((id) => !plan.areas.includes(id));
+}
+export function areaLocked(plan, category) {
+  return !plan.areas.includes(category);
+}
+export function allAreasPlan() {
+  return PLANS.find((p) => p.areas.length === ALL_AREAS.length) || PLANS[PLANS.length - 1];
 }

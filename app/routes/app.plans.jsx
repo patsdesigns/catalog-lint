@@ -1,7 +1,7 @@
 import { useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
-import { PLANS, FEATURE_LABELS, COMING_SOON } from "../lib/plans";
+import { PLANS, FEATURE_LABELS, COMING_SOON, ALL_AREAS } from "../lib/plans";
 import { BILLING_TEST, currentPlan } from "../lib/billing.server";
 
 // The three plans. Choosing a paid one sends the merchant to Shopify's approval screen and back;
@@ -55,6 +55,7 @@ function PlanCard({ plan, current, busy, onChoose }) {
           </s-stack>
           <s-text type="strong">{plan.price ? `$${plan.price} / month` : "Free"}</s-text>
           <s-text color="subdued">{plan.productLimit ? `Up to ${plan.productLimit.toLocaleString("en-US")} products` : "Unlimited products"}</s-text>
+          <s-text color="subdued">{plan.areas.length === ALL_AREAS.length ? `All ${ALL_AREAS.length} check areas` : `${plan.areas.length} of ${ALL_AREAS.length} check areas`}</s-text>
         </s-stack>
         <s-unordered-list>
           <s-list-item>Full scan, fix-all buttons and undo</s-list-item>

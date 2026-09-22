@@ -9,7 +9,7 @@ import { cleanStreak } from "../lib/snapshots.server";
 import { undoFix, recentFixes, fixedCount } from "../lib/fixes.server";
 import { latestScan, scanHistory, saveScan } from "../lib/scans.server";
 import { currentPlan } from "../lib/billing.server";
-import { planFor } from "../lib/plans";
+import { planFor, lockedAreas, allAreasPlan } from "../lib/plans";
 import { RULE_CATALOG } from "../lib/rules.server";
 import { CATEGORIES, categoryOf } from "../lib/categories";
 import { PASS_LABELS, SETUP_LABELS } from "../lib/checkLabels";
@@ -45,7 +45,9 @@ export async function loader({ request }) {
   // Products webhooks queued (Dust Off), and the clean streak when nothing high is open.
   const pending = state.result ? await pendingCount(session.shop) : 0;
   const streak = state.result && state.result.high === 0 ? await cleanStreak(session.shop) : 0;
-  return { ...state, job, plan, newProducts, pending, streak };
+  // Areas the plan does not cover: their counts stay real, their findings stay behind the plan.
+  const locked = lockedAreas(plan);
+  return { ...state, job, plan, newProducts, pending, streak, locked };
 }
 
 async function countNewProducts(graphql, since) {
@@ -236,8 +238,9 @@ function Trend({ history }) {
 
 // The summary: how many potential problems the last scan left and how many problems the app has
 // fixed, either side of a divider. Below 640px of card width the two stack.
-function Summary({ result, history, fixedWeek, fixedTotal, checksOn, checksTotal, newProducts, streak }) {
+function Summary({ result, history, fixedWeek, fixedTotal, checksOn, checksTotal, newProducts, streak, locked }) {
   const open = result.open || 0;
+  const lockedFindings = result.rules.filter((r) => locked.includes(r.category)).reduce((sum, r) => sum + r.count, 0);
   const previous = history && history.length >= 2 ? history[history.length - 2].open : null;
   const delta = previous == null ? 0 : open - previous;
   const affected = Math.max(0, result.total - result.clean);
@@ -262,6 +265,7 @@ function Summary({ result, history, fixedWeek, fixedTotal, checksOn, checksTotal
               }
               hint={open ? `In ${n(affected)} of ${products}, from ${n(result.rules.length)} ${result.rules.length === 1 ? "check" : "checks"}` : "Nothing to fix"}
             >
+              {lockedFindings > 0 ? <s-text color="subdued">{n(lockedFindings)} in {allAreasPlan().name} areas</s-text> : null}
               {result.high === 0 ? (
                 // The clean streak: consecutive daily snapshots with nothing high open.
                 <s-stack direction="inline" gap="small-200" alignItems="center">
@@ -446,8 +450,9 @@ function CardBody({ table, panel }) {
 
 // The failing checks with the most weight across every section, so a merchant knows where to
 // begin: findings count times severity.
-function StartHere({ result, onSelect, busy, showPanel }) {
-  const ranked = [...result.rules]
+function StartHere({ result, locked, onSelect, busy, showPanel }) {
+  const ranked = result.rules
+    .filter((r) => !locked.includes(r.category))
     .sort((a, b) => SEVERITY_WEIGHT[b.severity] * b.count - SEVERITY_WEIGHT[a.severity] * a.count || b.count - a.count)
     .slice(0, START_HERE_ROWS);
   if (ranked.length === 0) return null;
@@ -487,7 +492,7 @@ function StartHere({ result, onSelect, busy, showPanel }) {
 }
 
 // Chips that narrow the cards below to one section.
-function CategoryFilter({ result, filter, onChange }) {
+function CategoryFilter({ result, locked, filter, onChange }) {
   const cards = CATEGORIES.map((cat) => {
     const count = result.rules.filter((r) => r.category === cat.id).reduce((n, r) => n + r.count, 0);
     const hasChecks = (result.checks || []).some((c) => c.category === cat.id);
@@ -505,9 +510,11 @@ function CategoryFilter({ result, filter, onChange }) {
           key={cat.id}
           color={filter === cat.id ? "strong" : "base"}
           onClick={() => onChange(filter === cat.id ? null : cat.id)}
-          accessibilityLabel={`Show ${cat.label}, ${count} findings`}
+          accessibilityLabel={`Show ${cat.label}, ${count} findings${locked.includes(cat.id) ? `, part of ${allAreasPlan().name}` : ""}`}
         >
+          {locked.includes(cat.id) ? <s-icon slot="graphic" type="lock" /> : null}
           {cat.label} · {count}
+          {locked.includes(cat.id) ? ` · ${allAreasPlan().name}` : ""}
         </s-clickable-chip>
       ))}
     </s-stack>
@@ -519,8 +526,30 @@ function CategoryFilter({ result, filter, onChange }) {
 // Severity / Action sit at the same x from card to card. The visible heading names the section (no
 // accessibilityLabel, which would add a second hidden heading to the outline). `checks` are this
 // category's non-failing checks; `showChecks` is false for scans saved before checks were recorded.
-function CategoryCard({ cat, rules, checks, showChecks, showPassed, onSelect, busy }) {
+function CategoryCard({ cat, rules, checks, showChecks, showPassed, locked, onSelect, busy }) {
   const total = rules.reduce((n, r) => n + r.count, 0);
+  if (locked) {
+    // Behind the plan: the heading and the real count, one line, and a way to compare plans.
+    const fullPlan = allAreasPlan().name;
+    return (
+      <s-section padding="none">
+        <div style={{ borderTop: `3px solid ${cat.color}`, borderRadius: "12px 12px 0 0" }}>
+          <CardHeader
+            color={cat.color}
+            heading={cat.label}
+            badges={<s-badge size="small" icon="lock">{fullPlan}</s-badge>}
+            aside={<s-text color="subdued" fontVariantNumeric="tabular-nums">{rules.length ? `${total} findings` : "No findings"}</s-text>}
+          />
+        </div>
+        <s-box padding="base" paddingBlockStart="none">
+          <s-stack direction="inline" gap="base" alignItems="center" justifyContent="space-between">
+            <s-text color="subdued">These findings are part of {fullPlan}</s-text>
+            <s-button href="/app/plans">Compare plans</s-button>
+          </s-stack>
+        </s-box>
+      </s-section>
+    );
+  }
   const passed = checks.filter((c) => c.status === "passed");
   const skipped = checks.filter((c) => c.status === "skipped");
   const off = checks.filter((c) => c.status === "off");
@@ -613,7 +642,7 @@ function RecentFixes({ fixes, onUndo, busy, showPanel }) {
 // Remembered per browser: whether the cards list every passed check or just the count.
 const SHOW_PASSED_KEY = "catalog-lint:show-passed";
 
-function Overview({ result, history, fixes, fixedWeek, fixedTotal, plan, newProducts, streak, onSelect, onUndo, busy }) {
+function Overview({ result, history, fixes, fixedWeek, fixedTotal, plan, newProducts, streak, locked, onSelect, onUndo, busy }) {
   const [filter, setFilter] = useState(null);
   const [showPassed, setShowPassed] = useState(false);
   const checks = result.checks || [];
@@ -638,7 +667,7 @@ function Overview({ result, history, fixes, fixedWeek, fixedTotal, plan, newProd
 
   return (
     <>
-      <Summary result={result} history={history} fixedWeek={fixedWeek} fixedTotal={fixedTotal} checksOn={checksOn} checksTotal={checks.length} newProducts={newProducts} streak={streak} />
+      <Summary result={result} history={history} fixedWeek={fixedWeek} fixedTotal={fixedTotal} checksOn={checksOn} checksTotal={checks.length} newProducts={newProducts} streak={streak} locked={locked} />
 
       {newProducts > 0 && !plan.features.newProductScans ? (
         // The free plan can only run a full scan; the paid plans get a Scan New Products button.
@@ -670,11 +699,11 @@ function Overview({ result, history, fixes, fixedWeek, fixedTotal, plan, newProd
           </s-stack>
         </s-section>
       ) : (
-        <StartHere result={result} onSelect={onSelect} busy={busy} showPanel={showChecks} />
+        <StartHere result={result} locked={locked} onSelect={onSelect} busy={busy} showPanel={showChecks} />
       )}
 
       <s-stack direction="inline" gap="base" alignItems="center" justifyContent="space-between">
-        <CategoryFilter result={result} filter={filter} onChange={setFilter} />
+        <CategoryFilter result={result} locked={locked} filter={filter} onChange={setFilter} />
         {showChecks ? (
           <s-switch label="Show passed checks" checked={showPassed || undefined} onInput={(e) => toggleShowPassed(e.target.checked)}></s-switch>
         ) : null}
@@ -687,7 +716,7 @@ function Overview({ result, history, fixes, fixedWeek, fixedTotal, plan, newProd
         const rules = result.rules.filter((r) => r.category === cat.id);
         const catChecks = checks.filter((c) => c.category === cat.id && c.status !== "failed");
         if (rules.length === 0 && catChecks.length === 0) return null;
-        return <CategoryCard key={cat.id} cat={cat} rules={rules} checks={catChecks} showChecks={showChecks} showPassed={showPassed} onSelect={onSelect} busy={busy} />;
+        return <CategoryCard key={cat.id} cat={cat} rules={rules} checks={catChecks} showChecks={showChecks} showPassed={showPassed} locked={locked.includes(cat.id)} onSelect={onSelect} busy={busy} />;
       })}
 
       {filter ? null : <RecentFixes fixes={fixes} onUndo={onUndo} busy={busy} showPanel={showChecks} />}
@@ -749,7 +778,7 @@ export default function Index() {
   const data = fetcher.data;
   // The loader is revalidated after every action and while a background scan runs, so it is the
   // source of truth for the page; the fetcher's data only carries the action's notices.
-  const { result, history, fixes, fixedWeek, fixedTotal, job, checkCount, plan, newProducts, pending, streak } = initial;
+  const { result, history, fixes, fixedWeek, fixedTotal, job, checkCount, plan, newProducts, pending, streak, locked } = initial;
   const revalidator = useRevalidator();
   const scanning = job?.status === "running";
 
@@ -807,6 +836,7 @@ export default function Index() {
           plan={plan}
           newProducts={newProducts}
           streak={streak}
+          locked={locked}
           onSelect={openIssue}
           onUndo={runUndo}
           busy={busy}

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useFetcher, useLoaderData, useNavigate } from "react-router";
+import { redirect, useFetcher, useLoaderData, useNavigate } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { refreshAfter } from "../lib/rescan.server";
@@ -10,7 +10,8 @@ import { addIgnore, ignoreKey } from "../lib/ignores.server";
 import { applyEdit } from "../lib/edits.server";
 import { RULE_CATALOG } from "../lib/rules.server";
 import { currentPlan } from "../lib/billing.server";
-import { planFor } from "../lib/plans";
+import { planFor, areaLocked, allAreasPlan } from "../lib/plans";
+import { categoryOf } from "../lib/categories";
 import { adminUrl, truncate } from "../lib/format";
 import { TONE, CategoryChip, Notices, passesWhen } from "../lib/ui";
 
@@ -22,6 +23,9 @@ export async function loader({ request, params }) {
   const { plan } = await currentPlan(billing);
   const result = await latestScan(session.shop);
   const rule = result?.rules.find((r) => r.ruleId === params.ruleId) || null;
+  // A check in an area the plan does not cover has no page: Plans explains what covers it.
+  const category = rule?.category || RULE_CATALOG.find((r) => r.id === params.ruleId)?.category;
+  if (category && areaLocked(plan, category)) throw redirect("/app/plans");
   const findings = rule ? result.findings.filter((f) => f.ruleId === rule.ruleId) : [];
   const label = rule?.label || RULE_CATALOG.find((r) => r.id === params.ruleId)?.label || "Check";
   return { rule, findings, plan, label };
@@ -37,6 +41,11 @@ export async function action({ request, params }) {
   const gate = { edit: ["inlineEdits", "Inline edits are"], learn: ["dictionary", "The spelling dictionary is"], ignore: ["ignores", "Ignoring findings is"] }[intent];
   if (gate && !plan.features[gate[0]]) {
     return { ok: false, error: `${gate[1]} part of the ${planFor(gate[0]).name} plan and up. Upgrade in Plans.` };
+  }
+  // Fixes and edits in an area the plan does not cover are refused here as well.
+  const category = RULE_CATALOG.find((r) => r.id === ruleId)?.category;
+  if ((intent === "fix" || intent === "edit") && category && areaLocked(plan, category)) {
+    return { ok: false, error: `${categoryOf(category).label} findings are part of the ${allAreasPlan().name} plan. Compare plans to unlock them.` };
   }
 
   try {
