@@ -7,7 +7,7 @@ import { CATEGORIES } from "./categories";
 export const TIERS = {
   essential: { label: "Essential", description: "Stops products from selling or being found." },
   recommended: { label: "Recommended", description: "Quality, SEO and margin checks." },
-  consistency: { label: "Consistency", description: "House-style rules: casing, one-off tags, image shapes." },
+  consistency: { label: "Consistency", description: "House-style rules: casing and consistent spellings." },
 };
 
 // Families in the order the home page shows their checks: by area, as categories.js orders the
@@ -49,7 +49,6 @@ export const RULE_META = {
   emoji_in_title: { family: "title", tier: R },
   vendor_repeated_in_title: { family: "title", tier: C },
   title_casing_outlier: { family: "title", tier: C },
-  duplicate_title: { family: "title", tier: R },
 
   // Description
   missing_description: { family: "description", tier: E },
@@ -69,6 +68,7 @@ export const RULE_META = {
   seo_title_missing: { family: "seo", tier: E },
   seo_title_too_long: { family: "seo", tier: R },
   seo_title_competing: { family: "seo", tier: R },
+  duplicate_title: { family: "seo", tier: R },
   meta_description_missing: { family: "seo", tier: E },
   meta_description_too_long: { family: "seo", tier: R },
   meta_copies_description: { family: "seo", tier: R },
@@ -120,6 +120,7 @@ export const RULE_META = {
   // Vendor & product type
   missing_vendor: { family: "vendor_type", tier: E },
   vendor_casing: { family: "vendor_type", tier: C },
+  vendor_not_allowed: { family: "vendor_type", tier: R },
   missing_product_type: { family: "vendor_type", tier: E },
   product_type_casing: { family: "vendor_type", tier: C },
 
@@ -131,6 +132,10 @@ export const RULE_META = {
   // Status
   draft_stale: { family: "status", tier: R },
 
+  // Metafields
+  metafield_required: { family: "metafields", tier: E },
+  metafield_pattern: { family: "metafields", tier: E },
+
   // Product category
   category_missing: { family: "category", tier: E },
 
@@ -139,7 +144,6 @@ export const RULE_META = {
   unpublished_everywhere: { family: "channels", tier: E },
   channel_feedback: { family: "channels", tier: E },
 
-  // Metafields
 };
 
 export const PRESETS = [

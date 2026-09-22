@@ -7,8 +7,9 @@ import { refreshAfter } from "../lib/rescan.server";
 import { currentPlan } from "../lib/billing.server";
 import { planFor } from "../lib/plans";
 
-// Tracked metafields: product metafield definitions read with every product and checked like any
-// other field. Its own page, so the list and its settings do not crowd Settings.
+// Tracked metafields: product metafield definitions read with every product and covered by the
+// Required metafield missing and Metafield does not match pattern checks. Its own page, so the list
+// and its settings do not crowd Settings.
 
 export async function loader({ request }) {
   const { admin, session, billing } = await authenticate.admin(request);
@@ -35,7 +36,6 @@ export async function action({ request }) {
     if (intent === "update") {
       await updateTracked(session.shop, form.get("id"), {
         required: form.get("required") === "true",
-        unique: form.get("unique") === "true",
         pattern: form.get("pattern"),
         productType: form.get("productType"),
       });
@@ -53,8 +53,8 @@ const TWO_COLUMNS = "@container (inline-size <= 760px) 1fr, 1fr 1fr";
 
 // One tracked metafield: its settings, saved together, and Remove.
 function TrackedRow({ t, busy, onSave, onRemove }) {
-  const [form, setForm] = useState({ required: t.required, unique: t.unique, pattern: t.pattern, productType: t.productType });
-  const changed = form.required !== t.required || form.unique !== t.unique || form.pattern !== t.pattern || form.productType !== t.productType;
+  const [form, setForm] = useState({ required: t.required, pattern: t.pattern, productType: t.productType });
+  const changed = form.required !== t.required || form.pattern !== t.pattern || form.productType !== t.productType;
   const set = (patch) => setForm({ ...form, ...patch });
   return (
     <s-box padding="base" border="base" borderRadius="base">
@@ -64,7 +64,6 @@ function TrackedRow({ t, busy, onSave, onRemove }) {
           <s-text color="subdued">{t.fullKey} · {t.type}</s-text>
         </s-stack>
         <s-switch label="Required" details="Flag products where it is empty." checked={form.required || undefined} onInput={(e) => set({ required: e.target.checked })}></s-switch>
-        <s-switch label="Unique across products" details="Flag a value that more than one product has." checked={form.unique || undefined} onInput={(e) => set({ unique: e.target.checked })}></s-switch>
         <s-text-field
           label="Value pattern"
           details={"Optional. A regular expression the value must match, for example ^[A-Z]{3}-\\d{4}$."}
@@ -131,14 +130,15 @@ export default function TrackedPage() {
       ) : null}
       {outcome?.ok && outcome.done === "track" ? (
         <s-banner tone="success" heading={`Now tracking ${outcome.name}`}>
-          <s-paragraph>Its values are read on the next scan; its checks appear in the Metafields area from then on.</s-paragraph>
+          <s-paragraph>Its values are read on the next scan; the Metafields checks cover it from then on.</s-paragraph>
         </s-banner>
       ) : null}
       <s-section heading="Add a metafield">
         <s-stack gap="base">
           <s-paragraph>
-            A tracked metafield is read with every product and checked like any other field: missing, duplicated, misspelled,
-            a placeholder, too long or with stray spaces. It also shows as a column on every issue page.
+            A tracked metafield is read with every product. Required metafield missing flags products where it is empty,
+            and Metafield does not match pattern flags values that fail its pattern. It also shows as a column on every
+            issue page.
           </s-paragraph>
           {available.length ? (
             <s-stack direction="inline" gap="small" alignItems="end">
@@ -178,7 +178,7 @@ export default function TrackedPage() {
                   key={t.id}
                   t={t}
                   busy={busy}
-                  onSave={(id, form) => submit({ intent: "update", id: String(id), required: String(form.required), unique: String(form.unique), pattern: form.pattern, productType: form.productType })}
+                  onSave={(id, form) => submit({ intent: "update", id: String(id), required: String(form.required), pattern: form.pattern, productType: form.productType })}
                   onRemove={(id) => submit({ intent: "untrack", id: String(id) })}
                 />
               ))}

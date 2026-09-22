@@ -16,7 +16,7 @@ import {
   recheckProducts,
 } from "./scan.server";
 import { saveScan, latestScan } from "./scans.server";
-import { summarizeFindings, trackedRules, isDynamicRule } from "./rules.server";
+import { summarizeFindings, knownFindings } from "./rules.server";
 import { ignoreKey } from "./ignores.server";
 import { getSettings } from "./settings.server";
 import { activeJob, createJob, updateJob, jobView } from "./jobs.server";
@@ -89,9 +89,15 @@ export async function refreshAfter(graphql, shop, change, limit = null) {
   if (change.kind === "settings") {
     const settings = await getSettings(shop);
     const off = new Set(settings.disabledRules || []);
-    // A tracked metafield check that no longer exists (untracked, or its setting turned off) goes too.
-    const known = new Set(trackedRules(settings).all.map((r) => r.id));
-    await saveScan(shop, withFindings(latest, latest.findings.filter((f) => !off.has(f.ruleId) && (!isDynamicRule(f.ruleId) || known.has(f.ruleId))), settings));
+    // A finding of a tracked metafield goes when the metafield was untracked or the setting behind
+    // the finding (required, pattern) was turned off; withFindings drops checks that no longer exist.
+    const tracked = new Map((settings.trackedMetafields || []).map((t) => [t.fullKey, t]));
+    const stillChecked = (f) => {
+      if (f.ruleId === "metafield_required") return Boolean(tracked.get(f.field)?.required);
+      if (f.ruleId === "metafield_pattern") return Boolean(tracked.get(f.field)?.pattern);
+      return true;
+    };
+    await saveScan(shop, withFindings(latest, latest.findings.filter((f) => !off.has(f.ruleId) && stillChecked(f)), settings));
     return;
   }
 
@@ -135,10 +141,11 @@ export async function refreshAfter(graphql, shop, change, limit = null) {
 }
 
 export function withFindings(latest, findings, settings, ignoredDelta = 0) {
-  const summary = summarizeFindings(latest.total, findings, settings);
+  const kept = knownFindings(findings);
+  const summary = summarizeFindings(latest.total, kept, settings);
   return {
     ...summary,
-    findings,
+    findings: kept,
     names: latest.names || [],
     catalogTotal: latest.catalogTotal || latest.total,
     readAt: latest.readAt,

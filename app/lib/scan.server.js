@@ -5,7 +5,7 @@
 // file in the background, the page loader polls it (rescan.server.js) and the rules run once the
 // file is ready, so a 50k-product catalog scans without request timeouts or API rate limits.
 
-import { runRules, runProductRules, CATALOG_RULE_IDS, summarize, summarizeFindings } from "./rules.server";
+import { runRules, runProductRules, CATALOG_RULE_IDS, summarize, summarizeFindings, knownFindings } from "./rules.server";
 import { loadSpeller, seedWords, catalogNames } from "./spelling.server";
 import { getWords } from "./dictionary.server";
 import { getIgnoreKeys, ignoreKey } from "./ignores.server";
@@ -319,7 +319,7 @@ async function scanContext(graphql, shop) {
     loadSpeller(),
     shop ? getWords(shop) : [],
     shop ? getIgnoreKeys(shop) : new Set(),
-    shop ? getSettings(shop) : { trackedMetafields: [] },
+    shop ? getSettings(shop) : { vendorWhitelist: [], trackedMetafields: [] },
     fetchPrimaryLocale(graphql),
   ]);
   return { speller, storeWords, ignored, settings, locale };
@@ -369,7 +369,7 @@ export async function recheckProducts(graphql, shop, latest, ids, dropRuleId = n
   const ctx = { speller, customWords: seedWords(products, storeWords), nameWords: new Set(names), settings, locale };
   const fresh = runProductRules(products, ctx).filter((f) => !ignored.has(ignoreKey(f)));
   const touched = new Set(ids);
-  const kept = latest.findings.filter(
+  const kept = knownFindings(latest.findings).filter(
     (f) => !touched.has(f.productId) || (CATALOG_RULE_IDS.has(f.ruleId) && f.ruleId !== dropRuleId),
   );
   const findings = [...kept, ...fresh];
@@ -411,7 +411,7 @@ export async function scanNewProducts(graphql, shop, latest) {
   const ctx = { speller, customWords: seedWords(products, storeWords), nameWords: new Set(names), settings, locale };
   const fresh = runProductRules(products, ctx).filter((f) => !ignored.has(ignoreKey(f)));
   const added = new Set(ids);
-  const findings = [...latest.findings.filter((f) => !added.has(f.productId)), ...fresh];
+  const findings = [...knownFindings(latest.findings).filter((f) => !added.has(f.productId)), ...fresh];
   const total = latest.total + products.length;
   const summary = summarizeFindings(total, findings, settings);
   return {

@@ -71,8 +71,11 @@ export const PASS_LABELS = {
   no_tags: "Every product has tags",
   vendor_casing: "Vendors are spelled consistently",
   tag_casing: "Tags are spelled consistently",
+  vendor_not_allowed: "All vendors are on your approved list",
 
   // Metafields
+  metafield_required: "Required metafields are filled in",
+  metafield_pattern: "Metafield values match their patterns",
 
   // Batch A additions
   dead_link: "Links in descriptions go somewhere",
@@ -93,4 +96,7 @@ export const PASS_LABELS = {
 
 // What a settings-gated check needs before it can run.
 export const SETUP_LABELS = {
+  vendor_not_allowed: "an approved vendor list",
+  metafield_required: "a required tracked metafield",
+  metafield_pattern: "a tracked metafield with a pattern",
 };

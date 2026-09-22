@@ -1,7 +1,9 @@
 import prisma from "../db.server";
 
 export function ignoreKey(f) {
-  return [f.ruleId, f.productId, f.variantId || "", f.word || ""].join("|");
+  const base = [f.ruleId, f.productId, f.variantId || "", f.word || ""].join("|");
+  // A finding about one field of a product (a tracked metafield) carries the field too.
+  return f.field ? `${base}|${f.field}` : base;
 }
 
 export async function getIgnores(shop) {

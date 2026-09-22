@@ -2,11 +2,11 @@
 import { latestScan, saveScan, scanById } from "./scans.server";
 import { getSettings, saveSettings } from "./settings.server";
 import { refreshAfter, withFindings } from "./rescan.server";
-import { findRule } from "./rules.server";
+import { RULE_CATALOG } from "./rules.server";
 import { SYNC_LIMIT } from "./scan.server";
 
-function ruleOrThrow(ruleId, settings) {
-  const rule = findRule(ruleId, settings);
+function ruleOrThrow(ruleId) {
+  const rule = RULE_CATALOG.find((r) => r.id === ruleId);
   if (!rule) throw new Error("That check does not exist.");
   return rule;
 }
@@ -17,7 +17,7 @@ function ruleOrThrow(ruleId, settings) {
 export async function ignoreCheck(graphql, shop, ruleId, limit = null) {
   const before = await latestScan(shop);
   const current = await getSettings(shop);
-  const rule = ruleOrThrow(ruleId, current);
+  const rule = ruleOrThrow(ruleId);
   const customDisabled = [...new Set([...current.disabledRules, ruleId])];
   await saveSettings(shop, { ...current, preset: "custom", customDisabled });
   await refreshAfter(graphql, shop, { kind: "settings" }, limit);
@@ -30,7 +30,7 @@ export async function ignoreCheck(graphql, shop, ruleId, limit = null) {
 // large one reports the check on its next scan.
 export async function restoreCheck(graphql, shop, ruleId, scanId, limit = null) {
   const current = await getSettings(shop);
-  const rule = ruleOrThrow(ruleId, current);
+  const rule = ruleOrThrow(ruleId);
   const customDisabled = current.disabledRules.filter((id) => id !== ruleId);
   await saveSettings(shop, { ...current, preset: "custom", customDisabled });
   const latest = await latestScan(shop);

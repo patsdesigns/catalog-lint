@@ -9,7 +9,7 @@ import { addWord } from "../lib/dictionary.server";
 import { addIgnore, ignoreKey } from "../lib/ignores.server";
 import { applyEdit } from "../lib/edits.server";
 import { ignoreCheck } from "../lib/checks.server";
-import { findRule } from "../lib/rules.server";
+import { RULE_CATALOG } from "../lib/rules.server";
 import { getSettings } from "../lib/settings.server";
 import { currentPlan } from "../lib/billing.server";
 import { planFor, areaLocked, allAreasPlan } from "../lib/plans";
@@ -25,14 +25,14 @@ export async function loader({ request, params }) {
   const { plan } = await currentPlan(billing);
   const [result, settings] = await Promise.all([latestScan(session.shop), getSettings(session.shop)]);
   const rule = result?.rules.find((r) => r.ruleId === params.ruleId) || null;
-  const known = findRule(params.ruleId, settings);
+  const known = RULE_CATALOG.find((r) => r.id === params.ruleId) || null;
   // A check in an area the plan does not cover has no page: Plans explains what covers it.
   const category = rule?.category || known?.category;
   if (category && areaLocked(plan, category)) throw redirect("/app/plans");
   const findings = rule ? result.findings.filter((f) => f.ruleId === rule.ruleId) : [];
   const label = rule?.label || known?.label || "Check";
-  // Tracked metafields show as columns, except the one this check is about.
-  const tracked = (settings.trackedMetafields || []).filter((t) => !params.ruleId.endsWith(`:${t.fullKey}`)).map((t) => ({ key: t.fullKey, name: t.name }));
+  // Tracked metafields show as columns on every check.
+  const tracked = (settings.trackedMetafields || []).map((t) => ({ key: t.fullKey, name: t.name }));
   return { rule, findings, plan, label, tracked };
 }
 
@@ -48,7 +48,7 @@ export async function action({ request, params }) {
     return { ok: false, error: `${gate[1]} part of the ${planFor(gate[0]).name} plan and up. Upgrade in Plans.` };
   }
   // Fixes and edits in an area the plan does not cover are refused here as well.
-  const category = findRule(ruleId, await getSettings(session.shop))?.category;
+  const category = RULE_CATALOG.find((r) => r.id === ruleId)?.category;
   if ((intent === "fix" || intent === "edit") && category && areaLocked(plan, category)) {
     return { ok: false, error: `${categoryOf(category).label} findings are part of the ${allAreasPlan().name} plan. Compare plans to unlock them.` };
   }
@@ -381,7 +381,7 @@ function Detail({ rule, findings, tracked, features, onSave, onLearn, onIgnore, 
             <s-badge tone={TONE[rule.severity]}>{rule.severity} severity</s-badge>
             <CategoryChip id={rule.category} color="subdued" />
           </s-stack>
-          <s-text color="subdued">{rule.passLabel ? `Passes when ${rule.passLabel}.` : passesWhen(rule.ruleId, rule.label)} {help}</s-text>
+          <s-text color="subdued">{passesWhen(rule.ruleId, rule.label)} {help}</s-text>
         </s-stack>
       </s-box>
       <s-query-container>

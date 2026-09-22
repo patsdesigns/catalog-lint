@@ -163,8 +163,8 @@ model EarlyBirdClaim {
   status         String   @default("active")
 }
 
-// A product metafield the merchant tracks: read with every product and checked like a field
-// (app/lib/metafields.server.js, rules.server.js trackedRules).
+// A product metafield the merchant tracks: read with every product and covered by the two
+// Metafields checks, metafield_required and metafield_pattern (app/lib/metafields.server.js).
 model TrackedMetafield {
   id          Int      @id @default(autoincrement())
   shop        String
@@ -173,7 +173,6 @@ model TrackedMetafield {
   name        String
   type        String
   required    Boolean  @default(true)
-  unique      Boolean  @default(false)
   pattern     String   @default("")
   productType String   @default("")
   createdAt   DateTime @default(now())

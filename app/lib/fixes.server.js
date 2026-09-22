@@ -226,9 +226,6 @@ export function fixLabel(ruleId) {
   if (FIX_NAMES[ruleId]) return FIX_NAMES[ruleId];
   const rule = RULE_CATALOG.find((r) => r.id === ruleId);
   if (rule) return rule.label;
-  // A tracked metafield check: "custom.mpn missing".
-  const dynamic = /^metafield_([a-z_]+):(.+)$/.exec(ruleId);
-  if (dynamic) return `${dynamic[2]} ${dynamic[1].replace(/_/g, " ")}`;
   return ruleId === "edit" ? "Edit" : ruleId.replace(/_/g, " ");
 }
 

@@ -5,7 +5,7 @@ import { authenticate } from "../shopify.server";
 import { listWords } from "../lib/dictionary.server";
 import { getIgnores } from "../lib/ignores.server";
 import { getSettings, saveSettings } from "../lib/settings.server";
-import { ruleCatalog } from "../lib/rules.server";
+import { RULE_CATALOG } from "../lib/rules.server";
 import { refreshAfter } from "../lib/rescan.server";
 import { PASS_LABELS } from "../lib/checkLabels";
 import { FAMILIES, TIERS } from "../lib/checkGroups";
@@ -23,8 +23,8 @@ export async function loader({ request }) {
     getDigestSettings(session.shop),
   ]);
   // Only counts: the ignored findings and the tracked metafields have pages of their own
-  // (app.ignored.jsx, app.tracked.jsx). The checks list includes the checks of the tracked metafields.
-  return { words, ignoreCount: ignores.length, trackedCount: settings.trackedMetafields.length, settings, rules: ruleCatalog(settings), plan, digest };
+  // (app.ignored.jsx, app.tracked.jsx).
+  return { words, ignoreCount: ignores.length, trackedCount: settings.trackedMetafields.length, settings, rules: RULE_CATALOG, plan, digest };
 }
 
 export async function action({ request }) {
@@ -57,6 +57,9 @@ export async function action({ request }) {
   if (intent === "saveSettings") {
     const current = await getSettings(session.shop);
     const next = { ...current };
+    if (form.has("vendorWhitelist")) {
+      next.vendorWhitelist = String(form.get("vendorWhitelist")).split("\n").map((v) => v.trim()).filter(Boolean);
+    }
     if (form.has("preset")) next.preset = form.get("preset");
     // Flipping any single check means the merchant has their own list.
     if (form.has("disabledRules")) {
@@ -93,6 +96,9 @@ export default function Settings() {
   function submit(payload) {
     fetcher.submit(payload, { method: "post" });
   }
+  function saveWhitelist() {
+    submit({ intent: "saveSettings", vendorWhitelist: whitelist });
+  }
 
   // Which checks run. `off` is the set of disabled ids; kept locally so switches respond at once,
   // and every change is saved.
@@ -100,7 +106,7 @@ export default function Settings() {
   const [expanded, setExpanded] = useState(() => new Set());
   const [query, setQuery] = useState("");
   const q = query.trim().toLowerCase();
-  const matches = (r) => !q || r.label.toLowerCase().includes(q) || (r.passLabel || PASS_LABELS[r.id] || "").toLowerCase().includes(q);
+  const matches = (r) => !q || r.label.toLowerCase().includes(q) || (PASS_LABELS[r.id] || "").toLowerCase().includes(q);
   const visibleCount = checks.filter(matches).length;
 
   function saveOff(next) {
@@ -126,6 +132,7 @@ export default function Settings() {
   }
   const runningCount = checks.length - off.size;
 
+  const [whitelist, setWhitelist] = useState((settings.vendorWhitelist || []).join("\n"));
   const [digestEnabled, setDigestEnabled] = useState(digest.enabled);
   const [digestEmail, setDigestEmail] = useState(digest.email);
 
@@ -190,7 +197,7 @@ export default function Settings() {
                             <s-switch
                               key={r.id}
                               label={r.label}
-                              details={`${TIERS[r.tier]?.label || "Recommended"} · ${r.passLabel || PASS_LABELS[r.id] || ""}`}
+                              details={`${TIERS[r.tier]?.label || "Recommended"} · ${PASS_LABELS[r.id] || ""}`}
                               checked={!off.has(r.id) || undefined}
                               onInput={(e) => toggleCheck(r.id, e.target.checked)}
                             ></s-switch>
@@ -207,12 +214,31 @@ export default function Settings() {
       </s-section>
 
 
+      <s-section slot="aside" heading="Approved Vendors">
+        <s-stack gap="base">
+          <s-paragraph>
+            One vendor per line. Leave empty to skip this check. Products whose vendor is not on this list get flagged under
+            Product Organization.
+          </s-paragraph>
+          <s-text-area
+            label="Approved vendors"
+            labelAccessibilityVisibility="exclusive"
+            placeholder={"Porsche\nBosch\nBilstein"}
+            value={whitelist}
+            onInput={(e) => setWhitelist(e.target.value)}
+          ></s-text-area>
+          <s-stack direction="inline" gap="small">
+            <s-button variant="primary" onClick={saveWhitelist} disabled={busy || undefined}>Save vendors</s-button>
+          </s-stack>
+        </s-stack>
+      </s-section>
+
       {features.customRules ? (
       <s-section slot="aside" heading={`Tracked Metafields (${trackedCount})`}>
         <s-stack gap="small">
           <s-paragraph>
-            Product metafields read with every product and checked like any other field, with a column on every issue
-            page. The list lives on its own page.
+            Product metafields read with every product, flagged when a required one is empty or a value does not match
+            its pattern, and shown as a column on every issue page. The list lives on its own page.
           </s-paragraph>
           <s-stack direction="inline" gap="small">
             <s-button href="/app/tracked">Manage tracked metafields</s-button>

@@ -478,7 +478,7 @@ function PassedChecks({ passed, skipped, off, failing, expanded }) {
             <s-ordered-list>
               {passed.map((c) => (
                 <s-list-item key={c.ruleId}>
-                  <s-text color="subdued">{c.passLabel || PASS_LABELS[c.ruleId] || c.label}</s-text>
+                  <s-text color="subdued">{PASS_LABELS[c.ruleId] || c.label}</s-text>
                 </s-list-item>
               ))}
             </s-ordered-list>

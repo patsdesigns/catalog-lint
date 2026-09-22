@@ -1,7 +1,7 @@
 import prisma from "../db.server";
 
 // Tracked metafields: product metafield definitions the merchant chose to watch. Each is fetched
-// with every product and checked like any other field (rules.server.js, trackedRules), and shows
+// with every product and covered by the Metafields checks (rules.server.js), and shows
 // as a column on every issue page.
 
 const DEFINITIONS_QUERY = `#graphql
@@ -22,7 +22,6 @@ function view(row) {
     name: row.name,
     type: row.type,
     required: row.required,
-    unique: row.unique,
     pattern: row.pattern || "",
     productType: row.productType || "",
   };
@@ -33,7 +32,7 @@ export async function listTracked(shop) {
   return rows.map(view);
 }
 
-// Starts tracking a definition: required on, unique off, no pattern, every product type.
+// Starts tracking a definition: required on, no pattern, every product type.
 export async function trackMetafield(shop, def) {
   const namespace = String(def.namespace || "").trim();
   const key = String(def.key || "").trim();
@@ -50,7 +49,6 @@ export async function trackMetafield(shop, def) {
 export async function updateTracked(shop, id, fields) {
   const data = {};
   if (fields.required !== undefined) data.required = Boolean(fields.required);
-  if (fields.unique !== undefined) data.unique = Boolean(fields.unique);
   if (fields.pattern !== undefined) {
     const pattern = String(fields.pattern || "").trim();
     if (pattern) new RegExp(pattern); // throws on an invalid pattern
@@ -80,7 +78,7 @@ export async function migrateMetafieldRules(shop, rules) {
     await prisma.trackedMetafield.upsert({
       where: { shop_namespace_key: { shop, namespace, key } },
       update: {},
-      create: { shop, namespace, key, name, type: "single_line_text_field", required: true, unique: false, pattern: String(r.pattern || "").trim(), productType: String(r.productType || "").trim() },
+      create: { shop, namespace, key, name, type: "single_line_text_field", required: true, pattern: String(r.pattern || "").trim(), productType: String(r.productType || "").trim() },
     });
     migrated += 1;
   }
