@@ -257,7 +257,7 @@ export default function Settings() {
         <s-stack gap="base">
           <s-paragraph>
             Require a metafield, optionally only for one product type, and optionally check its value against a pattern.
-            Key is namespace.key, for example custom.fitment. Pattern is a regular expression, for example ^\d{3}-\d{3}-\d{3}-\d{2}$.
+            Key is namespace.key, for example custom.fitment. Pattern is a regular expression, for example {"^\\d{3}-\\d{3}-\\d{3}-\\d{2}$"}.
           </s-paragraph>
           {/* Stacked, not inline: the right column is too narrow for three fields in a row. */}
           <s-stack gap="small">
