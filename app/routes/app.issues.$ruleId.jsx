@@ -8,6 +8,7 @@ import { latestScan } from "../lib/scans.server";
 import { addWord } from "../lib/dictionary.server";
 import { addIgnore, ignoreKey } from "../lib/ignores.server";
 import { applyEdit } from "../lib/edits.server";
+import { getSettings, saveSettings } from "../lib/settings.server";
 import { RULE_CATALOG } from "../lib/rules.server";
 import { currentPlan } from "../lib/billing.server";
 import { planFor, areaLocked, allAreasPlan } from "../lib/plans";
@@ -55,6 +56,15 @@ export async function action({ request, params }) {
     let refresh = null;
     // What changed, so the stored scan can be refreshed without re-reading the catalog.
     let change = null;
+    if (intent === "disableRule") {
+      // Ignoring a whole check turns it off in Settings, where its switch shows unchecked, and
+      // drops its findings. Turning the switch back on brings it back on the next scan.
+      const current = await getSettings(session.shop);
+      const customDisabled = [...new Set([...current.disabledRules, ruleId])];
+      await saveSettings(session.shop, { ...current, preset: "custom", customDisabled });
+      await refreshAfter(admin.graphql, session.shop, { kind: "settings" }, plan.productLimit);
+      return { ok: true, disabledRule: ruleId };
+    }
     if (intent === "fix") {
       const latest = await latestScan(session.shop);
       fix = { ruleId, ...(await applyFix(admin.graphql, session.shop, ruleId, latest?.findings || [])) };
@@ -393,6 +403,7 @@ export default function IssuePage() {
   const ignoreFinding = (f) => submit({ intent: "ignore", finding: JSON.stringify(f) });
   const saveEdit = (edit, value, finding) => submit({ intent: "edit", edit: JSON.stringify(edit), value, finding: JSON.stringify(finding) });
   const runRefresh = () => submit({ intent: "refresh" });
+  const ignoreCheck = () => submit({ intent: "disableRule" });
   const refreshing = busy && fetcher.formData?.get("intent") === "refresh";
 
   return (
@@ -405,12 +416,24 @@ export default function IssuePage() {
           Refresh
         </s-button>
       ) : null}
+      {rule ? (
+        <s-button slot="secondary-actions" onClick={ignoreCheck} disabled={busy || undefined} accessibilityLabel={`Ignore this check: turn ${label} off in Settings`}>
+          Ignore this check
+        </s-button>
+      ) : null}
       {rule?.fixable ? (
         <s-button slot="primary-action" variant="primary" onClick={runFix} disabled={busy || undefined}>
           {rule.fixLabel}
         </s-button>
       ) : null}
       <Notices data={data} onUndo={runUndo} busy={busy} />
+      {data?.ok && data.disabledRule ? (
+        <s-banner tone="success" heading="Check turned off">
+          <s-paragraph>
+            Its findings are gone and it stays off until you turn it back on in <s-link href="/app/settings">Settings</s-link>.
+          </s-paragraph>
+        </s-banner>
+      ) : null}
       {rule ? (
         <Detail
           rule={rule}
