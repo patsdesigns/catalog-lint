@@ -1,19 +1,16 @@
 import { useState, useEffect } from "react";
-import { useFetcher, useLoaderData, useRevalidator } from "react-router";
+import { useFetcher, useLoaderData, useNavigate, useRevalidator } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { startScan, advanceJob, refreshAfter } from "../lib/rescan.server";
-import { applyFix, undoFix, recentFixes, fixedCount } from "../lib/fixes.server";
+import { undoFix, recentFixes, fixedCount } from "../lib/fixes.server";
 import { latestScan, scanHistory } from "../lib/scans.server";
-import { addWord } from "../lib/dictionary.server";
-import { addIgnore, ignoreKey } from "../lib/ignores.server";
 import { currentPlan } from "../lib/billing.server";
-import { planFor } from "../lib/plans";
-import { applyEdit } from "../lib/edits.server";
 import { RULE_CATALOG } from "../lib/rules.server";
 import { CATEGORIES, categoryOf } from "../lib/categories";
 import { PASS_LABELS, SETUP_LABELS } from "../lib/checkLabels";
-import { timeAgo, adminUrl, truncate } from "../lib/format";
+import { timeAgo, truncate } from "../lib/format";
+import { TONE, ruleLabel, Dot, Notices } from "../lib/ui";
 
 // ---------- server ----------
 
@@ -25,8 +22,10 @@ async function loadState(shop) {
     fixedCount(shop, 7),
     fixedCount(shop),
   ]);
-  // checkCount: how many checks exist, for the first-run page before any scan is stored.
-  return { result, history, fixes, fixedWeek, fixedTotal, checkCount: RULE_CATALOG.length };
+  // The home page shows counts, never findings: those can run to megabytes on a big catalog and
+  // belong to the issue pages. checkCount is for the first-run page before any scan is stored.
+  const summary = result ? { ...result, findings: undefined, open: result.findings.length } : null;
+  return { result: summary, history, fixes, fixedWeek, fixedTotal, checkCount: RULE_CATALOG.length };
 }
 
 export async function loader({ request }) {
@@ -42,66 +41,20 @@ export async function action({ request }) {
   const { plan } = await currentPlan(billing);
   const form = await request.formData();
   const intent = form.get("intent") || "scan";
-  // Features the plan does not include are refused here as well as hidden in the page.
-  const gate = { edit: ["inlineEdits", "Inline edits are"], learn: ["dictionary", "The spelling dictionary is"], ignore: ["ignores", "Ignoring findings is"] }[intent];
-  if (gate && !plan.features[gate[0]]) {
-    return { ok: false, error: `${gate[1]} part of the ${planFor(gate[0]).name} plan and up. Upgrade in Plans.` };
-  }
 
   try {
-    let fix = null;
     let undo = null;
-    let edit = null;
     let job = null;
-    let refresh = null;
     if (intent === "scan") {
       job = await startScan(admin.graphql, session.shop, plan.productLimit);
-    } else {
-      // What changed, so the stored scan can be refreshed without re-reading a large catalog.
-      let change = null;
-      if (intent === "fix") {
-        const ruleId = form.get("ruleId");
-        const latest = await latestScan(session.shop);
-        fix = { ruleId, ...(await applyFix(admin.graphql, session.shop, ruleId, latest?.findings || [])) };
-        change = { kind: "products", ids: fix.productIds, ruleId };
-      }
-      if (intent === "undo") {
-        undo = await undoFix(admin.graphql, session.shop, form.get("batchId"));
-        // From an issue page the undo only clears the row's saved mark; from the home page it re-checks.
-        const finding = form.get("finding") ? JSON.parse(form.get("finding")) : null;
-        change = finding ? { kind: "unsaved", key: ignoreKey(finding) } : { kind: "products", ids: undo.productIds, full: true };
-      }
-      if (intent === "learn") {
-        const word = form.get("word");
-        await addWord(session.shop, word);
-        change = { kind: "learn", word };
-      }
-      if (intent === "ignore") {
-        const finding = JSON.parse(form.get("finding"));
-        await addIgnore(session.shop, finding);
-        change = { kind: "ignore", finding };
-      }
-      if (intent === "edit") {
-        const descriptor = JSON.parse(form.get("edit"));
-        edit = await applyEdit(admin.graphql, session.shop, descriptor, form.get("value"));
-        // The row stays, marked saved, so the change can be undone in place; Refresh re-checks it.
-        const finding = form.get("finding") ? JSON.parse(form.get("finding")) : null;
-        change = edit.ok && finding ? { kind: "saved", key: ignoreKey(finding), batchId: edit.batchId, value: form.get("value") } : null;
-      }
-      if (intent === "refresh") {
-        // Re-check every product this issue lists (a full rescan on a small catalog).
-        const ruleId = form.get("ruleId");
-        const latest = await latestScan(session.shop);
-        const before = (latest?.findings || []).filter((f) => f.ruleId === ruleId);
-        const ids = [...new Set(before.map((f) => f.productId))];
-        if (ids.length) await refreshAfter(admin.graphql, session.shop, { kind: "products", ids, full: true }, plan.productLimit);
-        const after = ((await latestScan(session.shop))?.findings || []).filter((f) => f.ruleId === ruleId).length;
-        refresh = { ruleId, products: ids.length, before: before.length, after };
-      }
-      if (change) await refreshAfter(admin.graphql, session.shop, change, plan.productLimit);
+    }
+    if (intent === "undo") {
+      undo = await undoFix(admin.graphql, session.shop, form.get("batchId"));
+      // A full rescan on a small catalog brings catalog-wide findings back for the reverted products.
+      await refreshAfter(admin.graphql, session.shop, { kind: "products", ids: undo.productIds, full: true }, plan.productLimit);
     }
     const state = await loadState(session.shop);
-    return { ok: true, ...state, fix, undo, edit, refresh, job, plan };
+    return { ok: true, ...state, undo, job, plan };
   } catch (err) {
     return { ok: false, error: err.message || String(err) };
   }
@@ -109,18 +62,7 @@ export async function action({ request }) {
 
 // ---------- helpers ----------
 
-const TONE = { high: "critical", medium: "warning", low: "neutral" };
 const SEVERITY_WEIGHT = { high: 3, medium: 1.5, low: 0.5 }; // how Start here weighs a check's findings
-const RULE_LABELS = {
-  vendor_casing: "Vendor spelling",
-  missing_weight: "Shipping weight",
-  missing_alt_text: "Image alt text",
-  compare_at_not_higher: "Sale price",
-  zero_price: "Price",
-  missing_sku: "SKU",
-  duplicate_sku: "Duplicate SKU",
-};
-const MAX_ROWS = 100;
 const START_HERE_ROWS = 5;
 
 // Overview tables. Polaris has no column-width API: the browser sizes each <s-table> from its own
@@ -145,125 +87,18 @@ const HERO_COLUMNS = "@container (inline-size <= 640px) 1fr, 1fr auto 1fr";
 const HERO_DIVIDER_DISPLAY = "@container (inline-size <= 640px) none, auto";
 const BLURB_COLUMNS = "@container (inline-size <= 700px) 1fr, 1fr 1fr 1fr";
 
-// Detail view. Polaris sizes table columns from their content and a bare text field has almost no
-// intrinsic width, so the "Corrected" field sits in a one-track grid whose track has a real width:
-// wide enough for ~30 characters of text, narrower only for numeric values (a price or a weight).
-// (Sizing props such as minInlineSize do not accept the @container syntax at runtime; grid tracks do.)
-const CORRECTED_TRACKS = {
-  text: "@container (inline-size > 1100px) 320px, (inline-size > 900px) and (inline-size <= 1100px) 260px, 160px",
-  numeric: "@container (inline-size > 900px) 120px, 96px",
-};
-const NUMERIC_FIELDS = new Set(["price", "compareAt"]);
-function isNumericEdit(e) {
-  return e.kind === "weight" || e.kind === "cost" || (e.kind === "variant" && NUMERIC_FIELDS.has(e.field));
-}
-// "Current" values longer than one word get a track of their own too, so they are not broken one
-// word per line while the product title keeps most of the row.
-const CURRENT_TRACK = "@container (inline-size > 1100px) 200px, (inline-size > 900px) and (inline-size <= 1100px) 160px, 140px";
-// Row actions sit in one auto track each at every width: auto tracks never shrink, so the table cannot
-// wrap a button mid-row, and the flexible Product column yields instead of the actions breaking 2 + 1.
-function actionTracks(count) {
-  return Array(count).fill("auto").join(" ");
-}
-
-function ruleLabel(id) {
-  return RULE_LABELS[id] || id.replace(/_/g, " ");
-}
 // "Description has junk (raw URL, empty tags, spam phrases)" -> the label and its aside, so the aside
 // can sit on its own line. Labels without a trailing parenthetical have no aside.
 function splitLabel(label) {
   const m = /^(.*\S)\s+(\([^()]*\))$/.exec(label);
   return m ? { main: m[1], aside: m[2] } : { main: label, aside: "" };
 }
-// Passing-state sentence for a rule: "Passes when every product has a description."
-function passesWhen(ruleId, fallback) {
-  const label = PASS_LABELS[ruleId] || fallback;
-  // The first letter is lowercased unless the label opens with an acronym (SKUs, SEO, URL).
-  return `Passes when ${/^[A-Z]{2}/.test(label) ? label : label.charAt(0).toLowerCase() + label.slice(1)}.`;
-}
 const BAR_COLOR = "#616161"; // the trend bars
 // Light tints for the side panels. Polaris has no tinted-background prop, so they are inline styles.
 const PASSED_BACKGROUND = "rgba(41, 132, 90, 0.08)";
 const NOTE_BACKGROUND = "rgba(0, 0, 0, 0.035)";
 
-// Polaris has no primitive that takes an arbitrary hex color, and the category
-// colors mirror the Shopify product page (app/lib/categories.js), so the dot is
-// the only place that uses an inline style for color. The label next to it stays
-// in the default text color so it keeps AA contrast for every category hue.
-function Dot({ color, size = 10 }) {
-  return (
-    <span
-      aria-hidden="true"
-      style={{ display: "inline-block", width: size, height: size, borderRadius: "50%", background: color, flexShrink: 0 }}
-    />
-  );
-}
-
-function CategoryChip({ id, color = "base" }) {
-  const cat = categoryOf(id);
-  return (
-    <s-grid gridTemplateColumns="auto auto" gap="small-200" alignItems="center">
-      <Dot color={cat.color} size={8} />
-      <s-text color={color}>{cat.label}</s-text>
-    </s-grid>
-  );
-}
-
 // ---------- shared pieces ----------
-
-function Notices({ data, onUndo, busy }) {
-  if (!data) return null;
-  if (!data.ok) {
-    return (
-      <s-banner tone="critical" heading="Something went wrong">
-        <s-paragraph>{data.error}</s-paragraph>
-      </s-banner>
-    );
-  }
-  const { fix, undo, edit, refresh } = data;
-  return (
-    <>
-      {fix ? (
-        <s-banner tone={fix.errors.length ? "warning" : "success"} heading={`${ruleLabel(fix.ruleId)}: ${fix.fixed} fixed`}>
-          <s-stack direction="inline" gap="base" alignItems="center" justifyContent="space-between">
-            <s-paragraph>
-              {[
-                fix.skipped > 0 ? `${fix.skipped} skipped, no safe value to use` : null,
-                fix.errors.length > 0 ? `${fix.errors.length} failed: ${fix.errors.slice(0, 2).join("; ")}` : null,
-              ]
-                .filter(Boolean)
-                .join(". ") || "Catalog rescanned."}
-            </s-paragraph>
-            {fix.batchId ? (
-              <s-button variant="secondary" onClick={() => onUndo(fix.batchId)} disabled={busy || undefined}>Undo</s-button>
-            ) : null}
-          </s-stack>
-        </s-banner>
-      ) : null}
-      {undo ? (
-        <s-banner tone={undo.errors.length ? "warning" : "success"} heading={`${undo.undone} changes reverted`}>
-          {undo.errors.length ? <s-paragraph>{undo.errors.slice(0, 2).join("; ")}</s-paragraph> : null}
-        </s-banner>
-      ) : null}
-      {refresh ? (
-        <s-banner tone="success" heading={refresh.products ? `Re-checked ${refresh.products} ${refresh.products === 1 ? "product" : "products"}` : "Nothing to re-check"}>
-          <s-paragraph>
-            {refresh.before > refresh.after
-              ? `${refresh.before - refresh.after} ${refresh.before - refresh.after === 1 ? "finding" : "findings"} resolved, ${refresh.after} still open.`
-              : refresh.after
-                ? `${refresh.after} still open.`
-                : "All clear."}
-          </s-paragraph>
-        </s-banner>
-      ) : null}
-      {edit && !edit.ok ? (
-        <s-banner tone="critical" heading="Could not save">
-          <s-paragraph>{edit.error}</s-paragraph>
-        </s-banner>
-      ) : null}
-    </>
-  );
-}
 
 // A background scan (Shopify bulk export) in progress or failed. The page polls the loader while
 // one is running, so the banner updates on its own.
@@ -365,7 +200,7 @@ function Trend({ history }) {
 // The summary: how many potential problems the last scan left and how many problems the app has
 // fixed, either side of a divider. Below 640px of card width the two stack.
 function Summary({ result, history, fixedWeek, fixedTotal, checksOn, checksTotal }) {
-  const open = result.findings.length;
+  const open = result.open || 0;
   const previous = history && history.length >= 2 ? history[history.length - 2].open : null;
   const delta = previous == null ? 0 : open - previous;
   const affected = Math.max(0, result.total - result.clean);
@@ -613,7 +448,7 @@ function CategoryFilter({ result, filter, onChange }) {
     return { cat, count, show: count > 0 || hasChecks };
   }).filter((c) => c.show);
   if (cards.length < 2) return null;
-  const total = result.findings.length;
+  const total = result.open || 0;
   return (
     <s-stack direction="inline" gap="small-200" alignItems="center">
       <s-clickable-chip color={filter ? "base" : "strong"} onClick={() => onChange(null)} accessibilityLabel={`Show all areas, ${total} findings`}>
@@ -848,261 +683,17 @@ function Welcome({ checkCount, onScan, busy, scanning }) {
   );
 }
 
-// ---------- detail ----------
-
-// Column plan for one rule. The SKU column exists once findings record SKUs (scans saved before
-// that have none); the Fix column exists when some finding can be corrected here, and its input
-// track follows the values (a price or a weight needs far less room than a sentence). The Current
-// value column keeps a track of its own (CURRENT_TRACK) so a value and its note wrap as a block
-// instead of one word per line.
-function detailColumns(findings, features) {
-  const edits = findings.map((f) => f.edit).filter(Boolean);
-  const numeric = edits.length > 0 && edits.every(isNumericEdit);
-  return {
-    sku: findings.some((f) => f.sku !== undefined || f.variantCount !== undefined),
-    fix: features.inlineEdits && edits.length > 0,
-    fixTrack: numeric ? CORRECTED_TRACKS.numeric : CORRECTED_TRACKS.text,
-  };
-}
-
-// The Fix cell grid: the input track followed by one auto track per button, at every width. The
-// input track is a responsive list, so the button tracks go on each of its alternatives.
-function fixTracks(track, actionCount) {
-  const actions = actionTracks(actionCount);
-  return track.split(",").map((part) => `${part.trim()} ${actions}`).join(", ");
-}
-
-// What a row is about right now: the value a correction would replace, with the finding's detail
-// as a note when it says more, or the detail itself when nothing can be edited in place.
-function currentValue(f) {
-  let detail = f.detail && f.detail !== f.productTitle ? f.detail : "";
-  // Variant details start with the variant title, which the Product column already shows.
-  if (f.variantTitle && detail.startsWith(f.variantTitle)) detail = detail.slice(f.variantTitle.length).replace(/^:\s*/, "");
-  if (!f.edit) return { value: detail, note: "", empty: false };
-  const edit = f.edit;
-  const raw = String(edit.current ?? "");
-  const value = edit.kind === "weight" && raw ? `${raw} ${(edit.unit || "").toLowerCase()}` : truncate(raw, edit.multiline ? 80 : 40);
-  // A misspelling's detail repeats the word; keep the part that says where it is.
-  const note = f.word ? detail.replace(/^"[^"]*"\s*/, "") : detail && detail !== raw ? detail : "";
-  return { value, note, empty: raw === "" };
-}
-
-function SkuCell({ f }) {
-  if (f.sku) return <s-text>{f.sku}</s-text>;
-  if (f.sku === "") return <s-text color="subdued">None</s-text>;
-  if (f.variantCount > 1) return <s-text color="subdued">{f.variantCount} variants</s-text>;
-  return null;
-}
-
-function FindingRow({ f, columns, features, onSave, onLearn, onIgnore, onUndo, busy }) {
-  const edit = f.edit;
-  const [value, setValue] = useState(edit?.suggested ?? "");
-  const canSave = edit && value.trim() !== "" && value !== edit.current;
-  const current = currentValue(f);
-  const fieldLabel = `Corrected value for ${f.productTitle}`;
-  const variant = f.variantTitle && f.variantTitle !== "Default Title" ? f.variantTitle : "";
-  const canEdit = Boolean(edit) && features.inlineEdits;
-  // Save or Open in Shopify, then Trust word and Ignore when the plan includes them.
-  const buttons = 1 + (f.word && features.dictionary ? 1 : 0) + (features.ignores ? 1 : 0);
-  const currentCell = (
-    <s-stack gap="small-500">
-      {current.empty ? <s-text color="subdued">(empty)</s-text> : current.value ? <s-text>{current.value}</s-text> : null}
-      {current.note ? <s-text color="subdued">{truncate(current.note, 80)}</s-text> : null}
-    </s-stack>
-  );
-
-  return (
-    <s-table-row>
-      <s-table-cell>
-        <s-stack gap="small-500">
-          <s-link
-            href={adminUrl(f.productId)}
-            target="_blank"
-            accessibilityLabel={`${f.productTitle}, opens in Shopify admin in a new tab`}
-          >
-            {f.productTitle}
-          </s-link>
-          {variant ? <s-text color="subdued">{truncate(variant, 60)}</s-text> : null}
-        </s-stack>
-      </s-table-cell>
-      {columns.sku ? (
-        <s-table-cell>
-          {/* A track of its own, so SKUs and "N variants" do not wrap at the hyphen or the space. */}
-          <s-grid gridTemplateColumns="minmax(96px, max-content)"><SkuCell f={f} /></s-grid>
-        </s-table-cell>
-      ) : null}
-      <s-table-cell>
-        <s-grid gridTemplateColumns={CURRENT_TRACK}>{currentCell}</s-grid>
-      </s-table-cell>
-      <s-table-cell>
-        {f.saved ? (
-          // Saved from this page: the row stays so the change can be undone here; Refresh re-checks it.
-          <s-stack gap="small-500">
-            <s-stack direction="inline" gap="small-200" alignItems="center">
-              <s-icon type="check-circle" tone="success" />
-              <s-text>Saved</s-text>
-              <s-button variant="tertiary" onClick={() => onUndo(f.saved.batchId, f)} disabled={busy || undefined} accessibilityLabel={`Undo the saved change to ${f.productTitle}`}>
-                Undo
-              </s-button>
-            </s-stack>
-            {f.saved.value ? <s-text color="subdued">{truncate(f.saved.value, 60)}</s-text> : null}
-          </s-stack>
-        ) : (
-        <s-grid gridTemplateColumns={canEdit ? fixTracks(columns.fixTrack, buttons) : actionTracks(buttons + (edit ? 1 : 0))} gap="small-200" alignItems="center" justifyContent="start">
-          {edit && !canEdit ? (
-            // The correction field is part of a paid plan; the row can still be fixed in Shopify.
-            <s-link href="/app/plans">Upgrade to {planFor("inlineEdits").name}</s-link>
-          ) : null}
-          {canEdit ? (
-            edit.multiline ? (
-              <s-text-area
-                label={fieldLabel}
-                labelAccessibilityVisibility="exclusive"
-                rows={2}
-                placeholder={edit.hint || "Type a value"}
-                value={value}
-                onInput={(e) => setValue(e.target.value)}
-              ></s-text-area>
-            ) : (
-              <s-text-field
-                label={fieldLabel}
-                labelAccessibilityVisibility="exclusive"
-                placeholder={edit.hint || "Type a value"}
-                value={value}
-                onInput={(e) => setValue(e.target.value)}
-              ></s-text-field>
-            )
-          ) : null}
-          {canEdit ? (
-            // Secondary, not primary: a row full of disabled primary buttons reads as broken, and the
-            // page-level primary action stays the one primary button on the page.
-            <s-button
-              variant="secondary"
-              onClick={() => onSave(edit, value, f)}
-              disabled={!canSave || busy || undefined}
-              accessibilityLabel={`${edit.kind === "word" ? "Replace the word for" : "Save corrected value for"} ${f.productTitle}`}
-            >
-              {edit.kind === "word" ? "Replace" : "Save"}
-            </s-button>
-          ) : (
-            // A link styled as a tertiary button (s-button with href renders an anchor), so the
-            // cluster keeps the same height and gap as rows that have a Save button.
-            <s-button
-              variant="tertiary"
-              href={adminUrl(f.productId)}
-              target="_blank"
-              icon="external"
-              accessibilityLabel={`Open in Shopify: ${f.productTitle}, new tab`}
-            >
-              Open in Shopify
-            </s-button>
-          )}
-          {f.word && features.dictionary ? (
-            <s-button variant="tertiary" onClick={() => onLearn(f.word)} disabled={busy || undefined} accessibilityLabel={`Trust word ${f.word}: add it to the dictionary`}>
-              Trust word
-            </s-button>
-          ) : null}
-          {features.ignores ? (
-            <s-button variant="tertiary" onClick={() => onIgnore(f)} disabled={busy || undefined} accessibilityLabel={`Ignore ${f.productTitle}`}>
-              Ignore
-            </s-button>
-          ) : null}
-        </s-grid>
-        )}
-      </s-table-cell>
-    </s-table-row>
-  );
-}
-
-function Detail({ rule, findings, features, onSave, onLearn, onIgnore, onUndo, onBack, busy }) {
-  const [query, setQuery] = useState("");
-  const q = query.trim().toLowerCase();
-  const filtered = q
-    ? findings.filter((f) => f.productTitle.toLowerCase().includes(q) || (f.sku || "").toLowerCase().includes(q) || (f.detail || "").toLowerCase().includes(q))
-    : findings;
-  const rows = filtered.slice(0, MAX_ROWS);
-  const hidden = filtered.length - rows.length;
-  const columns = detailColumns(findings, features);
-  const help = !features.inlineEdits
-    ? `Open each product in Shopify to fix it. Inline edits are part of the ${planFor("inlineEdits").name} plan.`
-    : columns.fix
-      ? "Check the current value, type the correction and save, or ignore what is intentional. Saved changes stay listed until you refresh."
-      : "Open each product in Shopify to fix it, or ignore what is intentional.";
-
-  return (
-    // The visible "N findings" heading names the section (no accessibilityLabel, which would add a
-    // second hidden heading).
-    <s-section padding="none">
-      <s-box padding="base">
-        <s-stack gap="small">
-          <s-stack direction="inline" gap="small" alignItems="center">
-            <s-heading>{findings.length} {findings.length === 1 ? "finding" : "findings"}</s-heading>
-            <s-badge tone={TONE[rule.severity]}>{rule.severity} severity</s-badge>
-            <CategoryChip id={rule.category} color="subdued" />
-          </s-stack>
-          <s-text color="subdued">{passesWhen(rule.ruleId, rule.label)} {help}</s-text>
-        </s-stack>
-      </s-box>
-      <s-query-container>
-        <s-table loading={busy || undefined}>
-          {/* The header row comes first so the table finds it as soon as it upgrades; the filters
-              slot is placed by its slot name, not by position. */}
-          <s-table-header-row>
-            <s-table-header listSlot="primary">Product</s-table-header>
-            {columns.sku ? <s-table-header listSlot="labeled">SKU</s-table-header> : null}
-            <s-table-header listSlot="labeled">Current value</s-table-header>
-            <s-table-header listSlot="labeled">{columns.fix ? "Fix" : "Actions"}</s-table-header>
-          </s-table-header-row>
-          <s-search-field
-            slot="filters"
-            label="Search"
-            labelAccessibilityVisibility="exclusive"
-            placeholder="Search products and SKUs"
-            value={query}
-            onInput={(e) => setQuery(e.target.value)}
-          ></s-search-field>
-          <s-table-body>
-            {rows.map((f, i) => (
-              <FindingRow
-                key={`${f.productId}-${f.variantId || ""}-${f.word || ""}-${i}`}
-                f={f}
-                columns={columns}
-                onSave={onSave}
-                onLearn={onLearn}
-                onIgnore={onIgnore}
-                onUndo={onUndo}
-                features={features}
-                busy={busy}
-              />
-            ))}
-          </s-table-body>
-        </s-table>
-      </s-query-container>
-      {rows.length === 0 ? (
-        <s-box padding="base"><s-text color="subdued">No products match your search.</s-text></s-box>
-      ) : null}
-      {/* A second way back under the list, for readers who scrolled past the header. */}
-      <s-box padding="base">
-        <s-stack direction="inline" gap="base" alignItems="center" justifyContent="space-between">
-          <s-button variant="tertiary" icon="arrow-left" onClick={onBack}>Back to issues</s-button>
-          {hidden > 0 ? <s-text color="subdued">Showing {rows.length} of {filtered.length}. Use search to narrow down.</s-text> : null}
-        </s-stack>
-      </s-box>
-    </s-section>
-  );
-}
-
 // ---------- page ----------
 
 export default function Index() {
   const initial = useLoaderData();
   const fetcher = useFetcher();
+  const navigate = useNavigate();
   const busy = fetcher.state !== "idle";
   const data = fetcher.data;
   // The loader is revalidated after every action and while a background scan runs, so it is the
   // source of truth for the page; the fetcher's data only carries the action's notices.
   const { result, history, fixes, fixedWeek, fixedTotal, job, checkCount, plan } = initial;
-  const [selected, setSelected] = useState(null);
   const revalidator = useRevalidator();
   const scanning = job?.status === "running";
 
@@ -1114,53 +705,11 @@ export default function Index() {
     return () => clearInterval(timer);
   }, [scanning, revalidator]);
 
-  useEffect(() => {
-    if (result && selected && !result.rules.some((r) => r.ruleId === selected)) setSelected(null);
-  }, [result, selected]);
-
   const submit = (payload) => fetcher.submit(payload, { method: "post" });
-  const back = () => setSelected(null);
-  const runScan = () => { setSelected(null); submit({ intent: "scan" }); };
-  const runFix = (ruleId) => submit({ intent: "fix", ruleId });
-  const runUndo = (batchId, finding) => submit(finding ? { intent: "undo", batchId, finding: JSON.stringify(finding) } : { intent: "undo", batchId });
-  const learnWord = (word) => submit({ intent: "learn", word });
-  const ignoreFinding = (f) => submit({ intent: "ignore", finding: JSON.stringify(f) });
-  const saveEdit = (edit, value, finding) => submit({ intent: "edit", edit: JSON.stringify(edit), value, finding: JSON.stringify(finding) });
-  const runRefresh = (ruleId) => submit({ intent: "refresh", ruleId });
-  const refreshing = busy && fetcher.formData?.get("intent") === "refresh";
-
-  const rule = result && selected ? result.rules.find((r) => r.ruleId === selected) : null;
-
-  if (rule) {
-    const findings = result.findings.filter((f) => f.ruleId === rule.ruleId);
-    return (
-      <s-page heading={rule.label} inlineSize="large">
-        {/* The breadcrumb is the standard way back; the button makes it obvious. */}
-        <s-link slot="breadcrumb-actions" onClick={back}>Issues</s-link>
-        <s-button slot="secondary-actions" onClick={back}>Back to issues</s-button>
-        <s-button slot="secondary-actions" onClick={() => runRefresh(rule.ruleId)} loading={refreshing || undefined} disabled={busy || undefined}>
-          Refresh
-        </s-button>
-        {rule.fixable ? (
-          <s-button slot="primary-action" variant="primary" onClick={() => runFix(rule.ruleId)} disabled={busy || undefined}>
-            {rule.fixLabel}
-          </s-button>
-        ) : null}
-        <Notices data={data} onUndo={runUndo} busy={busy} />
-        <Detail
-          rule={rule}
-          findings={findings}
-          onSave={saveEdit}
-          onLearn={learnWord}
-          onIgnore={ignoreFinding}
-          onBack={back}
-          onUndo={runUndo}
-          features={plan.features}
-          busy={busy}
-        />
-      </s-page>
-    );
-  }
+  const runScan = () => submit({ intent: "scan" });
+  const runUndo = (batchId) => submit({ intent: "undo", batchId });
+  // Each check has a page of its own (app.issues.$ruleId.jsx) with the products it flagged.
+  const openIssue = (ruleId) => navigate(`/app/issues/${ruleId}`);
 
   return (
     <s-page heading="TidyUp: Product Data Cleanup" inlineSize="large">
@@ -1181,7 +730,7 @@ export default function Index() {
           fixedWeek={fixedWeek}
           fixedTotal={fixedTotal}
           plan={plan}
-          onSelect={setSelected}
+          onSelect={openIssue}
           onUndo={runUndo}
           busy={busy}
         />
