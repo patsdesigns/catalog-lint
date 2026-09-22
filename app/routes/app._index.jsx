@@ -6,11 +6,11 @@ import { startScan, advanceJob, refreshAfter } from "../lib/rescan.server";
 import { countProducts, createdSince, scanNewProducts } from "../lib/scan.server";
 import { pendingCount, scanPendingProducts } from "../lib/events.server";
 import { cleanStreak } from "../lib/snapshots.server";
-import { undoFix, fixedCount } from "../lib/fixes.server";
+import { applyFix, undoFix, fixedCount } from "../lib/fixes.server";
 import { ignoreCheck, restoreCheck } from "../lib/checks.server";
 import { latestScan, scanHistory, saveScan } from "../lib/scans.server";
 import { currentPlan } from "../lib/billing.server";
-import { planFor, lockedAreas, allAreasPlan } from "../lib/plans";
+import { planFor, lockedAreas, areaLocked, allAreasPlan } from "../lib/plans";
 import { RULE_CATALOG } from "../lib/rules.server";
 import { CATEGORIES, categoryOf } from "../lib/categories";
 import { PASS_LABELS, SETUP_LABELS } from "../lib/checkLabels";
@@ -70,6 +70,7 @@ export async function action({ request }) {
     let scanNew = null;
     let ignored = null;
     let restored = null;
+    let fix = null;
     if (intent === "scan") {
       job = await startScan(admin.graphql, session.shop, plan.productLimit);
     }
@@ -101,8 +102,18 @@ export async function action({ request }) {
     if (intent === "restoreRule") {
       restored = await restoreCheck(admin.graphql, session.shop, form.get("ruleId"), form.get("scanId"), plan.productLimit);
     }
+    if (intent === "fixAll") {
+      // The bulk fix from a Start here row: the one the issue page runs, undoable from the notice.
+      const ruleId = form.get("ruleId");
+      const rule = RULE_CATALOG.find((r) => r.id === ruleId);
+      if (!rule) throw new Error("That check does not exist.");
+      if (areaLocked(plan, rule.category)) throw new Error(`${categoryOf(rule.category).label} is part of the ${allAreasPlan().name} plan.`);
+      const latest = await latestScan(session.shop);
+      fix = { ruleId, ...(await applyFix(admin.graphql, session.shop, ruleId, latest?.findings || [])) };
+      await refreshAfter(admin.graphql, session.shop, { kind: "products", ids: fix.productIds, ruleId }, plan.productLimit);
+    }
     const state = await loadState(session.shop);
-    return { ok: true, ...state, undo, scanNew, job, plan, ignored, restored };
+    return { ok: true, ...state, undo, scanNew, job, plan, ignored, restored, fix };
   } catch (err) {
     return { ok: false, error: err.message || String(err) };
   }
@@ -132,9 +143,13 @@ const OVERVIEW_TRACKS = {
 // width the panel moves under the table. (Unquoted minmax() breaks Polaris's responsive parser,
 // since parentheses and commas are delimiters there, so these lists use fr units only.)
 const CARD_COLUMNS = "@container (inline-size <= 1000px) 1fr, 3fr 1fr";
-// Summary: three figures (potential problems, problems fixed, revenue at risk) with dividers between.
-const HERO_COLUMNS = "@container (inline-size <= 720px) 1fr, 1fr auto 1fr auto 1fr";
-const HERO_DIVIDER_DISPLAY = "@container (inline-size <= 720px) none, auto";
+// The overview header: the summary (about 55%) beside Start here (about 45%), stacked below 900px.
+const HEADER_COLUMNS = "@container (inline-size <= 900px) 1fr, 11fr 9fr";
+// A summary tile: label and number on the left, its supporting lines on the right; one column when
+// the section is narrow.
+const STAT_COLUMNS = "@container (inline-size <= 480px) 1fr, 176px 1fr";
+// A Start here row: rank, issue and area, finding count, action.
+const START_COLUMNS = "auto 1fr auto auto";
 // Revenue at risk: what each contributing check means, short enough for one line.
 const RISK_LABELS = { zero_price: "no price", price_below_cost: "priced below cost", not_published: "not visible on store", active_no_stock: "out of stock", missing_image: "no image" };
 const BLURB_COLUMNS = "@container (inline-size <= 700px) 1fr, 1fr 1fr 1fr";
@@ -148,7 +163,6 @@ function splitLabel(label) {
 const BAR_COLOR = "#616161"; // the trend bars
 // Light tints for the side panels. Polaris has no tinted-background prop, so they are inline styles.
 const PASSED_BACKGROUND = "rgba(41, 132, 90, 0.08)";
-const NOTE_BACKGROUND = "rgba(0, 0, 0, 0.035)";
 
 // ---------- shared pieces ----------
 
@@ -216,21 +230,25 @@ function AccentTop({ color, children }) {
 
 // ---------- summary ----------
 
-// A headline figure: label, display-size number (or a preformatted text such as an amount) with an
-// optional badge beside it, a hint, and any extra content under it. Polaris has no display-size
-// text, so the number is a styled span.
-const FIGURE_STYLE = { fontSize: "40px", lineHeight: 1, fontWeight: 650, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" };
-function Figure({ label, value, text, badge, hint, children }) {
+// A compact summary tile: the label over a display-size number (or a preformatted text such as an
+// amount) with an optional badge, and its supporting lines beside them. Polaris has no
+// display-size text, so the number is a styled span.
+const STAT_STYLE = { fontSize: "32px", lineHeight: 1, fontWeight: 650, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" };
+// The summary column fills its card (a plain div: the card box has a definite height once the header
+// grid stretches it), so the footer sits at the bottom whatever height Start here needs.
+const FILL_COLUMN = { height: "100%", display: "flex", flexDirection: "column", justifyContent: "space-between", gap: "16px" };
+function Stat({ label, value, text, badge, children }) {
   return (
-    <s-stack gap="small">
-      <s-text color="subdued">{label}</s-text>
-      <s-stack direction="inline" gap="small" alignItems="center">
-        <span style={FIGURE_STYLE}>{text ?? (value || 0).toLocaleString("en-US")}</span>
-        {badge}
+    <s-grid gridTemplateColumns={STAT_COLUMNS} gap="base" alignItems="center">
+      <s-stack gap="small-200">
+        <s-text color="subdued">{label}</s-text>
+        <s-stack direction="inline" gap="small" alignItems="center">
+          <span style={STAT_STYLE}>{text ?? (value || 0).toLocaleString("en-US")}</span>
+          {badge}
+        </s-stack>
       </s-stack>
-      {hint ? <s-text color="subdued">{hint}</s-text> : null}
-      {children}
-    </s-stack>
+      <s-stack gap="small-500">{children}</s-stack>
+    </s-grid>
   );
 }
 
@@ -273,8 +291,8 @@ function Trend({ history }) {
   );
 }
 
-// The summary: how many potential problems the last scan left and how many problems the app has
-// fixed, either side of a divider. Below 640px of card width the two stack.
+// The summary: three compact tiles stacked, potential problems, problems fixed and revenue at risk,
+// with the last scan and the checks running at the bottom. Beside Start here in the header.
 function Summary({ result, history, fixedWeek, fixedTotal, checksOn, checksTotal, newProducts, streak, locked }) {
   const open = result.open || 0;
   const lockedFindings = result.rules.filter((r) => locked.includes(r.category)).reduce((sum, r) => sum + r.count, 0);
@@ -289,75 +307,70 @@ function Summary({ result, history, fixedWeek, fixedTotal, checksOn, checksTotal
   const lastScan = `Last scan ${timeAgo(result.scannedAt)} · ${products}${result.ignoredCount ? ` · ${n(result.ignoredCount)} ignored` : ""}${newProducts ? ` · ${n(newProducts)} added since` : ""}`;
   return (
     <s-section accessibilityLabel="Catalog summary">
-      <s-query-container>
-        <s-stack gap="base">
-          <s-grid gridTemplateColumns={HERO_COLUMNS} gap="large">
-            <Figure
-              label="Potential problems"
-              value={open}
-              badge={
-                delta !== 0 ? (
-                  // Fewer is better: the direction is in the text as well as the icon and tone.
-                  <s-badge tone={delta < 0 ? "success" : "critical"} icon={delta < 0 ? "arrow-down" : "arrow-up"}>
-                    {delta < 0 ? "Down" : "Up"} {n(Math.abs(delta))}
-                  </s-badge>
-                ) : null
-              }
-              hint={open ? `In ${n(affected)} of ${products}, from ${n(result.rules.length)} ${result.rules.length === 1 ? "check" : "checks"}` : "Nothing to fix"}
-            >
-              {lockedFindings > 0 ? <s-text color="subdued">{n(lockedFindings)} in {allAreasPlan().name} areas</s-text> : null}
-              {result.high === 0 ? (
-                // The clean streak: consecutive daily snapshots with nothing high open.
-                <s-stack direction="inline" gap="small-200" alignItems="center">
-                  <s-icon type="check-circle" tone="success" />
-                  <s-text color="subdued">
-                    {streak > 0 ? `No high severity problems for ${streak} ${streak === 1 ? "day" : "days"}` : "No high severity problems"}
-                  </s-text>
-                </s-stack>
-              ) : null}
-              <Trend history={history} />
-            </Figure>
-            <s-box display={HERO_DIVIDER_DISPLAY}>
-              <s-divider direction="block"></s-divider>
-            </s-box>
-            <Figure
-              label="Problems fixed"
-              value={fixedTotal}
-              hint={fixedWeek ? `${n(fixedWeek)} this week` : fixedTotal ? "None this week" : "Fixes you apply or save are counted here"}
-            >
-              <s-text color="subdued">
-                <s-link href="/app/fixes">Recent fixes</s-link>
-                {fixedTotal ? " · every fix can be undone there" : ""}
-              </s-text>
-            </Figure>
-            <s-box display={HERO_DIVIDER_DISPLAY}>
-              <s-divider direction="block"></s-divider>
-            </s-box>
-            <Figure
-              label="Revenue at risk"
-              value={atRisk.products}
-              text={atRisk.amount > 0 ? formatMoney(atRisk.amount, atRisk.currency) : null}
-              hint={
-                atRisk.products
-                  ? `${n(atRisk.products)} ${atRisk.products === 1 ? "product" : "products"} cannot sell or cannot be found`
-                  : "Every product can be bought and found"
-              }
-            >
-              {riskTop.length ? (
-                // The two checks behind most of it, each a link to its issue page.
+      {/* Two groups, the tiles and the footer, so the footer stays at the bottom of the card. The query
+          container is a box of its own, so it sits inside the filling div rather than around it. */}
+      <div style={FILL_COLUMN}>
+        <s-query-container>
+          <s-stack gap="base">
+          <Stat
+            label="Potential problems"
+            value={open}
+            badge={
+              delta !== 0 ? (
+                // Fewer is better: the direction is in the text as well as the icon and tone.
+                <s-badge tone={delta < 0 ? "success" : "critical"} icon={delta < 0 ? "arrow-down" : "arrow-up"}>
+                  {delta < 0 ? "Down" : "Up"} {n(Math.abs(delta))}
+                </s-badge>
+              ) : null
+            }
+          >
+            <s-text color="subdued">
+              {open ? `In ${n(affected)} of ${products}, from ${n(result.rules.length)} ${result.rules.length === 1 ? "check" : "checks"}` : "Nothing to fix"}
+              {lockedFindings > 0 ? ` · ${n(lockedFindings)} in ${allAreasPlan().name} areas` : ""}
+            </s-text>
+            {result.high === 0 ? (
+              // The clean streak: consecutive daily snapshots with nothing high open.
+              <s-stack direction="inline" gap="small-200" alignItems="center">
+                <s-icon type="check-circle" tone="success" />
                 <s-text color="subdued">
-                  {riskTop.map(([ruleId, count], i) => (
-                    <Fragment key={ruleId}>
-                      {i ? " · " : ""}
-                      <s-link href={`/app/issues/${ruleId}`}>
-                        {n(count)} {RISK_LABELS[ruleId] || ruleId.replace(/_/g, " ")}
-                      </s-link>
-                    </Fragment>
-                  ))}
+                  {streak > 0 ? `No high severity problems for ${streak} ${streak === 1 ? "day" : "days"}` : "No high severity problems"}
                 </s-text>
-              ) : null}
-            </Figure>
-          </s-grid>
+              </s-stack>
+            ) : null}
+            <Trend history={history} />
+          </Stat>
+          <s-divider></s-divider>
+          <Stat label="Problems fixed" value={fixedTotal}>
+            <s-text color="subdued">{fixedWeek ? `${n(fixedWeek)} this week` : fixedTotal ? "None this week" : "Fixes you apply or save are counted here"}</s-text>
+            <s-text color="subdued">
+              <s-link href="/app/fixes">Recent fixes</s-link>
+              {fixedTotal ? " · every fix can be undone there" : ""}
+            </s-text>
+          </Stat>
+          <s-divider></s-divider>
+          <Stat label="Revenue at risk" value={atRisk.products} text={atRisk.amount > 0 ? formatMoney(atRisk.amount, atRisk.currency) : null}>
+            <s-text color="subdued">
+              {atRisk.products
+                ? `${n(atRisk.products)} ${atRisk.products === 1 ? "product" : "products"} cannot sell or cannot be found`
+                : "Every product can be bought and found"}
+            </s-text>
+            {riskTop.length ? (
+              // The two checks behind most of it, each a link to its issue page.
+              <s-text color="subdued">
+                {riskTop.map(([ruleId, count], i) => (
+                  <Fragment key={ruleId}>
+                    {i ? " · " : ""}
+                    <s-link href={`/app/issues/${ruleId}`}>
+                      {n(count)} {RISK_LABELS[ruleId] || ruleId.replace(/_/g, " ")}
+                    </s-link>
+                  </Fragment>
+                ))}
+              </s-text>
+            ) : null}
+          </Stat>
+          </s-stack>
+        </s-query-container>
+          <s-stack gap="base">
           <s-divider></s-divider>
           <s-stack direction="inline" gap="base" alignItems="center" justifyContent="space-between">
             <s-text color="subdued">{lastScan}</s-text>
@@ -366,8 +379,8 @@ function Summary({ result, history, fixedWeek, fixedTotal, checksOn, checksTotal
               <s-link href="/app/settings">Settings</s-link>
             </s-text>
           </s-stack>
-        </s-stack>
-      </s-query-container>
+          </s-stack>
+      </div>
     </s-section>
   );
 }
@@ -531,44 +544,72 @@ function CardBody({ table, panel }) {
 }
 
 // The failing checks with the most weight across every section, so a merchant knows where to
-// begin: findings count times severity.
-function StartHere({ result, locked, onSelect, onIgnore, busy, showPanel }) {
+// begin: findings count times severity. Beside the summary in the header.
+function StartHere({ result, locked, onSelect, onFixAll, busy }) {
+  const n = (v) => (v || 0).toLocaleString("en-US");
   const ranked = result.rules
     .filter((r) => !locked.includes(r.category))
     .sort((a, b) => SEVERITY_WEIGHT[b.severity] * b.count - SEVERITY_WEIGHT[a.severity] * a.count || b.count - a.count)
     .slice(0, START_HERE_ROWS);
-  if (ranked.length === 0) return null;
-  const table = (
-    <s-table loading={busy || undefined}>
-      <IssueHeaderRow />
-      <s-table-body>
-        {ranked.map((rule) => (
-          <IssueRow key={rule.ruleId} rule={rule} onSelect={onSelect} onIgnore={onIgnore} busy={busy} showCategory />
-        ))}
-      </s-table-body>
-    </s-table>
-  );
-  const panel = showPanel ? (
-    <div style={{ background: NOTE_BACKGROUND }}>
-      <s-box padding="base">
-        <s-stack gap="small-200">
-          <s-stack direction="inline" gap="small-200" alignItems="center">
-            <s-icon type="flag" />
-            <s-text type="strong">Why these first</s-text>
-          </s-stack>
-          <s-text color="subdued">Ranked by how many findings each check has, weighted by how serious they are.</s-text>
-          <s-text color="subdued">
-            High severity can stop a product from selling or being found, medium costs search traffic or margin, low is
-            housekeeping.
-          </s-text>
-        </s-stack>
-      </s-box>
-    </div>
-  ) : null;
   return (
-    <s-section padding="none">
-      <CardHeader heading="Start Here" badges={<s-badge tone="warning" size="small">Highest impact</s-badge>} aside={<s-text color="subdued">Most findings, weighted by severity</s-text>} />
-      <CardBody table={table} panel={panel} />
+    <s-section heading="Start here">
+      <s-stack gap="base">
+        <s-text color="subdued">Ranked by findings, weighted by severity</s-text>
+        {ranked.length === 0 ? (
+          <s-text color="subdued">Every open issue is in a {allAreasPlan().name} area.</s-text>
+        ) : (
+          <s-stack gap="small">
+            {ranked.map((rule, i) => (
+              <Fragment key={rule.ruleId}>
+                {i ? <s-divider></s-divider> : null}
+                <s-grid gridTemplateColumns={START_COLUMNS} gap="base" alignItems="center">
+                  <s-text color="subdued" fontVariantNumeric="tabular-nums">
+                    {i + 1}
+                  </s-text>
+                  <s-stack gap="small-500">
+                    <s-link onClick={() => onSelect(rule.ruleId)}>{rule.label}</s-link>
+                    <s-text color="subdued">{categoryOf(rule.category).label}</s-text>
+                  </s-stack>
+                  <s-text color="subdued" fontVariantNumeric="tabular-nums">
+                    {n(rule.count)} {rule.count === 1 ? "finding" : "findings"}
+                  </s-text>
+                  <s-stack direction="inline" justifyContent="end">
+                    {rule.fixable ? (
+                      // The bulk fix the issue page offers, run from here; the notice that follows can undo it.
+                      <s-button
+                        variant="secondary"
+                        onClick={() => onFixAll(rule.ruleId)}
+                        disabled={busy || undefined}
+                        accessibilityLabel={`Fix all: ${rule.fixLabel || rule.label}`}
+                      >
+                        Fix all
+                      </s-button>
+                    ) : (
+                      <s-link onClick={() => onSelect(rule.ruleId)} accessibilityLabel={`Review ${rule.label}`}>
+                        Review
+                      </s-link>
+                    )}
+                  </s-stack>
+                </s-grid>
+              </Fragment>
+            ))}
+          </s-stack>
+        )}
+      </s-stack>
+    </s-section>
+  );
+}
+
+// Nothing open: takes the place of Start here in the header.
+function CleanSection({ total }) {
+  return (
+    // The visible heading names the section; no accessibilityLabel, or the outline gets two headings.
+    <s-section>
+      <s-stack alignItems="center" gap="small" paddingBlock="large">
+        <s-icon type="check-circle" tone="success" />
+        <s-heading>Your catalog is clean</s-heading>
+        <s-text color="subdued">No issues found across {total} products.</s-text>
+      </s-stack>
     </s-section>
   );
 }
@@ -671,7 +712,7 @@ function CategoryCard({ cat, rules, checks, showChecks, showPassed, locked, onSe
 // Remembered per browser: whether the cards list every passed check or just the count.
 const SHOW_PASSED_KEY = "catalog-lint:show-passed";
 
-function Overview({ result, history, fixedWeek, fixedTotal, plan, newProducts, streak, locked, onSelect, onIgnore, busy }) {
+function Overview({ result, history, fixedWeek, fixedTotal, plan, newProducts, streak, locked, onSelect, onIgnore, onFixAll, busy }) {
   const [filter, setFilter] = useState(null);
   const [showPassed, setShowPassed] = useState(false);
   const checks = result.checks || [];
@@ -696,7 +737,15 @@ function Overview({ result, history, fixedWeek, fixedTotal, plan, newProducts, s
 
   return (
     <>
-      <Summary result={result} history={history} fixedWeek={fixedWeek} fixedTotal={fixedTotal} checksOn={checksOn} checksTotal={checks.length} newProducts={newProducts} streak={streak} locked={locked} />
+      {/* The header: the summary beside Start here, the same height, stacked when narrow. */}
+      <s-box paddingBlockEnd="small">
+      <s-query-container>
+        <s-grid gridTemplateColumns={HEADER_COLUMNS} gap="base">
+          <Summary result={result} history={history} fixedWeek={fixedWeek} fixedTotal={fixedTotal} checksOn={checksOn} checksTotal={checks.length} newProducts={newProducts} streak={streak} locked={locked} />
+          {result.rules.length === 0 ? <CleanSection total={result.total} /> : <StartHere result={result} locked={locked} onSelect={onSelect} onFixAll={onFixAll} busy={busy} />}
+        </s-grid>
+      </s-query-container>
+      </s-box>
 
       {newProducts > 0 && !plan.features.newProductScans ? (
         // The free plan can only run a full scan; the paid plans get a Scan New Products button.
@@ -717,19 +766,6 @@ function Overview({ result, history, fixedWeek, fixedTotal, plan, newProducts, s
           </s-paragraph>
         </s-banner>
       ) : null}
-
-      {result.rules.length === 0 ? (
-        // The visible heading names the section; no accessibilityLabel, or the outline gets two headings.
-        <s-section>
-          <s-stack alignItems="center" gap="small" paddingBlock="large">
-            <s-icon type="check-circle" tone="success" />
-            <s-heading>Your catalog is clean</s-heading>
-            <s-text color="subdued">No issues found across {result.total} products.</s-text>
-          </s-stack>
-        </s-section>
-      ) : (
-        <StartHere result={result} locked={locked} onSelect={onSelect} onIgnore={onIgnore} busy={busy} showPanel={showChecks} />
-      )}
 
       <s-stack direction="inline" gap="base" alignItems="center" justifyContent="space-between">
         <CategoryFilter result={result} locked={locked} filter={filter} onChange={setFilter} />
@@ -829,6 +865,7 @@ export default function Index() {
   // Quick ignore from a table row, and its undo from the notice that follows.
   const runIgnore = (ruleId) => submit({ intent: "ignoreRule", ruleId });
   const runRestore = (ruleId, scanId) => submit({ intent: "restoreRule", ruleId, scanId: scanId ?? "" });
+  const runFixAll = (ruleId) => submit({ intent: "fixAll", ruleId });
   const runScanNew = () => submit({ intent: "scanNew" });
   const scanningNew = busy && fetcher.formData?.get("intent") === "scanNew";
   // Each check has a page of its own (app.issues.$ruleId.jsx) with the products it flagged.
@@ -874,6 +911,7 @@ export default function Index() {
           locked={locked}
           onSelect={openIssue}
           onIgnore={runIgnore}
+          onFixAll={runFixAll}
           busy={busy}
         />
       )}
