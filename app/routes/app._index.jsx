@@ -827,7 +827,7 @@ function Welcome({ checkCount, onScan, busy, scanning }) {
               </s-paragraph>
             </div>
             <s-button variant="primary" onClick={onScan} loading={busy || undefined} disabled={scanning || undefined}>
-              {scanning ? "Scanning…" : "Run first scan"}
+              {scanning ? "Scanning…" : "Run Full Scan"}
             </s-button>
           </s-stack>
           <s-divider></s-divider>
