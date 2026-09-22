@@ -1,5 +1,6 @@
 import prisma from "../db.server";
 import { ensureDailySnapshot } from "./snapshots.server";
+import { atRiskFromFindings } from "./rules.server";
 
 // One row per scan. Findings, the rule summary and the list of checks that ran are stored as
 // JSON strings so the overview can render instantly without re-reading the catalog.
@@ -19,6 +20,7 @@ export async function saveScan(shop, result) {
       catalogTotal: result.catalogTotal ?? result.total,
       readAt: result.readAt ? new Date(result.readAt) : new Date(),
       productIds: JSON.stringify(result.productIds || []),
+      atRisk: result.atRisk ? JSON.stringify(result.atRisk) : null,
     },
   });
   // The first result saved on a day is that day's snapshot (clean streak, weekly digest).
@@ -65,6 +67,7 @@ function openCount(rulesJson) {
 }
 
 function toResult(row) {
+  const findings = JSON.parse(row.findings);
   return {
     id: row.id,
     score: row.score,
@@ -72,13 +75,15 @@ function toResult(row) {
     clean: row.clean,
     durationMs: row.durationMs,
     rules: JSON.parse(row.rules),
-    findings: JSON.parse(row.findings),
+    findings,
     checks: JSON.parse(row.checks || "[]"), // scans saved before checks were recorded have none
     names: JSON.parse(row.names || "[]"), // catalog names the title spell check trusts
     catalogTotal: row.catalogTotal || row.total,
     truncated: (row.catalogTotal || row.total) > row.total, // a plan limit left products unscanned
     readAt: (row.readAt || row.createdAt).toISOString(), // when the catalog was read: new products are those added since
     productIds: JSON.parse(row.productIds || "[]"), // every product the scan covers
+    // Results saved before revenue at risk was recorded get it from their findings, without a currency.
+    atRisk: row.atRisk ? JSON.parse(row.atRisk) : { ...atRiskFromFindings(findings), currency: null },
     scannedAt: row.createdAt.toISOString(),
   };
 }

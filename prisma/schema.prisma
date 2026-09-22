@@ -46,6 +46,7 @@ model Scan {
   catalogTotal Int    @default(0)
   readAt     DateTime?
   productIds String   @default("[]")
+  atRisk     String?
   createdAt  DateTime @default(now())
 
   @@index([shop, createdAt])

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { Fragment, useState, useEffect } from "react";
 import { useFetcher, useLoaderData, useNavigate, useRevalidator } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
@@ -14,7 +14,7 @@ import { planFor, lockedAreas, allAreasPlan } from "../lib/plans";
 import { RULE_CATALOG } from "../lib/rules.server";
 import { CATEGORIES, categoryOf } from "../lib/categories";
 import { PASS_LABELS, SETUP_LABELS } from "../lib/checkLabels";
-import { timeAgo } from "../lib/format";
+import { formatMoney, timeAgo } from "../lib/format";
 import { TONE, Dot, Notices } from "../lib/ui";
 
 // ---------- server ----------
@@ -132,9 +132,11 @@ const OVERVIEW_TRACKS = {
 // width the panel moves under the table. (Unquoted minmax() breaks Polaris's responsive parser,
 // since parentheses and commas are delimiters there, so these lists use fr units only.)
 const CARD_COLUMNS = "@container (inline-size <= 1000px) 1fr, 3fr 1fr";
-// Summary: two figures (potential problems, problems fixed) either side of a divider.
-const HERO_COLUMNS = "@container (inline-size <= 640px) 1fr, 1fr auto 1fr";
-const HERO_DIVIDER_DISPLAY = "@container (inline-size <= 640px) none, auto";
+// Summary: three figures (potential problems, problems fixed, revenue at risk) with dividers between.
+const HERO_COLUMNS = "@container (inline-size <= 720px) 1fr, 1fr auto 1fr auto 1fr";
+const HERO_DIVIDER_DISPLAY = "@container (inline-size <= 720px) none, auto";
+// Revenue at risk: what each contributing check means, short enough for one line.
+const RISK_LABELS = { zero_price: "no price", price_below_cost: "priced below cost", not_published: "not visible on store", active_no_stock: "out of stock", missing_image: "no image" };
 const BLURB_COLUMNS = "@container (inline-size <= 700px) 1fr, 1fr 1fr 1fr";
 
 // "Description has junk (raw URL, empty tags, spam phrases)" -> the label and its aside, so the aside
@@ -214,15 +216,16 @@ function AccentTop({ color, children }) {
 
 // ---------- summary ----------
 
-// A headline figure: label, display-size number with an optional badge beside it, a hint, and any
-// extra content under it. Polaris has no display-size text, so the number is a styled span.
+// A headline figure: label, display-size number (or a preformatted text such as an amount) with an
+// optional badge beside it, a hint, and any extra content under it. Polaris has no display-size
+// text, so the number is a styled span.
 const FIGURE_STYLE = { fontSize: "40px", lineHeight: 1, fontWeight: 650, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" };
-function Figure({ label, value, badge, hint, children }) {
+function Figure({ label, value, text, badge, hint, children }) {
   return (
     <s-stack gap="small">
       <s-text color="subdued">{label}</s-text>
       <s-stack direction="inline" gap="small" alignItems="center">
-        <span style={FIGURE_STYLE}>{(value || 0).toLocaleString("en-US")}</span>
+        <span style={FIGURE_STYLE}>{text ?? (value || 0).toLocaleString("en-US")}</span>
         {badge}
       </s-stack>
       {hint ? <s-text color="subdued">{hint}</s-text> : null}
@@ -280,6 +283,9 @@ function Summary({ result, history, fixedWeek, fixedTotal, checksOn, checksTotal
   const affected = Math.max(0, result.total - result.clean);
   const n = (v) => (v || 0).toLocaleString("en-US");
   const products = `${n(result.total)} ${result.total === 1 ? "product" : "products"}`;
+  // Revenue at risk: results saved before it was recorded carry a computed one (scans.server.js).
+  const atRisk = result.atRisk || { products: 0, amount: 0, currency: null, byRule: {} };
+  const riskTop = Object.entries(atRisk.byRule || {}).sort((a, b) => b[1] - a[1]).slice(0, 2);
   const lastScan = `Last scan ${timeAgo(result.scannedAt)} · ${products}${result.ignoredCount ? ` · ${n(result.ignoredCount)} ignored` : ""}${newProducts ? ` · ${n(newProducts)} added since` : ""}`;
   return (
     <s-section accessibilityLabel="Catalog summary">
@@ -323,6 +329,33 @@ function Summary({ result, history, fixedWeek, fixedTotal, checksOn, checksTotal
                 <s-link href="/app/fixes">Recent fixes</s-link>
                 {fixedTotal ? " · every fix can be undone there" : ""}
               </s-text>
+            </Figure>
+            <s-box display={HERO_DIVIDER_DISPLAY}>
+              <s-divider direction="block"></s-divider>
+            </s-box>
+            <Figure
+              label="Revenue at risk"
+              value={atRisk.products}
+              text={atRisk.amount > 0 ? formatMoney(atRisk.amount, atRisk.currency) : null}
+              hint={
+                atRisk.products
+                  ? `${n(atRisk.products)} ${atRisk.products === 1 ? "product" : "products"} cannot sell or cannot be found`
+                  : "Every product can be bought and found"
+              }
+            >
+              {riskTop.length ? (
+                // The two checks behind most of it, each a link to its issue page.
+                <s-text color="subdued">
+                  {riskTop.map(([ruleId, count], i) => (
+                    <Fragment key={ruleId}>
+                      {i ? " · " : ""}
+                      <s-link href={`/app/issues/${ruleId}`}>
+                        {n(count)} {RISK_LABELS[ruleId] || ruleId.replace(/_/g, " ")}
+                      </s-link>
+                    </Fragment>
+                  ))}
+                </s-text>
+              ) : null}
             </Figure>
           </s-grid>
           <s-divider></s-divider>

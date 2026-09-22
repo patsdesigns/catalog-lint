@@ -66,6 +66,15 @@ function cleanFormatting(html) {
 const FILENAME_ALT_RE = /\.(jpe?g|png|gif|webp|heic|tiff?|bmp|svg)$|^(img|dsc|dcim|pxl|dscn|screenshot|image|photo)[_ -]?\d+|^\d{4,}[_-]?\d*$/i;
 const MIN_MARGIN = 0.1;
 
+// Findings that stop a product from selling or being found. The home page sums the lowest variant
+// price of every product with one of them as revenue at risk (atRiskFromFindings), so these
+// findings carry that price.
+export const RISK_RULE_IDS = new Set(["zero_price", "price_below_cost", "not_published", "active_no_stock", "missing_image"]);
+function lowestPrice(product) {
+  const prices = (product.variants || []).map((v) => Number(v.price)).filter((n) => Number.isFinite(n));
+  return prices.length ? Math.min(...prices) : 0;
+}
+
 function finding(rule, product, extra = {}) {
   const f = {
     ruleId: rule.id,
@@ -87,6 +96,7 @@ function finding(rule, product, extra = {}) {
     f.variantCount = variants.length;
   }
   if (f.edit) f.edit = { ruleId: rule.id, productId: product.id, title: product.title, ...f.edit };
+  if (RISK_RULE_IDS.has(rule.id)) f.price = lowestPrice(product);
   return f;
 }
 const productEdit = (field, current, suggested = "", multiline = false) => ({ kind: "product", field, current, suggested, multiline });
@@ -974,6 +984,24 @@ export function summarize(products, findings, settings = {}) {
 
 // The same summary from a product count instead of the products themselves, so a stored scan can
 // be re-summarized after an incremental refresh. Products without findings count as clean.
+// Revenue at risk: every product with a finding from RISK_RULE_IDS, counted once, and the sum of
+// their lowest variant prices, which those findings carry. byRule counts products per check. The
+// currency is added by the scan that knows it.
+export function atRiskFromFindings(findings) {
+  const products = new Map();
+  const perRule = {};
+  for (const f of findings) {
+    if (!RISK_RULE_IDS.has(f.ruleId)) continue;
+    if (!products.has(f.productId)) products.set(f.productId, Number(f.price) || 0);
+    if (!perRule[f.ruleId]) perRule[f.ruleId] = new Set();
+    perRule[f.ruleId].add(f.productId);
+  }
+  let amount = 0;
+  for (const price of products.values()) amount += price;
+  const byRule = Object.fromEntries(Object.entries(perRule).map(([id, set]) => [id, set.size]));
+  return { products: products.size, amount: Math.round(amount * 100) / 100, byRule };
+}
+
 export function summarizeFindings(total, findings, settings = {}) {
   const byRule = {};
   const penalty = new Map();
@@ -1002,5 +1030,5 @@ export function summarizeFindings(total, findings, settings = {}) {
     count: byRule[rule.id]?.count || 0,
     status: byRule[rule.id] ? "failed" : off.has(rule.id) ? "off" : rule.applies && !rule.applies(settings) ? "skipped" : "passed",
   }));
-  return { score, total, clean, rules, checks };
+  return { score, total, clean, rules, checks, atRisk: atRiskFromFindings(findings) };
 }
