@@ -1,8 +1,8 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
-import { listWords, removeWord, addWord } from "../lib/dictionary.server";
+import { listWords } from "../lib/dictionary.server";
 import { getIgnores, removeIgnore } from "../lib/ignores.server";
 import { getSettings, saveSettings } from "../lib/settings.server";
 import { RULE_CATALOG } from "../lib/rules.server";
@@ -29,15 +29,11 @@ export async function action({ request }) {
   const allowed = plan.features;
   const form = await request.formData();
   const intent = form.get("intent");
-  // Settings the plan does not include are refused here as well as hidden in the page.
-  if ((intent === "addWord" || intent === "removeWord") && !allowed.dictionary) {
-    return { ok: false, error: `The spelling dictionary is part of the ${planFor("dictionary").name} plan and up.` };
-  }
+  // Settings the plan does not include are refused here as well as hidden in the page. The
+  // dictionary has its own page (app.dictionary.jsx).
   if (intent === "removeIgnore" && !allowed.ignores) {
     return { ok: false, error: `Ignored findings are part of the ${planFor("ignores").name} plan and up.` };
   }
-  if (intent === "removeWord") await removeWord(session.shop, form.get("id"));
-  if (intent === "addWord") await addWord(session.shop, form.get("word"));
   if (intent === "removeIgnore") await removeIgnore(session.shop, form.get("id"));
   if (intent === "saveSettings") {
     const current = await getSettings(session.shop);
@@ -78,7 +74,6 @@ export default function Settings() {
   const features = plan.features;
   const fetcher = useFetcher();
   const busy = fetcher.state !== "idle";
-  const inputRef = useRef(null);
 
   function submit(payload) {
     fetcher.submit(payload, { method: "post" });
@@ -145,15 +140,6 @@ export default function Settings() {
     if (!draft.key.trim()) return;
     saveRules([...rules, { key: draft.key.trim(), productType: draft.productType.trim(), pattern: draft.pattern.trim() }]);
     setDraft({ key: "", productType: "", pattern: "" });
-  }
-
-  function handleAdd() {
-    const input = inputRef.current;
-    const word = (input?.value || "").trim();
-    if (word) {
-      submit({ intent: "addWord", word });
-      input.value = "";
-    }
   }
 
   return (
@@ -244,7 +230,7 @@ export default function Settings() {
       </s-section>
 
       {features.vendorWhitelist ? (
-      <s-section heading="Approved Vendors">
+      <s-section slot="aside" heading="Approved Vendors">
         <s-stack gap="base">
           <s-paragraph>
             One vendor per line. Leave empty to skip this check. Products whose vendor is not on this list get flagged under Organization.
@@ -263,21 +249,24 @@ export default function Settings() {
         </s-stack>
       </s-section>
       ) : (
-        <UpgradeSection heading="Approved Vendors" feature="vendorWhitelist" what="Approved vendor lists are" />
+        <UpgradeSection slot="aside" heading="Approved Vendors" feature="vendorWhitelist" what="Approved vendor lists are" />
       )}
 
       {features.customRules ? (
-      <s-section heading={`Metafield Rules (${rules.length})`}>
+      <s-section slot="aside" heading={`Metafield Rules (${rules.length})`}>
         <s-stack gap="base">
           <s-paragraph>
             Require a metafield, optionally only for one product type, and optionally check its value against a pattern.
             Key is namespace.key, for example custom.fitment. Pattern is a regular expression, for example ^\d{3}-\d{3}-\d{3}-\d{2}$.
           </s-paragraph>
-          <s-stack direction="inline" gap="small" alignItems="end">
+          {/* Stacked, not inline: the right column is too narrow for three fields in a row. */}
+          <s-stack gap="small">
             <s-text-field label="Metafield key" placeholder="custom.fitment" value={draft.key} onInput={(e) => setDraft({ ...draft, key: e.target.value })}></s-text-field>
             <s-text-field label="Only for product type" placeholder="optional" value={draft.productType} onInput={(e) => setDraft({ ...draft, productType: e.target.value })}></s-text-field>
             <s-text-field label="Pattern" placeholder="optional regex" value={draft.pattern} onInput={(e) => setDraft({ ...draft, pattern: e.target.value })}></s-text-field>
-            <s-button variant="primary" onClick={addRule} disabled={busy || !draft.key.trim() || undefined}>Add rule</s-button>
+            <s-stack direction="inline" gap="small">
+              <s-button variant="primary" onClick={addRule} disabled={busy || !draft.key.trim() || undefined}>Add rule</s-button>
+            </s-stack>
           </s-stack>
           {rules.map((r, i) => (
             <s-box key={`${r.key}-${i}`} padding="small" border="base" borderRadius="base">
@@ -295,36 +284,18 @@ export default function Settings() {
         </s-stack>
       </s-section>
       ) : (
-        <UpgradeSection heading="Metafield Rules" feature="customRules" what="Custom metafield rules are" />
+        <UpgradeSection slot="aside" heading="Metafield Rules" feature="customRules" what="Custom metafield rules are" />
       )}
 
       {features.dictionary ? (
       <s-section slot="aside" heading={`Dictionary (${words.length})`}>
-        <s-stack gap="base">
+        <s-stack gap="small">
           <s-paragraph>
-            Words here are never flagged as misspellings. Brand names, part codes, and
-            jargon belong here.
+            Words that are never flagged as misspellings: brand names, part codes and jargon. The list lives on its own
+            page.
           </s-paragraph>
-          <s-stack direction="inline" gap="small" alignItems="end">
-            <s-text-field ref={inputRef} label="Add a word" placeholder="e.g. turbo, ceramic, hoodie"></s-text-field>
-            <s-button variant="primary" onClick={handleAdd} disabled={busy || undefined}>Add</s-button>
-          </s-stack>
           <s-stack direction="inline" gap="small">
-            {words.map((w) => (
-              <s-box key={w.id} padding="small" border="base" borderRadius="base">
-                <s-stack direction="inline" gap="small" alignItems="center">
-                  <s-text>{w.word}</s-text>
-                  <s-button
-                    variant="tertiary"
-                    onClick={() => submit({ intent: "removeWord", id: w.id })}
-                    disabled={busy || undefined}
-                  >
-                    Remove
-                  </s-button>
-                </s-stack>
-              </s-box>
-            ))}
-            {words.length === 0 ? <s-text color="subdued">No words yet.</s-text> : null}
+            <s-button href="/app/dictionary">Manage dictionary</s-button>
           </s-stack>
         </s-stack>
       </s-section>
