@@ -177,6 +177,29 @@ function CardHeader({ color, heading, badges, aside }) {
   );
 }
 
+// "#5c6ac4" at an opacity, for the wash of color under each stripe.
+function tint(hex, alpha) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
+}
+
+// The top of a category card: a 3px stripe in the section color and a wash of the same color
+// fading out beneath it, behind the heading only. Polaris has no prop for an arbitrary accent
+// color, so both are a plain div. The radius matches the card so the stripe follows the corners.
+function AccentTop({ color, children }) {
+  return (
+    <div
+      style={{
+        borderTop: `3px solid ${color}`,
+        borderRadius: "12px 12px 0 0",
+        background: `linear-gradient(to bottom, ${tint(color, 0.14)}, ${tint(color, 0)})`,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
 // ---------- summary ----------
 
 // A headline figure: label, display-size number with an optional badge beside it, a hint, and any
@@ -535,14 +558,14 @@ function CategoryCard({ cat, rules, checks, showChecks, showPassed, locked, onSe
     const fullPlan = allAreasPlan().name;
     return (
       <s-section padding="none">
-        <div style={{ borderTop: `3px solid ${cat.color}`, borderRadius: "12px 12px 0 0" }}>
+        <AccentTop color={cat.color}>
           <CardHeader
             color={cat.color}
             heading={cat.label}
             badges={<s-badge size="small" icon="lock">{fullPlan}</s-badge>}
             aside={<s-text color="subdued" fontVariantNumeric="tabular-nums">{rules.length ? `${total} findings` : "No findings"}</s-text>}
           />
-        </div>
+        </AccentTop>
         <s-box padding="base" paddingBlockStart="none">
           <s-stack direction="inline" gap="base" alignItems="center" justifyContent="space-between">
             <s-text color="subdued">These findings are part of {fullPlan}</s-text>
@@ -575,16 +598,14 @@ function CategoryCard({ cat, rules, checks, showChecks, showPassed, locked, onSe
     );
   return (
     <s-section padding="none">
-      {/* Polaris has no prop for an arbitrary accent color, so the stripe is a plain div. Its radius
-          matches the card's so the stripe follows the top corners. */}
-      <div style={{ borderTop: `3px solid ${cat.color}`, borderRadius: "12px 12px 0 0" }}>
+      <AccentTop color={cat.color}>
         <CardHeader
           color={cat.color}
           heading={cat.label}
           badges={rules.length ? <SeverityBadges rules={rules} /> : null}
           aside={<s-text color="subdued" fontVariantNumeric="tabular-nums">{rules.length ? `${total} findings` : "No findings"}</s-text>}
         />
-      </div>
+      </AccentTop>
       <CardBody table={table} panel={showChecks ? <PassedChecks passed={passed} skipped={skipped} off={off} failing={rules.length} expanded={showPassed} /> : null} />
     </s-section>
   );
