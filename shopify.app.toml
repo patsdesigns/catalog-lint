@@ -36,13 +36,18 @@ type = "multi_line_text_field"
 [webhooks]
 api_version = "2026-10"
 
-  # [[webhooks.subscriptions]]
-  # uri = "/webhooks/app/uninstalled"
-  # topics = [ "app/uninstalled" ]
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/app/uninstalled"
+  topics = [ "app/uninstalled" ]
 
-  # [[webhooks.subscriptions]]
-  # uri = "/webhooks/app/scopes_update"
-  # topics = [ "app/scopes_update" ]
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/app/scopes_update"
+  topics = [ "app/scopes_update" ]
+
+  # Privacy (GDPR) webhooks, required for a public app; handled by app/routes/webhooks.compliance.jsx.
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/compliance"
+  compliance_topics = [ "customers/data_request", "customers/redact", "shop/redact" ]
 
 [auth]
 redirect_urls = [ "https://example.com/api/auth" ]
