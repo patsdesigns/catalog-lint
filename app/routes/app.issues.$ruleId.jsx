@@ -182,7 +182,7 @@ function FindingRow({ f, columns, features, onSave, onLearn, onIgnore, onUndo, b
   const fieldLabel = `Corrected value for ${f.productTitle}`;
   const variant = f.variantTitle && f.variantTitle !== "Default Title" ? f.variantTitle : "";
   const canEdit = Boolean(edit) && features.inlineEdits;
-  // Save or Open in Shopify, then Trust word and Ignore when the plan includes them.
+  // Save or View Product, then Trust word and Ignore when the plan includes them.
   const buttons = 1 + (f.word && features.dictionary ? 1 : 0) + (features.ignores ? 1 : 0);
   const currentCell = (
     <s-stack gap="small-500">
@@ -272,9 +272,9 @@ function FindingRow({ f, columns, features, onSave, onLearn, onIgnore, onUndo, b
                 href={adminUrl(f.productId)}
                 target="_blank"
                 icon="external"
-                accessibilityLabel={`Open in Shopify: ${f.productTitle}, new tab`}
+                accessibilityLabel={`View product: ${f.productTitle}, opens in Shopify admin in a new tab`}
               >
-                Open in Shopify
+                View Product
               </s-button>
             )}
             {f.word && features.dictionary ? (
@@ -304,10 +304,10 @@ function Detail({ rule, findings, features, onSave, onLearn, onIgnore, onUndo, o
   const hidden = filtered.length - rows.length;
   const columns = detailColumns(findings, features);
   const help = !features.inlineEdits
-    ? `Open each product in Shopify to fix it. Inline edits are part of the ${planFor("inlineEdits").name} plan.`
+    ? `View each product to fix it in Shopify. Inline edits are part of the ${planFor("inlineEdits").name} plan.`
     : columns.fix
       ? "Check the current value, type the correction and save, or ignore what is intentional. Saved changes stay listed until you refresh."
-      : "Open each product in Shopify to fix it, or ignore what is intentional.";
+      : "View each product to fix it in Shopify, or ignore what is intentional.";
 
   return (
     // The visible "N findings" heading names the section (no accessibilityLabel, which would add a
