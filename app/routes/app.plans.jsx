@@ -20,14 +20,22 @@ export async function action({ request }) {
   if (!target) return { ok: false, error: "That plan does not exist." };
   const { plan, subscription } = await currentPlan(billing);
   if (target.id === plan.id) return { ok: true, plan: plan.id };
-  if (target.price === 0) {
-    if (subscription) await billing.cancel({ subscriptionId: subscription.id, isTest: BILLING_TEST, prorate: false });
-    return { ok: true, plan: target.id };
+  try {
+    if (target.price === 0) {
+      if (subscription) await billing.cancel({ subscriptionId: subscription.id, isTest: BILLING_TEST, prorate: false });
+      return { ok: true, plan: target.id };
+    }
+    // Throws a redirect to the approval screen; Shopify sends the merchant back to this page after.
+    // The app URL (https) is the base: the request URL behind the dev proxy is plain http.
+    const base = process.env.SHOPIFY_APP_URL || new URL(request.url).origin;
+    await billing.request({ plan: target.name, isTest: BILLING_TEST, returnUrl: `${base}/app/plans` });
+    return { ok: true };
+  } catch (err) {
+    // The redirect itself is thrown as a Response; anything else is a billing error to show.
+    if (err instanceof Response) throw err;
+    const detail = (err?.errorData || []).map((e) => e.message).filter(Boolean).join("; ");
+    return { ok: false, error: detail || err?.message || String(err) };
   }
-  // Throws a redirect to the approval screen; Shopify sends the merchant back to this page after.
-  const url = new URL(request.url);
-  await billing.request({ plan: target.name, isTest: BILLING_TEST, returnUrl: `${url.origin}/app/plans` });
-  return { ok: true };
 }
 
 const PLAN_COLUMNS = "@container (inline-size > 1000px) 1fr 1fr 1fr 1fr, (inline-size > 600px) and (inline-size <= 1000px) 1fr 1fr, 1fr";
