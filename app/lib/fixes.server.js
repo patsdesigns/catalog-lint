@@ -163,7 +163,9 @@ export async function recentFixes(shop, limit = 5) {
   }));
 }
 
-export async function fixedCount(shop, days = 7) {
-  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-  return prisma.fixLog.count({ where: { shop, undone: false, createdAt: { gte: since } } });
+// Fixes still in place (bulk fixes and saved edits alike): within the last `days`, or ever.
+export async function fixedCount(shop, days) {
+  const where = { shop, undone: false };
+  if (days) where.createdAt = { gte: new Date(Date.now() - days * 24 * 60 * 60 * 1000) };
+  return prisma.fixLog.count({ where });
 }

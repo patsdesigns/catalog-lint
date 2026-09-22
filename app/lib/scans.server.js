@@ -27,18 +27,28 @@ export async function latestScan(shop) {
   return row ? toResult(row) : null;
 }
 
+// The last few results, oldest first, each with its open-problem count. The count comes from the
+// small per-check summary rather than the findings JSON, which can run to megabytes on a big store.
 export async function scanHistory(shop, limit = 12) {
   const rows = await prisma.scan.findMany({
     where: { shop },
     orderBy: { createdAt: "desc" },
     take: limit,
-    select: { score: true, createdAt: true, total: true },
+    select: { rules: true, createdAt: true, total: true },
   });
   return rows.reverse().map((r) => ({
-    score: r.score,
+    open: openCount(r.rules),
     total: r.total,
     at: r.createdAt.toISOString(),
   }));
+}
+
+function openCount(rulesJson) {
+  try {
+    return JSON.parse(rulesJson).reduce((n, rule) => n + (rule.count || 0), 0);
+  } catch {
+    return 0;
+  }
 }
 
 function toResult(row) {

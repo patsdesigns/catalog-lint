@@ -15,14 +15,15 @@ import { PASS_LABELS, SETUP_LABELS } from "../lib/checkLabels";
 // ---------- server ----------
 
 async function loadState(shop) {
-  const [result, history, fixes, fixedWeek] = await Promise.all([
+  const [result, history, fixes, fixedWeek, fixedTotal] = await Promise.all([
     latestScan(shop),
     scanHistory(shop),
     recentFixes(shop),
     fixedCount(shop, 7),
+    fixedCount(shop),
   ]);
   // checkCount: how many checks exist, for the first-run page before any scan is stored.
-  return { result, history, fixes, fixedWeek, checkCount: RULE_CATALOG.length };
+  return { result, history, fixes, fixedWeek, fixedTotal, checkCount: RULE_CATALOG.length };
 }
 
 export async function loader({ request }) {
@@ -84,7 +85,7 @@ export async function action({ request }) {
 // ---------- helpers ----------
 
 const TONE = { high: "critical", medium: "warning", low: "neutral" };
-const SEVERITY_WEIGHT = { high: 3, medium: 1.5, low: 0.5 }; // mirrors the score in rules.server.js
+const SEVERITY_WEIGHT = { high: 3, medium: 1.5, low: 0.5 }; // how Start here weighs a check's findings
 const RULE_LABELS = {
   vendor_casing: "Vendor spelling",
   missing_weight: "Shipping weight",
@@ -114,10 +115,9 @@ const OVERVIEW_TRACKS = {
 // width the panel moves under the table. (Unquoted minmax() breaks Polaris's responsive parser,
 // since parentheses and commas are delimiters there, so these lists use fr units only.)
 const CARD_COLUMNS = "@container (inline-size <= 1000px) 1fr, 3fr 1fr";
-// Health hero: score block, divider, four counts.
-const HERO_COLUMNS = "@container (inline-size <= 760px) 1fr, 5fr auto 8fr";
-const HERO_DIVIDER_DISPLAY = "@container (inline-size <= 760px) none, auto";
-const STAT_COLUMNS = "@container (inline-size <= 560px) 1fr 1fr, 1fr 1fr 1fr 1fr";
+// Summary: two figures (potential problems, problems fixed) either side of a divider.
+const HERO_COLUMNS = "@container (inline-size <= 640px) 1fr, 1fr auto 1fr";
+const HERO_DIVIDER_DISPLAY = "@container (inline-size <= 640px) none, auto";
 const BLURB_COLUMNS = "@container (inline-size <= 700px) 1fr, 1fr 1fr 1fr";
 
 // Detail view. Polaris sizes table columns from their content and a bare text field has almost no
@@ -165,18 +165,12 @@ function timeAgo(iso) {
   if (hours < 24) return `${hours} h ago`;
   return `${Math.round(hours / 24)} d ago`;
 }
-function scoreTone(score) {
-  return score >= 90 ? "success" : score >= 70 ? "warning" : "critical";
-}
-function scoreLabel(tone) {
-  return tone === "success" ? "Good" : tone === "warning" ? "Needs work" : "Poor";
-}
 // Passing-state sentence for a rule: "Passes when every product has a description."
 function passesWhen(ruleId, fallback) {
   const label = PASS_LABELS[ruleId] || fallback;
   return `Passes when ${label.charAt(0).toLowerCase()}${label.slice(1)}.`;
 }
-const TONE_COLOR = { success: "#29845a", warning: "#b98900", critical: "#e51c00" };
+const BAR_COLOR = "#616161"; // the trend bars
 // Light tints for the side panels. Polaris has no tinted-background prop, so they are inline styles.
 const PASSED_BACKGROUND = "rgba(41, 132, 90, 0.08)";
 const NOTE_BACKGROUND = "rgba(0, 0, 0, 0.035)";
@@ -304,30 +298,36 @@ function CardHeader({ color, heading, badges, aside }) {
   );
 }
 
-// ---------- health hero ----------
+// ---------- summary ----------
 
-// One count in the hero: label over a heading-sized value, with an optional hint under it. The value
-// has heading styling but the presentation role, so the tiles do not add h2s to the outline.
-function Metric({ label, value, hint }) {
+// A headline figure: label, display-size number with an optional badge beside it, a hint, and any
+// extra content under it. Polaris has no display-size text, so the number is a styled span.
+const FIGURE_STYLE = { fontSize: "40px", lineHeight: 1, fontWeight: 650, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" };
+function Figure({ label, value, badge, hint, children }) {
   return (
-    <s-stack gap="small-300">
+    <s-stack gap="small">
       <s-text color="subdued">{label}</s-text>
-      <s-heading accessibilityRole="presentation">{value}</s-heading>
+      <s-stack direction="inline" gap="small" alignItems="center">
+        <span style={FIGURE_STYLE}>{(value || 0).toLocaleString("en-US")}</span>
+        {badge}
+      </s-stack>
       {hint ? <s-text color="subdued">{hint}</s-text> : null}
+      {children}
     </s-stack>
   );
 }
 
-// Score history as bars on an absolute 0-100 axis: a perfect score is the tallest bar the track
-// allows and a few points of movement still shows (4px for 0, 40px for 100).
+// Open problems per saved result as bars. The tallest bar is the most any of them found, so the
+// direction shows even when the counts are close: 4px for none, 40px for the most.
 function Trend({ history }) {
   if (!history || history.length < 2) return <s-text color="subdued">Scan again to start a trend.</s-text>;
-  const barHeight = (score) => 4 + Math.round((Math.max(0, Math.min(100, score)) / 100) * 36);
-  // Bar width 12px + 4px gap, sized to the scans on record, so no bare baseline trails the bars.
+  const most = history.reduce((m, h) => Math.max(m, h.open || 0), 0);
+  const barHeight = (open) => 4 + (most ? Math.round(((open || 0) / most) * 36) : 0);
+  // Bar width 12px + 4px gap, sized to the results on record, so no bare baseline trails the bars.
   const trackWidth = history.length * 16 - 4;
   // ISO date, not toLocaleString(): the server and the browser must render the same markup.
   const dateOf = (iso) => (iso ? String(iso).slice(0, 10) : "");
-  const describe = (h) => `${h.score}${h.at ? ` on ${dateOf(h.at)}` : ""}`;
+  const describe = (h) => `${(h.open || 0).toLocaleString("en-US")}${h.at ? ` on ${dateOf(h.at)}` : ""}`;
   return (
     <s-stack direction="inline" gap="small" alignItems="end">
       {/* Polaris has no sparkline/bar primitive: the bars are plain boxes on a divider baseline. */}
@@ -339,10 +339,10 @@ function Trend({ history }) {
               title={describe(h)}
               style={{
                 width: "12px",
-                height: `${barHeight(h.score)}px`,
+                height: `${barHeight(h.open)}px`,
                 borderRadius: "2px 2px 0 0",
-                background: TONE_COLOR[scoreTone(h.score)],
-                opacity: i === history.length - 1 ? 1 : 0.45,
+                background: BAR_COLOR,
+                opacity: i === history.length - 1 ? 1 : 0.4,
               }}
             />
           ))}
@@ -350,49 +350,52 @@ function Trend({ history }) {
         <s-divider></s-divider>
       </s-stack>
       <s-text color="subdued">Last {history.length} scans</s-text>
-      {/* The same score-and-date detail the bar tooltips carry, for readers who cannot hover. */}
-      <s-text accessibilityVisibility="exclusive">Scores, oldest first: {history.map(describe).join(", ")}</s-text>
+      {/* The same count-and-date detail the bar tooltips carry, for readers who cannot hover. */}
+      <s-text accessibilityVisibility="exclusive">Problems per scan, oldest first: {history.map(describe).join(", ")}</s-text>
     </s-stack>
   );
 }
 
-function HealthHero({ result, history, fixedWeek, checksOn, checksTotal }) {
-  const tone = scoreTone(result.score);
-  const delta = history && history.length >= 2 ? history[history.length - 1].score - history[history.length - 2].score : 0;
-  const cleanShare = result.total ? Math.round((result.clean / result.total) * 100) : 0;
-  const lastScan = `Last scan ${timeAgo(result.scannedAt)}${result.ignoredCount ? ` · ${result.ignoredCount} ignored` : ""}`;
+// The summary: how many potential problems the last scan left and how many problems the app has
+// fixed, either side of a divider. Below 640px of card width the two stack.
+function Summary({ result, history, fixedWeek, fixedTotal, checksOn, checksTotal }) {
+  const open = result.findings.length;
+  const previous = history && history.length >= 2 ? history[history.length - 2].open : null;
+  const delta = previous == null ? 0 : open - previous;
+  const affected = Math.max(0, result.total - result.clean);
+  const n = (v) => (v || 0).toLocaleString("en-US");
+  const products = `${n(result.total)} ${result.total === 1 ? "product" : "products"}`;
+  const lastScan = `Last scan ${timeAgo(result.scannedAt)} · ${products}${result.ignoredCount ? ` · ${n(result.ignoredCount)} ignored` : ""}`;
   return (
-    <s-section accessibilityLabel="Catalog health">
+    <s-section accessibilityLabel="Catalog summary">
       <s-query-container>
         <s-stack gap="base">
-          <s-grid gridTemplateColumns={HERO_COLUMNS} gap="large" alignItems="start">
-            <s-stack gap="small">
-              <s-text color="subdued">Catalog health</s-text>
-              <s-stack direction="inline" gap="small" alignItems="center">
-                {/* Polaris has no display-size text, so the score figure is the one styled span on the page. */}
-                <span style={{ fontSize: "40px", lineHeight: 1, fontWeight: 650, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" }} aria-label={`Health score ${result.score} out of 100`}>
-                  {result.score}
-                </span>
-                <s-text color="subdued">/ 100</s-text>
-                <s-badge tone={tone}>{scoreLabel(tone)}</s-badge>
-                {delta !== 0 ? (
-                  // The direction is in the text as well as the icon and tone.
-                  <s-badge tone={delta > 0 ? "success" : "critical"} icon={delta > 0 ? "arrow-up" : "arrow-down"}>
-                    {delta > 0 ? "Up" : "Down"} {Math.abs(delta)}
+          <s-grid gridTemplateColumns={HERO_COLUMNS} gap="large">
+            <Figure
+              label="Potential problems"
+              value={open}
+              badge={
+                delta !== 0 ? (
+                  // Fewer is better: the direction is in the text as well as the icon and tone.
+                  <s-badge tone={delta < 0 ? "success" : "critical"} icon={delta < 0 ? "arrow-down" : "arrow-up"}>
+                    {delta < 0 ? "Down" : "Up"} {n(Math.abs(delta))}
                   </s-badge>
-                ) : null}
-              </s-stack>
+                ) : null
+              }
+              hint={open ? `In ${n(affected)} of ${products}, from ${n(result.rules.length)} ${result.rules.length === 1 ? "check" : "checks"}` : "Nothing to fix"}
+            >
               <Trend history={history} />
-            </s-stack>
+            </Figure>
             <s-box display={HERO_DIVIDER_DISPLAY}>
               <s-divider direction="block"></s-divider>
             </s-box>
-            <s-grid gridTemplateColumns={STAT_COLUMNS} gap="base">
-              <Metric label="Products scanned" value={result.total} />
-              <Metric label="Clean products" value={result.clean} hint={result.total ? `${cleanShare}% of the catalog` : null} />
-              <Metric label="Open issues" value={result.findings.length} hint={result.rules.length ? `${result.rules.length} ${result.rules.length === 1 ? "check" : "checks"} failing` : "Nothing to fix"} />
-              <Metric label="Fixed this week" value={fixedWeek} />
-            </s-grid>
+            <Figure
+              label="Problems fixed"
+              value={fixedTotal}
+              hint={fixedWeek ? `${n(fixedWeek)} this week` : fixedTotal ? "None this week" : "Fixes you apply or save are counted here"}
+            >
+              {fixedTotal ? <s-text color="subdued">Every fix can be undone from Recent fixes.</s-text> : null}
+            </Figure>
           </s-grid>
           <s-divider></s-divider>
           <s-stack direction="inline" gap="base" alignItems="center" justifyContent="space-between">
@@ -554,8 +557,8 @@ function CardBody({ table, panel }) {
   );
 }
 
-// The failing checks that cost the score the most, across every section, so a merchant knows where
-// to begin. Impact is the same weighting the score uses.
+// The failing checks with the most weight across every section, so a merchant knows where to
+// begin: findings count times severity.
 function StartHere({ result, onSelect, busy, showPanel }) {
   const ranked = [...result.rules]
     .sort((a, b) => SEVERITY_WEIGHT[b.severity] * b.count - SEVERITY_WEIGHT[a.severity] * a.count || b.count - a.count)
@@ -576,21 +579,21 @@ function StartHere({ result, onSelect, busy, showPanel }) {
       <s-box padding="base">
         <s-stack gap="small-200">
           <s-stack direction="inline" gap="small-200" alignItems="center">
-            <s-icon type="gauge" />
-            <s-text type="strong">How the score works</s-text>
+            <s-icon type="flag" />
+            <s-text type="strong">Why these first</s-text>
           </s-stack>
+          <s-text color="subdued">Ranked by how many findings each check has, weighted by how serious they are.</s-text>
           <s-text color="subdued">
-            A product loses 3 points for each high-severity finding, 1.5 for medium and 0.5 for low, at most 10. The
-            score is the average across all {result.total.toLocaleString("en-US")} products, out of 100.
+            High severity can stop a product from selling or being found, medium costs search traffic or margin, low is
+            housekeeping.
           </s-text>
-          <s-text color="subdued">90 and above is good; under 70 needs attention.</s-text>
         </s-stack>
       </s-box>
     </div>
   ) : null;
   return (
     <s-section padding="none">
-      <CardHeader heading="Start here" badges={<s-badge tone="warning" size="small">Highest impact</s-badge>} aside={<s-text color="subdued">The checks costing the most points</s-text>} />
+      <CardHeader heading="Start here" badges={<s-badge tone="warning" size="small">Highest impact</s-badge>} aside={<s-text color="subdued">Most findings, weighted by severity</s-text>} />
       <CardBody table={table} panel={panel} />
     </s-section>
   );
@@ -713,7 +716,7 @@ function RecentFixes({ fixes, onUndo, busy, showPanel }) {
 // Remembered per browser: whether the cards list every passed check or just the count.
 const SHOW_PASSED_KEY = "catalog-lint:show-passed";
 
-function Overview({ result, history, fixes, fixedWeek, onSelect, onUndo, busy }) {
+function Overview({ result, history, fixes, fixedWeek, fixedTotal, onSelect, onUndo, busy }) {
   const [filter, setFilter] = useState(null);
   const [showPassed, setShowPassed] = useState(false);
   const checks = result.checks || [];
@@ -738,7 +741,7 @@ function Overview({ result, history, fixes, fixedWeek, onSelect, onUndo, busy })
 
   return (
     <>
-      <HealthHero result={result} history={history} fixedWeek={fixedWeek} checksOn={checksOn} checksTotal={checks.length} />
+      <Summary result={result} history={history} fixedWeek={fixedWeek} fixedTotal={fixedTotal} checksOn={checksOn} checksTotal={checks.length} />
 
       {result.rules.length === 0 ? (
         // The visible heading names the section; no accessibilityLabel, or the outline gets two headings.
@@ -781,7 +784,7 @@ function Welcome({ checkCount, onScan, busy, scanning }) {
   const blurbs = [
     { icon: "search", title: "Find", text: "Missing images, SKUs and weights, misspellings, duplicate SKUs, SEO gaps, pricing slips and more, grouped the way the product page is." },
     { icon: "wand", title: "Fix safely", text: "Review each suggestion and save it, or apply a fix to many products at once. Every change is logged and can be undone." },
-    { icon: "chart-histogram-growth", title: "Track", text: "A health score and trend show whether the catalog is getting better, and which checks pass on every product." },
+    { icon: "chart-histogram-growth", title: "Track", text: "See how many potential problems are left after each scan, what has been fixed, and which checks pass on every product." },
   ];
   return (
     <s-section>
@@ -1012,7 +1015,7 @@ export default function Index() {
   const data = fetcher.data;
   // The loader is revalidated after every action and while a background scan runs, so it is the
   // source of truth for the page; the fetcher's data only carries the action's notices.
-  const { result, history, fixes, fixedWeek, job, checkCount } = initial;
+  const { result, history, fixes, fixedWeek, fixedTotal, job, checkCount } = initial;
   const [selected, setSelected] = useState(null);
   const revalidator = useRevalidator();
   const scanning = job?.status === "running";
@@ -1082,6 +1085,7 @@ export default function Index() {
           history={history}
           fixes={fixes}
           fixedWeek={fixedWeek}
+          fixedTotal={fixedTotal}
           onSelect={setSelected}
           onUndo={runUndo}
           busy={busy}
