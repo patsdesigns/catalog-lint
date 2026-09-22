@@ -198,22 +198,6 @@ function CategoryChip({ id, color = "base" }) {
     </s-grid>
   );
 }
-function exportCsv(result) {
-  const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-  const lines = [["Issue", "Severity", "Product", "SKU", "Detail", "Product ID"].map(esc).join(",")];
-  for (const f of result.findings) {
-    lines.push([f.label, f.severity, f.productTitle, f.sku || "", f.detail || "", f.productId.split("/").pop()].map(esc).join(","));
-  }
-  const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `catalog-lint-${new Date().toISOString().slice(0, 10)}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
 
 // ---------- shared pieces ----------
 
@@ -1109,9 +1093,6 @@ export default function Index() {
       <s-button slot="primary-action" variant="primary" onClick={runScan} loading={busy || undefined} disabled={scanning || undefined}>
         {scanning ? "Scanning…" : result ? "Scan again" : "Run scan"}
       </s-button>
-      {result ? (
-        <s-button slot="secondary-actions" onClick={() => exportCsv(result)}>Export CSV</s-button>
-      ) : null}
 
       <Notices data={data} onUndo={runUndo} busy={busy} />
       <ScanProgress job={job} />
