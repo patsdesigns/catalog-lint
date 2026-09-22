@@ -27,6 +27,7 @@ export async function action({ request }) {
     }
     // Throws a redirect to the approval screen; Shopify sends the merchant back to this page after.
     // The app URL (https) is the base: the request URL behind the dev proxy is plain http.
+    // eslint-disable-next-line no-undef
     const base = process.env.SHOPIFY_APP_URL || new URL(request.url).origin;
     await billing.request({ plan: target.name, isTest: BILLING_TEST, returnUrl: `${base}/app/plans` });
     return { ok: true };
