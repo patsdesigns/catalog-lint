@@ -6,23 +6,22 @@ import { startScan, advanceJob, refreshAfter } from "../lib/rescan.server";
 import { countProducts, createdSince, scanNewProducts } from "../lib/scan.server";
 import { pendingCount, scanPendingProducts } from "../lib/events.server";
 import { cleanStreak } from "../lib/snapshots.server";
-import { undoFix, recentFixes, fixedCount } from "../lib/fixes.server";
+import { undoFix, fixedCount } from "../lib/fixes.server";
 import { latestScan, scanHistory, saveScan } from "../lib/scans.server";
 import { currentPlan } from "../lib/billing.server";
 import { planFor, lockedAreas, allAreasPlan } from "../lib/plans";
 import { RULE_CATALOG } from "../lib/rules.server";
 import { CATEGORIES, categoryOf } from "../lib/categories";
 import { PASS_LABELS, SETUP_LABELS } from "../lib/checkLabels";
-import { timeAgo, truncate } from "../lib/format";
-import { TONE, ruleLabel, Dot, Notices } from "../lib/ui";
+import { timeAgo } from "../lib/format";
+import { TONE, Dot, Notices } from "../lib/ui";
 
 // ---------- server ----------
 
 async function loadState(shop) {
-  const [result, history, fixes, fixedWeek, fixedTotal] = await Promise.all([
+  const [result, history, fixedWeek, fixedTotal] = await Promise.all([
     latestScan(shop),
     scanHistory(shop),
-    recentFixes(shop),
     fixedCount(shop, 7),
     fixedCount(shop),
   ]);
@@ -31,7 +30,7 @@ async function loadState(shop) {
   const summary = result
     ? { ...result, findings: undefined, productIds: undefined, open: result.findings.length, high: result.findings.filter((f) => f.severity === "high").length }
     : null;
-  return { result: summary, history, fixes, fixedWeek, fixedTotal, checkCount: RULE_CATALOG.length };
+  return { result: summary, history, fixedWeek, fixedTotal, checkCount: RULE_CATALOG.length };
 }
 
 export async function loader({ request }) {
@@ -106,7 +105,7 @@ const START_HERE_ROWS = 5;
 
 // Overview tables. Polaris has no column-width API: the browser sizes each <s-table> from its own
 // content, so separate tables never share boundaries on their own. Every overview table (Start
-// here, one card per category, Recent fixes) therefore uses one header skeleton whose header cells
+// here, one card per category) therefore uses one header skeleton whose header cells
 // carry a grid with a fixed track. The tracks set each column's intrinsic minimum and maximum,
 // identical in every table, so the table algorithm puts every column boundary in the same place no
 // matter what the rows contain. The primary track has a range rather than one size, so the text
@@ -285,7 +284,10 @@ function Summary({ result, history, fixedWeek, fixedTotal, checksOn, checksTotal
               value={fixedTotal}
               hint={fixedWeek ? `${n(fixedWeek)} this week` : fixedTotal ? "None this week" : "Fixes you apply or save are counted here"}
             >
-              {fixedTotal ? <s-text color="subdued">Every fix can be undone from Recent fixes.</s-text> : null}
+              <s-text color="subdued">
+                <s-link href="/app/fixes">Recent fixes</s-link>
+                {fixedTotal ? " · every fix can be undone there" : ""}
+              </s-text>
             </Figure>
           </s-grid>
           <s-divider></s-divider>
@@ -588,61 +590,10 @@ function CategoryCard({ cat, rules, checks, showChecks, showPassed, locked, onSe
   );
 }
 
-function RecentFixes({ fixes, onUndo, busy, showPanel }) {
-  if (!fixes || fixes.length === 0) return null;
-  const table = (
-    <s-table loading={busy || undefined}>
-      <s-table-header-row>
-        <ColumnHeader track="numeric" listSlot="labeled" format="numeric">Changes</ColumnHeader>
-        <ColumnHeader track="primary" listSlot="primary">Fix</ColumnHeader>
-        <ColumnHeader track="inline" listSlot="inline">When</ColumnHeader>
-        <ColumnHeader track="action" listSlot="secondary">Action</ColumnHeader>
-      </s-table-header-row>
-      <s-table-body>
-        {fixes.map((f) => (
-          <s-table-row key={f.batchId}>
-            <s-table-cell><s-text fontVariantNumeric="tabular-nums">{f.count}</s-text></s-table-cell>
-            <s-table-cell>
-              {/* One product: its name. Several: a link to the batch page, where each can be undone alone. */}
-              <s-stack gap="small-500">
-                <s-text>{f.label || ruleLabel(f.ruleId)}</s-text>
-                {f.productCount === 1 ? (
-                  <s-text color="subdued">{truncate(f.productTitle, 70)}</s-text>
-                ) : f.productCount > 1 ? (
-                  <s-link href={`/app/fixes/${f.batchId}`}>{f.productCount} products</s-link>
-                ) : null}
-              </s-stack>
-            </s-table-cell>
-            <s-table-cell><s-text color="subdued">{timeAgo(f.at)}</s-text></s-table-cell>
-            <s-table-cell>
-              <s-button
-                variant="secondary"
-                onClick={() => onUndo(f.batchId)}
-                disabled={busy || undefined}
-                accessibilityLabel={`Undo ${ruleLabel(f.ruleId)}, ${f.count} changes`}
-              >
-                Undo
-              </s-button>
-            </s-table-cell>
-          </s-table-row>
-        ))}
-      </s-table-body>
-    </s-table>
-  );
-  // Same composition, column skeleton and card grid as the category cards, so the Changes / Fix /
-  // When / Action columns sit exactly under Findings / Issue / Severity / Action.
-  return (
-    <s-section padding="none">
-      <CardHeader heading="Recent Fixes" aside={<s-text color="subdued">Every fix can be undone</s-text>} />
-      <CardBody table={table} panel={showPanel ? <div /> : null} />
-    </s-section>
-  );
-}
-
 // Remembered per browser: whether the cards list every passed check or just the count.
 const SHOW_PASSED_KEY = "catalog-lint:show-passed";
 
-function Overview({ result, history, fixes, fixedWeek, fixedTotal, plan, newProducts, streak, locked, onSelect, onUndo, busy }) {
+function Overview({ result, history, fixedWeek, fixedTotal, plan, newProducts, streak, locked, onSelect, busy }) {
   const [filter, setFilter] = useState(null);
   const [showPassed, setShowPassed] = useState(false);
   const checks = result.checks || [];
@@ -718,8 +669,6 @@ function Overview({ result, history, fixes, fixedWeek, fixedTotal, plan, newProd
         if (rules.length === 0 && catChecks.length === 0) return null;
         return <CategoryCard key={cat.id} cat={cat} rules={rules} checks={catChecks} showChecks={showChecks} showPassed={showPassed} locked={locked.includes(cat.id)} onSelect={onSelect} busy={busy} />;
       })}
-
-      {filter ? null : <RecentFixes fixes={fixes} onUndo={onUndo} busy={busy} showPanel={showChecks} />}
     </>
   );
 }
@@ -778,7 +727,7 @@ export default function Index() {
   const data = fetcher.data;
   // The loader is revalidated after every action and while a background scan runs, so it is the
   // source of truth for the page; the fetcher's data only carries the action's notices.
-  const { result, history, fixes, fixedWeek, fixedTotal, job, checkCount, plan, newProducts, pending, streak, locked } = initial;
+  const { result, history, fixedWeek, fixedTotal, job, checkCount, plan, newProducts, pending, streak, locked } = initial;
   const revalidator = useRevalidator();
   const scanning = job?.status === "running";
 
@@ -830,7 +779,6 @@ export default function Index() {
         <Overview
           result={result}
           history={history}
-          fixes={fixes}
           fixedWeek={fixedWeek}
           fixedTotal={fixedTotal}
           plan={plan}
@@ -838,7 +786,6 @@ export default function Index() {
           streak={streak}
           locked={locked}
           onSelect={openIssue}
-          onUndo={runUndo}
           busy={busy}
         />
       )}
