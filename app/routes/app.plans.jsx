@@ -78,7 +78,7 @@ const THREE_COLUMNS = "@container (inline-size > 900px) 1fr 1fr 1fr, (inline-siz
 const FOUR_COLUMNS = "@container (inline-size > 1000px) 1fr 1fr 1fr 1fr, (inline-size > 560px) and (inline-size <= 1000px) 1fr 1fr, 1fr";
 const FEATURE_ORDER = Object.keys(FEATURE_LABELS);
 
-function PlanCard({ plan, current, note, claimed, busy, onChoose }) {
+function PlanCard({ plan, current, note, claimed, footnote, busy, onChoose }) {
   const included = FEATURE_ORDER.filter((key) => plan.features[key] && !COMING_SOON.has(key));
   const later = FEATURE_ORDER.filter((key) => plan.features[key] && COMING_SOON.has(key));
   return (
@@ -115,6 +115,7 @@ function PlanCard({ plan, current, note, claimed, busy, onChoose }) {
         >
           {current ? "Current plan" : plan.price ? `Choose ${plan.earlyBird ? "Early Bird" : plan.name}` : "Switch to Dust Off"}
         </s-button>
+        {footnote ? <s-text color="subdued">{footnote}</s-text> : null}
       </s-stack>
     </s-box>
   );
@@ -126,7 +127,7 @@ export default function PlansPage() {
   const busy = fetcher.state !== "idle";
   const outcome = fetcher.data;
   const choose = (id) => fetcher.submit({ plan: id }, { method: "post" });
-  // The offer sits right after the free plan; the subscription condition is a footnote under the cards.
+  // The offer sits right after the free plan; the subscription condition is a footnote in its card.
   const cards = earlyBird.show ? [plans[0], earlyBird.plan, ...plans.slice(1)] : plans;
   const offer = `First ${earlyBird.seats} stores get Deep Clean for $${earlyBird.plan.price} a month*`;
   const claimed = `${earlyBird.claimed} of ${earlyBird.seats} claimed`;
@@ -164,13 +165,13 @@ export default function PlansPage() {
                   current={plan.id === currentId}
                   note={plan.earlyBird ? offer : null}
                   claimed={plan.earlyBird ? claimed : null}
+                  footnote={plan.earlyBird ? "* Keep it as long as you stay subscribed." : null}
                   busy={busy}
                   onChoose={choose}
                 />
               ))}
             </s-grid>
           </s-query-container>
-          {earlyBird.show ? <s-text color="subdued">* Keep it as long as you stay subscribed.</s-text> : null}
         </s-stack>
       </s-section>
     </s-page>
