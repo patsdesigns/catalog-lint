@@ -168,7 +168,8 @@ function timeAgo(iso) {
 // Passing-state sentence for a rule: "Passes when every product has a description."
 function passesWhen(ruleId, fallback) {
   const label = PASS_LABELS[ruleId] || fallback;
-  return `Passes when ${label.charAt(0).toLowerCase()}${label.slice(1)}.`;
+  // The first letter is lowercased unless the label opens with an acronym (SKUs, SEO, URL).
+  return `Passes when ${/^[A-Z]{2}/.test(label) ? label : label.charAt(0).toLowerCase() + label.slice(1)}.`;
 }
 const BAR_COLOR = "#616161"; // the trend bars
 // Light tints for the side panels. Polaris has no tinted-background prop, so they are inline styles.
@@ -199,9 +200,9 @@ function CategoryChip({ id, color = "base" }) {
 }
 function exportCsv(result) {
   const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-  const lines = [["Issue", "Severity", "Product", "Detail", "Product ID"].map(esc).join(",")];
+  const lines = [["Issue", "Severity", "Product", "SKU", "Detail", "Product ID"].map(esc).join(",")];
   for (const f of result.findings) {
-    lines.push([f.label, f.severity, f.productTitle, f.detail || "", f.productId.split("/").pop()].map(esc).join(","));
+    lines.push([f.label, f.severity, f.productTitle, f.sku || "", f.detail || "", f.productId.split("/").pop()].map(esc).join(","));
   }
   const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
@@ -824,35 +825,68 @@ function Welcome({ checkCount, onScan, busy, scanning }) {
 
 // ---------- detail ----------
 
-// Column plan for one rule: "Current" and "Corrected" exist only when some finding fills them,
-// and their widths follow the values (a weight or price needs far less room than a sentence).
+// Column plan for one rule. The SKU column exists once findings record SKUs (scans saved before
+// that have none); the Fix column exists when some finding can be corrected here, and its input
+// track follows the values (a price or a weight needs far less room than a sentence). The Current
+// value column keeps a track of its own (CURRENT_TRACK) so a value and its note wrap as a block
+// instead of one word per line.
 function detailColumns(findings) {
   const edits = findings.map((f) => f.edit).filter(Boolean);
-  const currentLen = edits.reduce((n, e) => Math.max(n, String(e.current ?? "").length), 0);
   const numeric = edits.length > 0 && edits.every(isNumericEdit);
   return {
-    current: currentLen > 0,
-    corrected: edits.length > 0,
-    currentTrack: currentLen > 16 ? CURRENT_TRACK : undefined,
-    correctedTrack: numeric ? CORRECTED_TRACKS.numeric : CORRECTED_TRACKS.text,
+    sku: findings.some((f) => f.sku !== undefined || f.variantCount !== undefined),
+    fix: edits.length > 0,
+    fixTrack: numeric ? CORRECTED_TRACKS.numeric : CORRECTED_TRACKS.text,
   };
+}
+
+// The Fix cell grid: the input track followed by one auto track per button, at every width. The
+// input track is a responsive list, so the button tracks go on each of its alternatives.
+function fixTracks(track, actionCount) {
+  const actions = actionTracks(actionCount);
+  return track.split(",").map((part) => `${part.trim()} ${actions}`).join(", ");
+}
+
+// What a row is about right now: the value a correction would replace, with the finding's detail
+// as a note when it says more, or the detail itself when nothing can be edited in place.
+function currentValue(f) {
+  let detail = f.detail && f.detail !== f.productTitle ? f.detail : "";
+  // Variant details start with the variant title, which the Product column already shows.
+  if (f.variantTitle && detail.startsWith(f.variantTitle)) detail = detail.slice(f.variantTitle.length).replace(/^:\s*/, "");
+  if (!f.edit) return { value: detail, note: "", empty: false };
+  const edit = f.edit;
+  const raw = String(edit.current ?? "");
+  const value = edit.kind === "weight" && raw ? `${raw} ${(edit.unit || "").toLowerCase()}` : truncate(raw, edit.multiline ? 80 : 40);
+  // A misspelling's detail repeats the word; keep the part that says where it is.
+  const note = f.word ? detail.replace(/^"[^"]*"\s*/, "") : detail && detail !== raw ? detail : "";
+  return { value, note, empty: raw === "" };
+}
+
+function SkuCell({ f }) {
+  if (f.sku) return <s-text>{f.sku}</s-text>;
+  if (f.sku === "") return <s-text color="subdued">None</s-text>;
+  if (f.variantCount > 1) return <s-text color="subdued">{f.variantCount} variants</s-text>;
+  return null;
 }
 
 function FindingRow({ f, columns, onSave, onLearn, onIgnore, busy }) {
   const edit = f.edit;
   const [value, setValue] = useState(edit?.suggested ?? "");
   const canSave = edit && value.trim() !== "" && value !== edit.current;
-  const label = f.detail && f.detail !== f.productTitle ? f.detail : "";
+  const current = currentValue(f);
   const fieldLabel = `Corrected value for ${f.productTitle}`;
-  const actionCount = 1 + (f.word ? 1 : 0) + 1;
-  const current = edit ? (
-    edit.current ? <s-text>{truncate(edit.current, edit.multiline ? 80 : 32)}</s-text> : <s-text color="subdued">(empty)</s-text>
-  ) : null;
+  const variant = f.variantTitle && f.variantTitle !== "Default Title" ? f.variantTitle : "";
+  const actionCount = 2 + (f.word ? 1 : 0); // Save or Open in Shopify, Trust word, Ignore
+  const currentCell = (
+    <s-stack gap="small-500">
+      {current.empty ? <s-text color="subdued">(empty)</s-text> : current.value ? <s-text>{current.value}</s-text> : null}
+      {current.note ? <s-text color="subdued">{truncate(current.note, 80)}</s-text> : null}
+    </s-stack>
+  );
 
   return (
     <s-table-row>
       <s-table-cell>
-        {/* The finding's detail is a secondary line under the product, so it never gets a crushed column of its own. */}
         <s-stack gap="small-500">
           <s-link
             href={adminUrl(f.productId)}
@@ -861,43 +895,40 @@ function FindingRow({ f, columns, onSave, onLearn, onIgnore, busy }) {
           >
             {f.productTitle}
           </s-link>
-          {label ? <s-text color="subdued">{truncate(label, 80)}</s-text> : null}
+          {variant ? <s-text color="subdued">{truncate(variant, 60)}</s-text> : null}
         </s-stack>
       </s-table-cell>
-      {columns.current ? (
+      {columns.sku ? (
         <s-table-cell>
-          {/* The one-track grid exists only when the column needs a width of its own. */}
-          {current && columns.currentTrack ? <s-grid gridTemplateColumns={columns.currentTrack}>{current}</s-grid> : current}
-        </s-table-cell>
-      ) : null}
-      {columns.corrected ? (
-        <s-table-cell>
-          {edit ? (
-            <s-grid gridTemplateColumns={columns.correctedTrack}>
-              {edit.multiline ? (
-                <s-text-area
-                  label={fieldLabel}
-                  labelAccessibilityVisibility="exclusive"
-                  rows={2}
-                  placeholder={edit.hint || "Type a value"}
-                  value={value}
-                  onInput={(e) => setValue(e.target.value)}
-                ></s-text-area>
-              ) : (
-                <s-text-field
-                  label={fieldLabel}
-                  labelAccessibilityVisibility="exclusive"
-                  placeholder={edit.hint || "Type a value"}
-                  value={value}
-                  onInput={(e) => setValue(e.target.value)}
-                ></s-text-field>
-              )}
-            </s-grid>
-          ) : null}
+          {/* A track of its own, so SKUs and "N variants" do not wrap at the hyphen or the space. */}
+          <s-grid gridTemplateColumns="minmax(96px, max-content)"><SkuCell f={f} /></s-grid>
         </s-table-cell>
       ) : null}
       <s-table-cell>
-        <s-grid gridTemplateColumns={actionTracks(actionCount)} gap="small-200" alignItems="center" justifyContent="start">
+        <s-grid gridTemplateColumns={CURRENT_TRACK}>{currentCell}</s-grid>
+      </s-table-cell>
+      <s-table-cell>
+        <s-grid gridTemplateColumns={edit ? fixTracks(columns.fixTrack, actionCount) : actionTracks(actionCount)} gap="small-200" alignItems="center" justifyContent="start">
+          {edit ? (
+            edit.multiline ? (
+              <s-text-area
+                label={fieldLabel}
+                labelAccessibilityVisibility="exclusive"
+                rows={2}
+                placeholder={edit.hint || "Type a value"}
+                value={value}
+                onInput={(e) => setValue(e.target.value)}
+              ></s-text-area>
+            ) : (
+              <s-text-field
+                label={fieldLabel}
+                labelAccessibilityVisibility="exclusive"
+                placeholder={edit.hint || "Type a value"}
+                value={value}
+                onInput={(e) => setValue(e.target.value)}
+              ></s-text-field>
+            )
+          ) : null}
           {edit ? (
             // Secondary, not primary: a row full of disabled primary buttons reads as broken, and the
             // page-level primary action stays the one primary button on the page.
@@ -905,9 +936,9 @@ function FindingRow({ f, columns, onSave, onLearn, onIgnore, busy }) {
               variant="secondary"
               onClick={() => onSave(edit, value)}
               disabled={!canSave || busy || undefined}
-              accessibilityLabel={`Save corrected value for ${f.productTitle}`}
+              accessibilityLabel={`${edit.kind === "word" ? "Replace the word for" : "Save corrected value for"} ${f.productTitle}`}
             >
-              Save
+              {edit.kind === "word" ? "Replace" : "Save"}
             </s-button>
           ) : (
             // A link styled as a tertiary button (s-button with href renders an anchor), so the
@@ -940,13 +971,13 @@ function Detail({ rule, findings, onSave, onLearn, onIgnore, busy }) {
   const [query, setQuery] = useState("");
   const q = query.trim().toLowerCase();
   const filtered = q
-    ? findings.filter((f) => f.productTitle.toLowerCase().includes(q) || (f.detail || "").toLowerCase().includes(q))
+    ? findings.filter((f) => f.productTitle.toLowerCase().includes(q) || (f.sku || "").toLowerCase().includes(q) || (f.detail || "").toLowerCase().includes(q))
     : findings;
   const rows = filtered.slice(0, MAX_ROWS);
   const hidden = filtered.length - rows.length;
   const columns = detailColumns(findings);
-  const help = columns.corrected
-    ? "Edit the corrected value and save, or ignore what is intentional."
+  const help = columns.fix
+    ? "Check the current value, type the correction and save, or ignore what is intentional."
     : "Open each product in Shopify to fix it, or ignore what is intentional.";
 
   return (
@@ -969,15 +1000,15 @@ function Detail({ rule, findings, onSave, onLearn, onIgnore, busy }) {
               slot is placed by its slot name, not by position. */}
           <s-table-header-row>
             <s-table-header listSlot="primary">Product</s-table-header>
-            {columns.current ? <s-table-header listSlot="labeled">Current</s-table-header> : null}
-            {columns.corrected ? <s-table-header listSlot="labeled">Corrected</s-table-header> : null}
-            <s-table-header listSlot="inline">Actions</s-table-header>
+            {columns.sku ? <s-table-header listSlot="labeled">SKU</s-table-header> : null}
+            <s-table-header listSlot="labeled">Current value</s-table-header>
+            <s-table-header listSlot="labeled">{columns.fix ? "Fix" : "Actions"}</s-table-header>
           </s-table-header-row>
           <s-search-field
             slot="filters"
             label="Search"
             labelAccessibilityVisibility="exclusive"
-            placeholder="Search products"
+            placeholder="Search products and SKUs"
             value={query}
             onInput={(e) => setQuery(e.target.value)}
           ></s-search-field>

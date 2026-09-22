@@ -76,6 +76,16 @@ function finding(rule, product, extra = {}) {
     productTitle: product.title,
     ...extra,
   };
+  // The SKU the row is about: the variant for a variant finding, the only variant otherwise. A
+  // product with several variants shows how many instead.
+  const variants = product.variants || [];
+  const v = f.variantId ? variants.find((x) => x.id === f.variantId) : variants.length === 1 ? variants[0] : null;
+  if (v) {
+    f.sku = v.sku || "";
+    if (f.variantId) f.variantTitle = v.title || "";
+  } else {
+    f.variantCount = variants.length;
+  }
   if (f.edit) f.edit = { ruleId: rule.id, productId: product.id, title: product.title, ...f.edit };
   return f;
 }
