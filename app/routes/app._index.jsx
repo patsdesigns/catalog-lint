@@ -303,7 +303,7 @@ function Summary({ result, history, fixedWeek, fixedTotal, checksOn, checksTotal
   const products = `${n(result.total)} ${result.total === 1 ? "product" : "products"}`;
   // Revenue at risk: results saved before it was recorded carry a computed one (scans.server.js).
   const atRisk = result.atRisk || { products: 0, amount: 0, currency: null, byRule: {} };
-  const riskTop = Object.entries(atRisk.byRule || {}).sort((a, b) => b[1] - a[1]).slice(0, 2);
+  const riskTop = Object.entries(atRisk.byRule || {}).sort((a, b) => b[1] - a[1]);
   const lastScan = `Last scan ${timeAgo(result.scannedAt)} · ${products}${result.ignoredCount ? ` · ${n(result.ignoredCount)} ignored` : ""}${newProducts ? ` · ${n(newProducts)} added since` : ""}`;
   return (
     <s-section accessibilityLabel="Catalog summary">
@@ -356,7 +356,7 @@ function Summary({ result, history, fixedWeek, fixedTotal, checksOn, checksTotal
                 : "Every product can be bought and found"}
             </s-text>
             {riskTop.length ? (
-              // The two checks behind most of it, each a link to its issue page.
+              // Every check behind it, biggest first, each a link to its issue page.
               <s-text color="subdued">
                 {riskTop.map(([ruleId, count], i) => (
                   <Fragment key={ruleId}>
