@@ -4,7 +4,8 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 
-// Contact form. Messages are kept per shop in SupportMessage until an inbox or email is wired up.
+// Contact form. Messages are kept per shop in SupportMessage and, when SUPPORT_WEBHOOK_URL is set,
+// posted there as well (a Slack incoming webhook, Zapier, Make or any endpoint that takes JSON).
 
 const CATEGORIES = ["General Question", "Bug Report", "Feature Request", "Billing", "Something Else"];
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -31,7 +32,27 @@ export async function action({ request }) {
   }
   if (!EMAIL_RE.test(entry.email)) return { ok: false, error: "That email address does not look right." };
   await prisma.supportMessage.create({ data: { shop: session.shop, ...entry } });
+  await forward(session.shop, entry);
   return { ok: true };
+}
+
+// Best effort: a failed forward is logged, never shown to the merchant, since the message is stored.
+async function forward(shop, entry) {
+  // eslint-disable-next-line no-undef
+  const url = process.env.SUPPORT_WEBHOOK_URL;
+  if (!url) return;
+  const text = `TidyUp support · ${entry.category}\nShop: ${shop}\nFrom: ${entry.name} <${entry.email}>\nSubject: ${entry.subject}\n\n${entry.message}`;
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, shop, ...entry }),
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) console.error(`Support webhook responded ${res.status}`);
+  } catch (err) {
+    console.error("Support webhook failed", err);
+  }
 }
 
 export default function SupportPage() {

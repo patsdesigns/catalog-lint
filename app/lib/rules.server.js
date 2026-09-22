@@ -30,7 +30,7 @@ function isTitleCase(t) {
   return caps / words.length >= 0.8;
 }
 
-const EMOJI_RE = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/u;
+const EMOJI_RE = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]|\u{FE0F}/u;
 const EN_STOPWORDS = ["the", "and", "with", "for", "this", "that", "your", "from", "are", "is", "of", "to", "in", "on", "it"];
 function englishRatio(text) {
   const words = text.toLowerCase().split(/[^a-z']+/).filter(Boolean);
@@ -151,7 +151,7 @@ export const PRODUCT_RULES = [
   {
     id: "title_formatting", category: "description", label: "Title has stray spaces or punctuation", severity: "low",
     check(p) {
-      const cleaned = p.title.replace(/\s{2,}/g, " ").trim().replace(/[.,;:!?\-]+$/, "").trim();
+      const cleaned = p.title.replace(/\s{2,}/g, " ").trim().replace(/[.,;:!?-]+$/, "").trim();
       return cleaned !== p.title
         ? [finding(this, p, { edit: productEdit("title", p.title, cleaned) })] : [];
     },

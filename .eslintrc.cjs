@@ -50,6 +50,8 @@ module.exports = {
       },
       rules: {
         "react/no-unknown-property": ["error", { ignore: ["variant"] }],
+        // Components are typed by their loader data, not PropTypes.
+        "react/prop-types": "off",
       },
     },
 

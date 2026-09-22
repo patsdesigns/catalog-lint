@@ -88,6 +88,9 @@ export function findMisspellings(fields, ctx) {
   const seen = new Set();
   const out = [];
   const names = ctx.nameWords || new Set();
+  // Dictionary lookups, and suggestions above all, are the slow part of a scan, and the same unknown
+  // words recur across a catalog, so results are kept for the whole scan (ctx lives that long).
+  const cache = ctx.spellCache || (ctx.spellCache = new Map());
   for (const { field, key, text, titleLike } of fields) {
     for (const match of text.matchAll(WORD_RE)) {
       const word = match[0];
@@ -98,11 +101,18 @@ export function findMisspellings(fields, ctx) {
       if (ctx.customWords.has(lower)) continue;
       const capitalized = /^[A-Z]/.test(word);
       if (capitalized && (!titleLike || names.has(lower))) continue;
-      if (known(ctx.speller, word)) continue;
-      const suggestion = capitalized ? nearSuggestion(ctx.speller, word) : ctx.speller.suggest(word)[0] || null;
-      if (capitalized && !suggestion) continue;
+      const cacheKey = (capitalized ? "C:" : "w:") + word;
+      let hit = cache.get(cacheKey);
+      if (!hit) {
+        hit = known(ctx.speller, word)
+          ? { known: true, suggestion: null }
+          : { known: false, suggestion: capitalized ? nearSuggestion(ctx.speller, word) : ctx.speller.suggest(word)[0] || null };
+        cache.set(cacheKey, hit);
+      }
+      if (hit.known) continue;
+      if (capitalized && !hit.suggestion) continue;
       seen.add(lower);
-      out.push({ word, suggestion, field, key });
+      out.push({ word, suggestion: hit.suggestion, field, key });
     }
   }
   return out;

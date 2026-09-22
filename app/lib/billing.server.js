@@ -1,8 +1,12 @@
 import { authenticate } from "../shopify.server";
 import { DEFAULT_PLAN, PAID_PLANS } from "./plans";
 
-// Test charges while TidyUp is in development: they appear on the dev store and bill nobody.
-export const BILLING_TEST = true;
+// Test charges (the only kind a development store accepts) unless BILLING_TEST=false, which a
+// production deployment sets once real billing is wanted. Without the variable, production means
+// real charges and everything else means test charges.
+// eslint-disable-next-line no-undef
+const env = process.env;
+export const BILLING_TEST = env.BILLING_TEST ? env.BILLING_TEST === "true" : env.NODE_ENV !== "production";
 
 // The shop's plan and its subscription, for code that has already authenticated the request.
 // A paid plan needs an active subscription named after it; anything else is Dust Off.
