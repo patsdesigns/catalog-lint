@@ -54,6 +54,11 @@ api_version = "2026-10"
   uri = "/webhooks/products/update"
   topics = [ "products/update" ]
 
+  # Subscription changes: an Early Bird seat lapses when its subscription is cancelled or expires.
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/app_subscriptions/update"
+  topics = [ "app_subscriptions/update" ]
+
   # Privacy (GDPR) webhooks, required for a public app; handled by app/routes/webhooks.compliance.jsx.
   [[webhooks.subscriptions]]
   uri = "/webhooks/compliance"

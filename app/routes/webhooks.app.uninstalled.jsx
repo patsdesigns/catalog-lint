@@ -1,5 +1,6 @@
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
+import { lapseEarlyBird } from "../lib/billing.server";
 
 export const action = async ({ request }) => {
   const { shop, session, topic } = await authenticate.webhook(request);
@@ -11,6 +12,8 @@ export const action = async ({ request }) => {
   if (session) {
     await db.session.deleteMany({ where: { shop } });
   }
+  // Uninstalling ends the subscription, and with it the Early Bird seat.
+  await lapseEarlyBird(shop);
 
   return new Response();
 };

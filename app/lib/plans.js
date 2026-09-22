@@ -20,6 +20,9 @@ const NONE = {
   customRules: false,
   vendorWhitelist: false,
 };
+const QUICK_FEATURES = { ...NONE, inlineEdits: true, export: true, dictionary: true, ignores: true, newProductScans: true, autoRescan: true, weeklyDigest: true };
+const DEEP_FEATURES = { ...QUICK_FEATURES, customRules: true, vendorWhitelist: true };
+const DEEP_EXTRAS = ["Priority support"];
 
 export const PLANS = [
   {
@@ -37,7 +40,7 @@ export const PLANS = [
     price: 10,
     productLimit: null,
     areas: CORE_AREAS,
-    features: { ...NONE, inlineEdits: true, export: true, dictionary: true, ignores: true, newProductScans: true, autoRescan: true, weeklyDigest: true },
+    features: { ...QUICK_FEATURES },
     extras: [],
   },
   {
@@ -46,24 +49,30 @@ export const PLANS = [
     price: 20,
     productLimit: null,
     areas: ALL_AREAS,
-    features: {
-      ...NONE,
-      inlineEdits: true,
-      export: true,
-      dictionary: true,
-      ignores: true,
-      newProductScans: true,
-      autoRescan: true,
-      weeklyDigest: true,
-      customRules: true,
-      vendorWhitelist: true,
-    },
-    extras: ["Priority support"],
+    features: { ...DEEP_FEATURES },
+    extras: [...DEEP_EXTRAS],
   },
 ];
 
+// The Early Bird offer: Deep Clean for the price of Quick Clean, for the first EARLY_BIRD_SEATS
+// stores, kept as long as the subscription stays active. It is offered rather than listed, so it
+// is not in PLANS: every "upgrade to" text keeps pointing at Deep Clean, and gating reads the same
+// features and areas as Deep Clean.
+export const EARLY_BIRD_SEATS = 50;
+export const EARLY_BIRD = {
+  id: "deep_clean_early_bird",
+  name: "Deep Clean Early Bird",
+  price: 10,
+  productLimit: null,
+  areas: ALL_AREAS,
+  features: { ...DEEP_FEATURES },
+  extras: [...DEEP_EXTRAS],
+  earlyBird: true,
+};
+
 export const DEFAULT_PLAN = PLANS[0];
-export const PAID_PLANS = PLANS.filter((p) => p.price > 0);
+// Every plan a subscription can be named after: the billing config and plan matching read this.
+export const PAID_PLANS = [...PLANS.filter((p) => p.price > 0), EARLY_BIRD];
 
 // What each feature is called on the Plans page.
 export const FEATURE_LABELS = {
@@ -82,11 +91,11 @@ export const FEATURE_LABELS = {
 export const COMING_SOON = new Set(["export"]);
 
 export function planById(id) {
-  return PLANS.find((p) => p.id === id) || null;
+  return [...PLANS, EARLY_BIRD].find((p) => p.id === id) || null;
 }
 
 export function planByName(name) {
-  return PLANS.find((p) => p.name === name) || null;
+  return [...PLANS, EARLY_BIRD].find((p) => p.name === name) || null;
 }
 
 // The cheapest plan that includes a feature, for "Upgrade to ..." links.

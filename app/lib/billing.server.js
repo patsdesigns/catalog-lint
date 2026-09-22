@@ -1,5 +1,6 @@
+import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
-import { DEFAULT_PLAN, PAID_PLANS } from "./plans";
+import { DEFAULT_PLAN, PAID_PLANS, EARLY_BIRD, EARLY_BIRD_SEATS } from "./plans";
 
 // Test charges (the only kind a development store accepts) unless BILLING_TEST=false, which a
 // production deployment sets once real billing is wanted. Without the variable, production means
@@ -42,4 +43,42 @@ export async function planForShop(graphql) {
 export async function getCurrentPlan(request) {
   const { billing } = await authenticate.admin(request);
   return (await currentPlan(billing)).plan;
+}
+
+// ---------- Early Bird ----------
+// Deep Clean at the Quick Clean price for the first EARLY_BIRD_SEATS stores. A claim is recorded
+// once the subscription is approved and lapses when it is cancelled or the app is uninstalled; a
+// store claims at most once, whatever the status.
+
+export async function earlyBirdSeatsLeft() {
+  const claims = await prisma.earlyBirdClaim.count();
+  return Math.max(0, EARLY_BIRD_SEATS - claims);
+}
+
+export async function earlyBirdClaim(shop) {
+  return prisma.earlyBirdClaim.findUnique({ where: { shop } });
+}
+
+// Records the claim inside a transaction: only while seats remain and the store never claimed.
+export async function claimEarlyBird(shop, subscriptionId) {
+  const claim = await prisma.$transaction(async (tx) => {
+    const claims = await tx.earlyBirdClaim.count();
+    if (claims >= EARLY_BIRD_SEATS) throw new Error("All Early Bird seats are taken.");
+    const existing = await tx.earlyBirdClaim.findUnique({ where: { shop } });
+    if (existing) throw new Error("This store has already claimed the Early Bird offer.");
+    return tx.earlyBirdClaim.create({ data: { shop, subscriptionId, status: "active" } });
+  });
+  const taken = await prisma.earlyBirdClaim.count();
+  console.log(`Early Bird claimed by ${shop}: seat ${taken} of ${EARLY_BIRD_SEATS} (${subscriptionId})`);
+  return claim;
+}
+
+export async function lapseEarlyBird(shop) {
+  const { count } = await prisma.earlyBirdClaim.updateMany({ where: { shop, status: "active" }, data: { status: "lapsed" } });
+  if (count) console.log(`Early Bird lapsed for ${shop}`);
+  return count;
+}
+
+export function isEarlyBirdSubscription(subscription) {
+  return Boolean(subscription && subscription.name === EARLY_BIRD.name);
 }

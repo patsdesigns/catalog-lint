@@ -1,29 +1,64 @@
 import { useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
-import { PLANS, FEATURE_LABELS, COMING_SOON, ALL_AREAS } from "../lib/plans";
-import { BILLING_TEST, currentPlan } from "../lib/billing.server";
+import { PLANS, DEFAULT_PLAN, EARLY_BIRD, EARLY_BIRD_SEATS, FEATURE_LABELS, COMING_SOON, ALL_AREAS } from "../lib/plans";
+import { BILLING_TEST, currentPlan, earlyBirdSeatsLeft, earlyBirdClaim, claimEarlyBird, lapseEarlyBird, isEarlyBirdSubscription } from "../lib/billing.server";
 
-// The three plans. Choosing a paid one sends the merchant to Shopify's approval screen and back;
-// choosing Dust Off cancels the current subscription.
+// The three plans, plus the Early Bird offer while seats remain. Choosing a paid plan sends the
+// merchant to Shopify's approval screen and back here; choosing Dust Off cancels the subscription.
 
 export async function loader({ request }) {
-  const { billing } = await authenticate.admin(request);
+  const { billing, session } = await authenticate.admin(request);
+  const shop = session.shop;
   const { plan, subscription } = await currentPlan(billing);
-  return { currentId: plan.id, subscription, plans: PLANS };
+  let claim = await earlyBirdClaim(shop);
+  let notice = null;
+  let currentId = plan.id;
+
+  // Back from approving the Early Bird subscription: the seat is claimed now. If the seats ran out
+  // between the request and the approval, the subscription is cancelled again and nothing is charged.
+  if (plan.id === EARLY_BIRD.id && subscription && !claim) {
+    try {
+      claim = await claimEarlyBird(shop, subscription.id);
+    } catch (err) {
+      await billing.cancel({ subscriptionId: subscription.id, isTest: BILLING_TEST, prorate: false });
+      currentId = DEFAULT_PLAN.id;
+      notice = { heading: "The Early Bird offer is no longer available", text: `${err.message} The subscription was cancelled and nothing is charged.` };
+    }
+  }
+
+  const seatsLeft = await earlyBirdSeatsLeft();
+  const earlyBird = {
+    seats: EARLY_BIRD_SEATS,
+    seatsLeft,
+    claimed: EARLY_BIRD_SEATS - seatsLeft,
+    status: claim?.status || null,
+    // Offered while seats remain and the store never claimed; shown as current while its claim is active.
+    show: claim?.status === "active" || (!claim && seatsLeft > 0),
+    plan: EARLY_BIRD,
+  };
+  return { currentId, plans: PLANS, earlyBird, notice };
 }
 
 export async function action({ request }) {
-  const { billing } = await authenticate.admin(request);
+  const { billing, session } = await authenticate.admin(request);
+  const shop = session.shop;
   const form = await request.formData();
-  const target = PLANS.find((p) => p.id === form.get("plan"));
+  const wanted = form.get("plan");
+  const target = wanted === EARLY_BIRD.id ? EARLY_BIRD : PLANS.find((p) => p.id === wanted);
   if (!target) return { ok: false, error: "That plan does not exist." };
   const { plan, subscription } = await currentPlan(billing);
   if (target.id === plan.id) return { ok: true, plan: plan.id };
   try {
     if (target.price === 0) {
       if (subscription) await billing.cancel({ subscriptionId: subscription.id, isTest: BILLING_TEST, prorate: false });
+      if (isEarlyBirdSubscription(subscription)) await lapseEarlyBird(shop);
       return { ok: true, plan: target.id };
+    }
+    if (target.earlyBird) {
+      // Seats are checked here and again, inside a transaction, when the claim is recorded.
+      if (await earlyBirdClaim(shop)) return { ok: false, error: "This store has already used the Early Bird offer." };
+      if ((await earlyBirdSeatsLeft()) <= 0) return { ok: false, error: "All Early Bird seats are taken." };
     }
     // Throws a redirect to the approval screen; Shopify sends the merchant back to this page after.
     // The app URL (https) is the base: the request URL behind the dev proxy is plain http.
@@ -39,10 +74,11 @@ export async function action({ request }) {
   }
 }
 
-const PLAN_COLUMNS = "@container (inline-size > 900px) 1fr 1fr 1fr, (inline-size > 560px) and (inline-size <= 900px) 1fr 1fr, 1fr";
+const THREE_COLUMNS = "@container (inline-size > 900px) 1fr 1fr 1fr, (inline-size > 560px) and (inline-size <= 900px) 1fr 1fr, 1fr";
+const FOUR_COLUMNS = "@container (inline-size > 1000px) 1fr 1fr 1fr 1fr, (inline-size > 560px) and (inline-size <= 1000px) 1fr 1fr, 1fr";
 const FEATURE_ORDER = Object.keys(FEATURE_LABELS);
 
-function PlanCard({ plan, current, busy, onChoose }) {
+function PlanCard({ plan, current, note, busy, onChoose }) {
   const included = FEATURE_ORDER.filter((key) => plan.features[key] && !COMING_SOON.has(key));
   const later = FEATURE_ORDER.filter((key) => plan.features[key] && COMING_SOON.has(key));
   return (
@@ -51,11 +87,12 @@ function PlanCard({ plan, current, busy, onChoose }) {
         <s-stack gap="small-200">
           <s-stack direction="inline" gap="small" alignItems="center" justifyContent="space-between">
             <s-heading>{plan.name}</s-heading>
-            {current ? <s-badge tone="success">Current plan</s-badge> : null}
+            {current ? <s-badge tone="success">Current plan</s-badge> : plan.earlyBird ? <s-badge tone="info">Limited offer</s-badge> : null}
           </s-stack>
           <s-text type="strong">{plan.price ? `$${plan.price} / month` : "Free"}</s-text>
           <s-text color="subdued">{plan.productLimit ? `Up to ${plan.productLimit.toLocaleString("en-US")} products` : "Unlimited products"}</s-text>
           <s-text color="subdued">{plan.areas.length === ALL_AREAS.length ? `All ${ALL_AREAS.length} check areas` : `${plan.areas.length} of ${ALL_AREAS.length} check areas`}</s-text>
+          {note ? <s-text>{note}</s-text> : null}
         </s-stack>
         <s-unordered-list>
           <s-list-item>Full scan, fix-all buttons and undo</s-list-item>
@@ -75,7 +112,7 @@ function PlanCard({ plan, current, busy, onChoose }) {
           onClick={() => onChoose(plan.id)}
           accessibilityLabel={current ? `${plan.name} is your current plan` : `Choose ${plan.name}`}
         >
-          {current ? "Current plan" : plan.price ? `Choose ${plan.name}` : "Switch to Dust Off"}
+          {current ? "Current plan" : plan.price ? `Choose ${plan.earlyBird ? "Early Bird" : plan.name}` : "Switch to Dust Off"}
         </s-button>
       </s-stack>
     </s-box>
@@ -83,15 +120,22 @@ function PlanCard({ plan, current, busy, onChoose }) {
 }
 
 export default function PlansPage() {
-  const { currentId, plans } = useLoaderData();
+  const { currentId, plans, earlyBird, notice } = useLoaderData();
   const fetcher = useFetcher();
   const busy = fetcher.state !== "idle";
   const outcome = fetcher.data;
   const choose = (id) => fetcher.submit({ plan: id }, { method: "post" });
+  const cards = earlyBird.show ? [...plans, earlyBird.plan] : plans;
+  const offer = `First ${earlyBird.seats} stores get Deep Clean for $${earlyBird.plan.price} a month, ${earlyBird.claimed} of ${earlyBird.seats} claimed. Keep it as long as you stay subscribed.`;
 
   return (
     <s-page heading="Plans" inlineSize="large">
       <s-link slot="breadcrumb-actions" href="/app">Home</s-link>
+      {notice ? (
+        <s-banner tone="critical" heading={notice.heading}>
+          <s-paragraph>{notice.text}</s-paragraph>
+        </s-banner>
+      ) : null}
       {outcome && !outcome.ok ? (
         <s-banner tone="critical" heading="Could not change plan">
           <s-paragraph>{outcome.error}</s-paragraph>
@@ -109,9 +153,16 @@ export default function PlansPage() {
             development, charges are test charges.
           </s-paragraph>
           <s-query-container>
-            <s-grid gridTemplateColumns={PLAN_COLUMNS} gap="base">
-              {plans.map((plan) => (
-                <PlanCard key={plan.id} plan={plan} current={plan.id === currentId} busy={busy} onChoose={choose} />
+            <s-grid gridTemplateColumns={cards.length > 3 ? FOUR_COLUMNS : THREE_COLUMNS} gap="base">
+              {cards.map((plan) => (
+                <PlanCard
+                  key={plan.id}
+                  plan={plan}
+                  current={plan.id === currentId}
+                  note={plan.earlyBird ? offer : null}
+                  busy={busy}
+                  onChoose={choose}
+                />
               ))}
             </s-grid>
           </s-query-container>
