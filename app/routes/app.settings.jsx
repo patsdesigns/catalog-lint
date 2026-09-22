@@ -3,7 +3,7 @@ import { useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { listWords } from "../lib/dictionary.server";
-import { getIgnores, removeIgnore } from "../lib/ignores.server";
+import { getIgnores } from "../lib/ignores.server";
 import { getSettings, saveSettings } from "../lib/settings.server";
 import { RULE_CATALOG } from "../lib/rules.server";
 import { refreshAfter } from "../lib/rescan.server";
@@ -22,7 +22,8 @@ export async function loader({ request }) {
     getSettings(session.shop),
     getDigestSettings(session.shop),
   ]);
-  return { words, ignores: ignores.map((i) => ({ ...i, createdAt: i.createdAt.toISOString() })), settings, rules: RULE_CATALOG, plan, digest };
+  // Only the count: the ignored findings have their own page (app.ignored.jsx).
+  return { words, ignoreCount: ignores.length, settings, rules: RULE_CATALOG, plan, digest };
 }
 
 export async function action({ request }) {
@@ -32,10 +33,7 @@ export async function action({ request }) {
   const form = await request.formData();
   const intent = form.get("intent");
   // Settings the plan does not include are refused here as well as hidden in the page. The
-  // dictionary has its own page (app.dictionary.jsx).
-  if (intent === "removeIgnore" && !allowed.ignores) {
-    return { ok: false, error: `Ignored findings are part of the ${planFor("ignores").name} plan and up.` };
-  }
+  // dictionary and the ignored findings have pages of their own (app.dictionary.jsx, app.ignored.jsx).
   if (intent === "saveDigest" || intent === "sendTestDigest") {
     if (!allowed.weeklyDigest) return { ok: false, error: `The weekly email is part of the ${planFor("weeklyDigest").name} plan and up.` };
     const email = String(form.get("email") || "").trim();
@@ -55,7 +53,6 @@ export async function action({ request }) {
       return { ok: false, digest: "test", error: err.message || String(err) };
     }
   }
-  if (intent === "removeIgnore") await removeIgnore(session.shop, form.get("id"));
   if (intent === "saveSettings") {
     const current = await getSettings(session.shop);
     const next = { ...current };
@@ -91,7 +88,7 @@ function UpgradeSection({ heading, feature, what, slot }) {
 }
 
 export default function Settings() {
-  const { words, ignores, settings, rules: checks, plan, digest } = useLoaderData();
+  const { words, ignoreCount, settings, rules: checks, plan, digest } = useLoaderData();
   const features = plan.features;
   const fetcher = useFetcher();
   const busy = fetcher.state !== "idle";
@@ -254,14 +251,14 @@ export default function Settings() {
       <s-section slot="aside" heading={`Metafield Rules (${rules.length})`}>
         <s-stack gap="base">
           <s-paragraph>
-            Require a metafield, optionally only for one product type, and optionally check its value against a pattern.
-            Key is namespace.key, for example custom.fitment. Pattern is a regular expression, for example {"^\\d{3}-\\d{3}-\\d{3}-\\d{2}$"}.
+            Require a metafield on every product or only on one product type, and optionally check its value against a
+            pattern.
           </s-paragraph>
           {/* Stacked, not inline: the right column is too narrow for three fields in a row. */}
           <s-stack gap="small">
-            <s-text-field label="Metafield key" placeholder="custom.fitment" value={draft.key} onInput={(e) => setDraft({ ...draft, key: e.target.value })}></s-text-field>
-            <s-text-field label="Only for product type" placeholder="optional" value={draft.productType} onInput={(e) => setDraft({ ...draft, productType: e.target.value })}></s-text-field>
-            <s-text-field label="Pattern" placeholder="optional regex" value={draft.pattern} onInput={(e) => setDraft({ ...draft, pattern: e.target.value })}></s-text-field>
+            <s-text-field label="Metafield key" details="namespace.key, for example custom.fitment" placeholder="namespace.key" value={draft.key} onInput={(e) => setDraft({ ...draft, key: e.target.value })}></s-text-field>
+            <s-text-field label="Only for product type" details="Leave empty to apply to every product." placeholder="Wheels" value={draft.productType} onInput={(e) => setDraft({ ...draft, productType: e.target.value })}></s-text-field>
+            <s-text-field label="Value pattern" details={"Optional. A regular expression the value must match, for example ^[A-Z]{3}-\\d{4}$ for codes like ABC-1234."} placeholder="Any value" value={draft.pattern} onInput={(e) => setDraft({ ...draft, pattern: e.target.value })}></s-text-field>
             <s-stack direction="inline" gap="small">
               <s-button variant="primary" onClick={addRule} disabled={busy || !draft.key.trim() || undefined}>Add rule</s-button>
             </s-stack>
@@ -269,11 +266,13 @@ export default function Settings() {
           {rules.map((r, i) => (
             <s-box key={`${r.key}-${i}`} padding="small" border="base" borderRadius="base">
               <s-stack direction="inline" gap="base" alignItems="center" justifyContent="space-between">
-                <s-text>
-                  <strong>{r.key}</strong>
-                  {r.productType ? ` for type "${r.productType}"` : " for all products"}
-                  {r.pattern ? `, must match ${r.pattern}` : ""}
-                </s-text>
+                <s-stack gap="none">
+                  <s-text type="strong">{r.key}</s-text>
+                  <s-text color="subdued">
+                    {r.productType ? `Product type ${r.productType}` : "Every product"}
+                    {r.pattern ? ` · must match ${r.pattern}` : ""}
+                  </s-text>
+                </s-stack>
                 <s-button variant="tertiary" onClick={() => saveRules(rules.filter((_, j) => j !== i))} disabled={busy || undefined}>Remove</s-button>
               </s-stack>
             </s-box>
@@ -299,6 +298,22 @@ export default function Settings() {
       </s-section>
       ) : (
         <UpgradeSection slot="aside" heading="Dictionary" feature="dictionary" what="The spelling dictionary is" />
+      )}
+
+      {features.ignores ? (
+      <s-section slot="aside" heading={`Ignored Findings (${ignoreCount})`}>
+        <s-stack gap="small">
+          <s-paragraph>
+            Single findings hidden with Ignore on an issue page. They stay hidden until you restore them. The list lives
+            on its own page.
+          </s-paragraph>
+          <s-stack direction="inline" gap="small">
+            <s-button href="/app/ignored">Manage ignored findings</s-button>
+          </s-stack>
+        </s-stack>
+      </s-section>
+      ) : (
+        <UpgradeSection slot="aside" heading="Ignored Findings" feature="ignores" what="Ignoring findings is" />
       )}
 
       {features.weeklyDigest ? (
@@ -330,33 +345,6 @@ export default function Settings() {
         <UpgradeSection slot="aside" heading="Weekly Email" feature="weeklyDigest" what="The weekly email is" />
       )}
 
-      {features.ignores ? (
-      <s-section slot="aside" heading={`Ignored Findings (${ignores.length})`}>
-        <s-stack gap="small">
-          <s-paragraph>Findings you chose to ignore. Restore one to see it again on the next scan.</s-paragraph>
-          {ignores.map((i) => (
-            <s-box key={i.id} padding="small" border="base" borderRadius="base">
-              <s-stack direction="inline" gap="base" alignItems="center" justifyContent="space-between">
-                <s-stack gap="none">
-                  <s-text>{i.title}</s-text>
-                  <s-text color="subdued">{i.ruleId.replace(/_/g, " ")}{i.detail ? `, ${i.detail}` : ""}</s-text>
-                </s-stack>
-                <s-button
-                  variant="tertiary"
-                  onClick={() => submit({ intent: "removeIgnore", id: i.id })}
-                  disabled={busy || undefined}
-                >
-                  Restore
-                </s-button>
-              </s-stack>
-            </s-box>
-          ))}
-          {ignores.length === 0 ? <s-text color="subdued">Nothing ignored.</s-text> : null}
-        </s-stack>
-      </s-section>
-      ) : (
-        <UpgradeSection slot="aside" heading="Ignored Findings" feature="ignores" what="Ignoring findings is" />
-      )}
     </s-page>
   );
 }
