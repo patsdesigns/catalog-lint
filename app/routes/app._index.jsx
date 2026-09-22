@@ -967,7 +967,7 @@ function FindingRow({ f, columns, onSave, onLearn, onIgnore, busy }) {
   );
 }
 
-function Detail({ rule, findings, onSave, onLearn, onIgnore, busy }) {
+function Detail({ rule, findings, onSave, onLearn, onIgnore, onBack, busy }) {
   const [query, setQuery] = useState("");
   const q = query.trim().toLowerCase();
   const filtered = q
@@ -1030,9 +1030,13 @@ function Detail({ rule, findings, onSave, onLearn, onIgnore, busy }) {
       {rows.length === 0 ? (
         <s-box padding="base"><s-text color="subdued">No products match your search.</s-text></s-box>
       ) : null}
-      {hidden > 0 ? (
-        <s-box padding="base"><s-text color="subdued">Showing {rows.length} of {filtered.length}. Use search to narrow down.</s-text></s-box>
-      ) : null}
+      {/* A second way back under the list, for readers who scrolled past the header. */}
+      <s-box padding="base">
+        <s-stack direction="inline" gap="base" alignItems="center" justifyContent="space-between">
+          <s-button variant="tertiary" icon="arrow-left" onClick={onBack}>Back to issues</s-button>
+          {hidden > 0 ? <s-text color="subdued">Showing {rows.length} of {filtered.length}. Use search to narrow down.</s-text> : null}
+        </s-stack>
+      </s-box>
     </s-section>
   );
 }
@@ -1064,6 +1068,7 @@ export default function Index() {
   }, [result, selected]);
 
   const submit = (payload) => fetcher.submit(payload, { method: "post" });
+  const back = () => setSelected(null);
   const runScan = () => { setSelected(null); submit({ intent: "scan" }); };
   const runFix = (ruleId) => submit({ intent: "fix", ruleId });
   const runUndo = (batchId) => submit({ intent: "undo", batchId });
@@ -1077,7 +1082,9 @@ export default function Index() {
     const findings = result.findings.filter((f) => f.ruleId === rule.ruleId);
     return (
       <s-page heading={rule.label} inlineSize="large">
-        <s-link slot="breadcrumb-actions" onClick={() => setSelected(null)}>Issues</s-link>
+        {/* The breadcrumb is the standard way back; the button makes it obvious. */}
+        <s-link slot="breadcrumb-actions" onClick={back}>Issues</s-link>
+        <s-button slot="secondary-actions" onClick={back}>Back to issues</s-button>
         {rule.fixable ? (
           <s-button slot="primary-action" variant="primary" onClick={() => runFix(rule.ruleId)} disabled={busy || undefined}>
             {rule.fixLabel}
@@ -1090,6 +1097,7 @@ export default function Index() {
           onSave={saveEdit}
           onLearn={learnWord}
           onIgnore={ignoreFinding}
+          onBack={back}
           busy={busy}
         />
       </s-page>
