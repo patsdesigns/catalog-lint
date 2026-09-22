@@ -14,7 +14,7 @@ import { planFor, lockedAreas, areaLocked, allAreasPlan } from "../lib/plans";
 import { RULE_CATALOG } from "../lib/rules.server";
 import { CATEGORIES, categoryOf } from "../lib/categories";
 import { PASS_LABELS, SETUP_LABELS } from "../lib/checkLabels";
-import { formatMoney, timeAgo } from "../lib/format";
+import { timeAgo } from "../lib/format";
 import { TONE, Dot, Notices } from "../lib/ui";
 
 // ---------- server ----------
@@ -348,10 +348,11 @@ function Summary({ result, history, fixedWeek, fixedTotal, checksOn, checksTotal
             </s-text>
           </Stat>
           <s-divider></s-divider>
-          <Stat label="Revenue at risk" value={atRisk.products} text={atRisk.amount > 0 ? formatMoney(atRisk.amount, atRisk.currency) : null}>
+          {/* The count of products, not an amount: a product with no price would add nothing to one. */}
+          <Stat label="Revenue at risk" value={atRisk.products}>
             <s-text color="subdued">
               {atRisk.products
-                ? `${n(atRisk.products)} ${atRisk.products === 1 ? "product" : "products"} cannot sell or cannot be found`
+                ? `${atRisk.products === 1 ? "Product that cannot" : "Products that cannot"} sell or cannot be found`
                 : "Every product can be bought and found"}
             </s-text>
             {riskTop.length ? (
