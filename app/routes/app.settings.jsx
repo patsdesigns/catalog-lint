@@ -9,31 +9,43 @@ import { RULE_CATALOG } from "../lib/rules.server";
 import { refreshAfter } from "../lib/rescan.server";
 import { PASS_LABELS } from "../lib/checkLabels";
 import { FAMILIES, TIERS, PRESETS, disabledForPreset } from "../lib/checkGroups";
+import { currentPlan } from "../lib/billing.server";
+import { planFor } from "../lib/plans";
 
 export async function loader({ request }) {
-  const { session } = await authenticate.admin(request);
+  const { session, billing } = await authenticate.admin(request);
+  const { plan } = await currentPlan(billing);
   const [words, ignores, settings] = await Promise.all([
     listWords(session.shop),
     getIgnores(session.shop),
     getSettings(session.shop),
   ]);
-  return { words, ignores: ignores.map((i) => ({ ...i, createdAt: i.createdAt.toISOString() })), settings, rules: RULE_CATALOG };
+  return { words, ignores: ignores.map((i) => ({ ...i, createdAt: i.createdAt.toISOString() })), settings, rules: RULE_CATALOG, plan };
 }
 
 export async function action({ request }) {
-  const { admin, session } = await authenticate.admin(request);
+  const { admin, session, billing } = await authenticate.admin(request);
+  const { plan } = await currentPlan(billing);
+  const allowed = plan.features;
   const form = await request.formData();
   const intent = form.get("intent");
+  // Settings the plan does not include are refused here as well as hidden in the page.
+  if ((intent === "addWord" || intent === "removeWord") && !allowed.dictionary) {
+    return { ok: false, error: `The spelling dictionary is part of the ${planFor("dictionary").name} plan and up.` };
+  }
+  if (intent === "removeIgnore" && !allowed.ignores) {
+    return { ok: false, error: `Ignored findings are part of the ${planFor("ignores").name} plan and up.` };
+  }
   if (intent === "removeWord") await removeWord(session.shop, form.get("id"));
   if (intent === "addWord") await addWord(session.shop, form.get("word"));
   if (intent === "removeIgnore") await removeIgnore(session.shop, form.get("id"));
   if (intent === "saveSettings") {
     const current = await getSettings(session.shop);
     const next = { ...current };
-    if (form.has("vendorWhitelist")) {
+    if (form.has("vendorWhitelist") && allowed.vendorWhitelist) {
       next.vendorWhitelist = String(form.get("vendorWhitelist")).split("\n").map((v) => v.trim()).filter(Boolean);
     }
-    if (form.has("metafieldRules")) next.metafieldRules = JSON.parse(form.get("metafieldRules"));
+    if (form.has("metafieldRules") && allowed.customRules) next.metafieldRules = JSON.parse(form.get("metafieldRules"));
     if (form.has("preset")) next.preset = form.get("preset");
     // Flipping any single check means the merchant has their own list.
     if (form.has("disabledRules")) {
@@ -49,8 +61,21 @@ export async function action({ request }) {
 
 const FAMILY_COLUMNS = "@container (inline-size > 720px) 1fr 1fr, 1fr";
 
+// Stands in for a section the plan does not include. `what` names the feature with its verb.
+function UpgradeSection({ heading, feature, what, slot }) {
+  const plan = planFor(feature);
+  return (
+    <s-section slot={slot} heading={heading}>
+      <s-paragraph>
+        {what} part of the {plan.name} plan and up. <s-link href="/app/plans">Upgrade to {plan.name}</s-link>
+      </s-paragraph>
+    </s-section>
+  );
+}
+
 export default function Settings() {
-  const { words, ignores, settings, rules: checks } = useLoaderData();
+  const { words, ignores, settings, rules: checks, plan } = useLoaderData();
+  const features = plan.features;
   const fetcher = useFetcher();
   const busy = fetcher.state !== "idle";
   const inputRef = useRef(null);
@@ -133,6 +158,11 @@ export default function Settings() {
 
   return (
     <s-page heading="Settings">
+      {fetcher.data && !fetcher.data.ok ? (
+        <s-banner tone="critical" heading="Not included in your plan">
+          <s-paragraph>{fetcher.data.error}</s-paragraph>
+        </s-banner>
+      ) : null}
       <s-section heading={`Checks (${runningCount} of ${checks.length} running)`}>
         <s-stack gap="large">
           <s-stack gap="small">
@@ -213,6 +243,7 @@ export default function Settings() {
         </s-stack>
       </s-section>
 
+      {features.vendorWhitelist ? (
       <s-section heading="Approved Vendors">
         <s-stack gap="base">
           <s-paragraph>
@@ -231,7 +262,11 @@ export default function Settings() {
           </s-stack>
         </s-stack>
       </s-section>
+      ) : (
+        <UpgradeSection heading="Approved Vendors" feature="vendorWhitelist" what="Approved vendor lists are" />
+      )}
 
+      {features.customRules ? (
       <s-section heading={`Metafield Rules (${rules.length})`}>
         <s-stack gap="base">
           <s-paragraph>
@@ -259,7 +294,11 @@ export default function Settings() {
           {rules.length === 0 ? <s-text color="subdued">No rules yet.</s-text> : null}
         </s-stack>
       </s-section>
+      ) : (
+        <UpgradeSection heading="Metafield Rules" feature="customRules" what="Custom metafield rules are" />
+      )}
 
+      {features.dictionary ? (
       <s-section slot="aside" heading={`Dictionary (${words.length})`}>
         <s-stack gap="base">
           <s-paragraph>
@@ -289,7 +328,11 @@ export default function Settings() {
           </s-stack>
         </s-stack>
       </s-section>
+      ) : (
+        <UpgradeSection slot="aside" heading="Dictionary" feature="dictionary" what="The spelling dictionary is" />
+      )}
 
+      {features.ignores ? (
       <s-section slot="aside" heading={`Ignored Findings (${ignores.length})`}>
         <s-stack gap="small">
           <s-paragraph>Findings you chose to ignore. Restore one to see it again on the next scan.</s-paragraph>
@@ -313,6 +356,9 @@ export default function Settings() {
           {ignores.length === 0 ? <s-text color="subdued">Nothing ignored.</s-text> : null}
         </s-stack>
       </s-section>
+      ) : (
+        <UpgradeSection slot="aside" heading="Ignored Findings" feature="ignores" what="Ignoring findings is" />
+      )}
     </s-page>
   );
 }

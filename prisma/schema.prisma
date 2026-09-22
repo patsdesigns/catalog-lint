@@ -43,6 +43,7 @@ model Scan {
   findings   String
   checks     String   @default("[]")
   names      String   @default("[]")
+  catalogTotal Int    @default(0)
   createdAt  DateTime @default(now())
 
   @@index([shop, createdAt])

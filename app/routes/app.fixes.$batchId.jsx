@@ -4,6 +4,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { fixBatch, undoFix } from "../lib/fixes.server";
 import { refreshAfter } from "../lib/rescan.server";
+import { currentPlan } from "../lib/billing.server";
 import { adminUrl, timeAgo } from "../lib/format";
 
 // One recent fix: the products it changed, each of which can be undone on its own.
@@ -15,11 +16,12 @@ export async function loader({ request, params }) {
 
 // Undo one product's changes (productId) or every change in the batch.
 export async function action({ request, params }) {
-  const { admin, session } = await authenticate.admin(request);
+  const { admin, session, billing } = await authenticate.admin(request);
+  const { plan } = await currentPlan(billing);
   const form = await request.formData();
   try {
     const undo = await undoFix(admin.graphql, session.shop, params.batchId, form.get("productId") || null);
-    if (undo.productIds.length) await refreshAfter(admin.graphql, session.shop, { kind: "products", ids: undo.productIds });
+    if (undo.productIds.length) await refreshAfter(admin.graphql, session.shop, { kind: "products", ids: undo.productIds }, plan.productLimit);
     return { ok: true, undo };
   } catch (err) {
     return { ok: false, error: err.message || String(err) };

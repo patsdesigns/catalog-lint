@@ -23,12 +23,14 @@ import { activeJob, createJob, updateJob, jobView } from "./jobs.server";
 
 // Starts a full scan. Returns the running job for a large catalog, or null when the scan already
 // completed inline.
-export async function startScan(graphql, shop) {
+// limit: the plan's product limit (null for unlimited); the scan covers at most that many products.
+export async function startScan(graphql, shop, limit = null) {
   const running = await activeJob(shop);
   if (running) return jobView(running);
   const count = await countProducts(graphql);
-  if (count <= SYNC_LIMIT) {
-    await saveScan(shop, await scanCatalog(graphql, shop));
+  const toScan = limit ? Math.min(count, limit) : count;
+  if (toScan <= SYNC_LIMIT) {
+    await saveScan(shop, await scanCatalog(graphql, shop, limit));
     return null;
   }
   const operationId = await startBulkScan(graphql);
@@ -37,7 +39,7 @@ export async function startScan(graphql, shop) {
 
 // Called from the page loader: moves the running job along. Finishes it (downloads the export,
 // runs the rules, saves the scan) once Shopify is done. Returns the job to show, or null.
-export async function advanceJob(graphql, shop) {
+export async function advanceJob(graphql, shop, limit = null) {
   const job = await activeJob(shop);
   if (!job) return null;
 
@@ -53,8 +55,9 @@ export async function advanceJob(graphql, shop) {
 
   if (op.status === "COMPLETED") {
     try {
-      const products = op.url ? await downloadBulkCatalog(op.url) : [];
-      const result = await scanProducts(products, graphql, shop, job.createdAt.getTime());
+      const all = op.url ? await downloadBulkCatalog(op.url) : [];
+      const products = limit ? all.slice(0, limit) : all;
+      const result = await scanProducts(products, graphql, shop, job.createdAt.getTime(), all.length);
       await saveScan(shop, result);
       await updateJob(job.id, { status: "done", objects: Number(op.objectCount || 0) });
       return null;
@@ -76,7 +79,8 @@ export async function advanceJob(graphql, shop) {
 //   { kind: "settings" }                   checks were turned on or off
 //   { kind: "saved", key, batchId, value } an edit saved from an issue page: mark its finding
 //   { kind: "unsaved", key }               that edit was undone: clear the mark
-export async function refreshAfter(graphql, shop, change) {
+// limit: the plan's product limit, for the small-catalog rescan.
+export async function refreshAfter(graphql, shop, change, limit = null) {
   const latest = await latestScan(shop);
   if (!latest) return;
 
@@ -105,7 +109,7 @@ export async function refreshAfter(graphql, shop, change) {
 
   // Small catalogs: a full rescan is quick and keeps catalog-wide rules exact.
   if (latest.total <= SYNC_LIMIT) {
-    await saveScan(shop, await scanCatalog(graphql, shop));
+    await saveScan(shop, await scanCatalog(graphql, shop, limit));
     return;
   }
 
@@ -130,6 +134,7 @@ function withFindings(latest, findings, settings, ignoredDelta = 0) {
     ...summarizeFindings(latest.total, findings, settings),
     findings,
     names: latest.names || [],
+    catalogTotal: latest.catalogTotal || latest.total,
     ignoredCount: (latest.ignoredCount || 0) + ignoredDelta,
     scannedAt: new Date().toISOString(),
     durationMs: 0,

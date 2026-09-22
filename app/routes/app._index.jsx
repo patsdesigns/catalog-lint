@@ -7,6 +7,8 @@ import { applyFix, undoFix, recentFixes, fixedCount } from "../lib/fixes.server"
 import { latestScan, scanHistory } from "../lib/scans.server";
 import { addWord } from "../lib/dictionary.server";
 import { addIgnore, ignoreKey } from "../lib/ignores.server";
+import { currentPlan } from "../lib/billing.server";
+import { planFor } from "../lib/plans";
 import { applyEdit } from "../lib/edits.server";
 import { RULE_CATALOG } from "../lib/rules.server";
 import { CATEGORIES, categoryOf } from "../lib/categories";
@@ -28,16 +30,23 @@ async function loadState(shop) {
 }
 
 export async function loader({ request }) {
-  const { admin, session } = await authenticate.admin(request);
+  const { admin, session, billing } = await authenticate.admin(request);
+  const { plan } = await currentPlan(billing);
   // Moves a background scan along (and finishes it) every time the page loads or polls.
-  const job = await advanceJob(admin.graphql, session.shop);
-  return { ...(await loadState(session.shop)), job };
+  const job = await advanceJob(admin.graphql, session.shop, plan.productLimit);
+  return { ...(await loadState(session.shop)), job, plan };
 }
 
 export async function action({ request }) {
-  const { admin, session } = await authenticate.admin(request);
+  const { admin, session, billing } = await authenticate.admin(request);
+  const { plan } = await currentPlan(billing);
   const form = await request.formData();
   const intent = form.get("intent") || "scan";
+  // Features the plan does not include are refused here as well as hidden in the page.
+  const gate = { edit: ["inlineEdits", "Inline edits are"], learn: ["dictionary", "The spelling dictionary is"], ignore: ["ignores", "Ignoring findings is"] }[intent];
+  if (gate && !plan.features[gate[0]]) {
+    return { ok: false, error: `${gate[1]} part of the ${planFor(gate[0]).name} plan and up. Upgrade in Plans.` };
+  }
 
   try {
     let fix = null;
@@ -46,7 +55,7 @@ export async function action({ request }) {
     let job = null;
     let refresh = null;
     if (intent === "scan") {
-      job = await startScan(admin.graphql, session.shop);
+      job = await startScan(admin.graphql, session.shop, plan.productLimit);
     } else {
       // What changed, so the stored scan can be refreshed without re-reading a large catalog.
       let change = null;
@@ -85,14 +94,14 @@ export async function action({ request }) {
         const latest = await latestScan(session.shop);
         const before = (latest?.findings || []).filter((f) => f.ruleId === ruleId);
         const ids = [...new Set(before.map((f) => f.productId))];
-        if (ids.length) await refreshAfter(admin.graphql, session.shop, { kind: "products", ids });
+        if (ids.length) await refreshAfter(admin.graphql, session.shop, { kind: "products", ids }, plan.productLimit);
         const after = ((await latestScan(session.shop))?.findings || []).filter((f) => f.ruleId === ruleId).length;
         refresh = { ruleId, products: ids.length, before: before.length, after };
       }
-      if (change) await refreshAfter(admin.graphql, session.shop, change);
+      if (change) await refreshAfter(admin.graphql, session.shop, change, plan.productLimit);
     }
     const state = await loadState(session.shop);
-    return { ok: true, ...state, fix, undo, edit, refresh, job };
+    return { ok: true, ...state, fix, undo, edit, refresh, job, plan };
   } catch (err) {
     return { ok: false, error: err.message || String(err) };
   }
@@ -723,7 +732,7 @@ function RecentFixes({ fixes, onUndo, busy, showPanel }) {
 // Remembered per browser: whether the cards list every passed check or just the count.
 const SHOW_PASSED_KEY = "catalog-lint:show-passed";
 
-function Overview({ result, history, fixes, fixedWeek, fixedTotal, onSelect, onUndo, busy }) {
+function Overview({ result, history, fixes, fixedWeek, fixedTotal, plan, onSelect, onUndo, busy }) {
   const [filter, setFilter] = useState(null);
   const [showPassed, setShowPassed] = useState(false);
   const checks = result.checks || [];
@@ -749,6 +758,16 @@ function Overview({ result, history, fixes, fixedWeek, fixedTotal, onSelect, onU
   return (
     <>
       <Summary result={result} history={history} fixedWeek={fixedWeek} fixedTotal={fixedTotal} checksOn={checksOn} checksTotal={checks.length} />
+
+      {result.truncated ? (
+        // The plan's product limit left products out of the scan.
+        <s-banner tone="warning" heading={`Scanned ${result.total.toLocaleString("en-US")} of ${result.catalogTotal.toLocaleString("en-US")} products`}>
+          <s-paragraph>
+            {plan.productLimit ? `The ${plan.name} plan scans up to ${plan.productLimit.toLocaleString("en-US")} products. ` : "Scan again to include every product. "}
+            <s-link href="/app/plans">Upgrade to scan everything.</s-link>
+          </s-paragraph>
+        </s-banner>
+      ) : null}
 
       {result.rules.length === 0 ? (
         // The visible heading names the section; no accessibilityLabel, or the outline gets two headings.
@@ -836,12 +855,12 @@ function Welcome({ checkCount, onScan, busy, scanning }) {
 // track follows the values (a price or a weight needs far less room than a sentence). The Current
 // value column keeps a track of its own (CURRENT_TRACK) so a value and its note wrap as a block
 // instead of one word per line.
-function detailColumns(findings) {
+function detailColumns(findings, features) {
   const edits = findings.map((f) => f.edit).filter(Boolean);
   const numeric = edits.length > 0 && edits.every(isNumericEdit);
   return {
     sku: findings.some((f) => f.sku !== undefined || f.variantCount !== undefined),
-    fix: edits.length > 0,
+    fix: features.inlineEdits && edits.length > 0,
     fixTrack: numeric ? CORRECTED_TRACKS.numeric : CORRECTED_TRACKS.text,
   };
 }
@@ -875,14 +894,16 @@ function SkuCell({ f }) {
   return null;
 }
 
-function FindingRow({ f, columns, onSave, onLearn, onIgnore, onUndo, busy }) {
+function FindingRow({ f, columns, features, onSave, onLearn, onIgnore, onUndo, busy }) {
   const edit = f.edit;
   const [value, setValue] = useState(edit?.suggested ?? "");
   const canSave = edit && value.trim() !== "" && value !== edit.current;
   const current = currentValue(f);
   const fieldLabel = `Corrected value for ${f.productTitle}`;
   const variant = f.variantTitle && f.variantTitle !== "Default Title" ? f.variantTitle : "";
-  const actionCount = 2 + (f.word ? 1 : 0); // Save or Open in Shopify, Trust word, Ignore
+  const canEdit = Boolean(edit) && features.inlineEdits;
+  // Save or Open in Shopify, then Trust word and Ignore when the plan includes them.
+  const buttons = 1 + (f.word && features.dictionary ? 1 : 0) + (features.ignores ? 1 : 0);
   const currentCell = (
     <s-stack gap="small-500">
       {current.empty ? <s-text color="subdued">(empty)</s-text> : current.value ? <s-text>{current.value}</s-text> : null}
@@ -927,8 +948,12 @@ function FindingRow({ f, columns, onSave, onLearn, onIgnore, onUndo, busy }) {
             {f.saved.value ? <s-text color="subdued">{truncate(f.saved.value, 60)}</s-text> : null}
           </s-stack>
         ) : (
-        <s-grid gridTemplateColumns={edit ? fixTracks(columns.fixTrack, actionCount) : actionTracks(actionCount)} gap="small-200" alignItems="center" justifyContent="start">
-          {edit ? (
+        <s-grid gridTemplateColumns={canEdit ? fixTracks(columns.fixTrack, buttons) : actionTracks(buttons + (edit ? 1 : 0))} gap="small-200" alignItems="center" justifyContent="start">
+          {edit && !canEdit ? (
+            // The correction field is part of a paid plan; the row can still be fixed in Shopify.
+            <s-link href="/app/plans">Upgrade to {planFor("inlineEdits").name}</s-link>
+          ) : null}
+          {canEdit ? (
             edit.multiline ? (
               <s-text-area
                 label={fieldLabel}
@@ -948,7 +973,7 @@ function FindingRow({ f, columns, onSave, onLearn, onIgnore, onUndo, busy }) {
               ></s-text-field>
             )
           ) : null}
-          {edit ? (
+          {canEdit ? (
             // Secondary, not primary: a row full of disabled primary buttons reads as broken, and the
             // page-level primary action stays the one primary button on the page.
             <s-button
@@ -972,14 +997,16 @@ function FindingRow({ f, columns, onSave, onLearn, onIgnore, onUndo, busy }) {
               Open in Shopify
             </s-button>
           )}
-          {f.word ? (
+          {f.word && features.dictionary ? (
             <s-button variant="tertiary" onClick={() => onLearn(f.word)} disabled={busy || undefined} accessibilityLabel={`Trust word ${f.word}: add it to the dictionary`}>
               Trust word
             </s-button>
           ) : null}
-          <s-button variant="tertiary" onClick={() => onIgnore(f)} disabled={busy || undefined} accessibilityLabel={`Ignore ${f.productTitle}`}>
-            Ignore
-          </s-button>
+          {features.ignores ? (
+            <s-button variant="tertiary" onClick={() => onIgnore(f)} disabled={busy || undefined} accessibilityLabel={`Ignore ${f.productTitle}`}>
+              Ignore
+            </s-button>
+          ) : null}
         </s-grid>
         )}
       </s-table-cell>
@@ -987,7 +1014,7 @@ function FindingRow({ f, columns, onSave, onLearn, onIgnore, onUndo, busy }) {
   );
 }
 
-function Detail({ rule, findings, onSave, onLearn, onIgnore, onUndo, onBack, busy }) {
+function Detail({ rule, findings, features, onSave, onLearn, onIgnore, onUndo, onBack, busy }) {
   const [query, setQuery] = useState("");
   const q = query.trim().toLowerCase();
   const filtered = q
@@ -995,10 +1022,12 @@ function Detail({ rule, findings, onSave, onLearn, onIgnore, onUndo, onBack, bus
     : findings;
   const rows = filtered.slice(0, MAX_ROWS);
   const hidden = filtered.length - rows.length;
-  const columns = detailColumns(findings);
-  const help = columns.fix
-    ? "Check the current value, type the correction and save, or ignore what is intentional. Saved changes stay listed until you refresh."
-    : "Open each product in Shopify to fix it, or ignore what is intentional.";
+  const columns = detailColumns(findings, features);
+  const help = !features.inlineEdits
+    ? `Open each product in Shopify to fix it. Inline edits are part of the ${planFor("inlineEdits").name} plan.`
+    : columns.fix
+      ? "Check the current value, type the correction and save, or ignore what is intentional. Saved changes stay listed until you refresh."
+      : "Open each product in Shopify to fix it, or ignore what is intentional.";
 
   return (
     // The visible "N findings" heading names the section (no accessibilityLabel, which would add a
@@ -1042,6 +1071,7 @@ function Detail({ rule, findings, onSave, onLearn, onIgnore, onUndo, onBack, bus
                 onLearn={onLearn}
                 onIgnore={onIgnore}
                 onUndo={onUndo}
+                features={features}
                 busy={busy}
               />
             ))}
@@ -1071,7 +1101,7 @@ export default function Index() {
   const data = fetcher.data;
   // The loader is revalidated after every action and while a background scan runs, so it is the
   // source of truth for the page; the fetcher's data only carries the action's notices.
-  const { result, history, fixes, fixedWeek, fixedTotal, job, checkCount } = initial;
+  const { result, history, fixes, fixedWeek, fixedTotal, job, checkCount, plan } = initial;
   const [selected, setSelected] = useState(null);
   const revalidator = useRevalidator();
   const scanning = job?.status === "running";
@@ -1125,6 +1155,7 @@ export default function Index() {
           onIgnore={ignoreFinding}
           onBack={back}
           onUndo={runUndo}
+          features={plan.features}
           busy={busy}
         />
       </s-page>
@@ -1149,6 +1180,7 @@ export default function Index() {
           fixes={fixes}
           fixedWeek={fixedWeek}
           fixedTotal={fixedTotal}
+          plan={plan}
           onSelect={setSelected}
           onUndo={runUndo}
           busy={busy}

@@ -173,14 +173,16 @@ export async function countProducts(graphql) {
   return data.productsCount?.count ?? 0;
 }
 
-// Every product, page by page. Only used for catalogs up to SYNC_LIMIT (see rescan.server.js).
-export async function fetchCatalog(graphql) {
+// Every product, page by page, or only the first `limit` of them (the plan's product limit).
+// Only used for catalogs up to SYNC_LIMIT (see rescan.server.js).
+export async function fetchCatalog(graphql, limit = null) {
   const products = [];
   let cursor = null;
   for (;;) {
     const data = await graphqlJson(graphql, CATALOG_QUERY, { cursor });
     const conn = data.products;
     products.push(...conn.nodes.map(normalize));
+    if (limit && products.length >= limit) return products.slice(0, limit);
     if (!conn.pageInfo.hasNextPage) break;
     cursor = conn.pageInfo.endCursor;
   }
@@ -276,8 +278,9 @@ async function scanContext(graphql, shop) {
   return { speller, storeWords, ignored, settings, locale };
 }
 
-// Runs every rule over an already-read catalog and builds the stored scan result.
-export async function scanProducts(products, graphql, shop, startedAt = Date.now()) {
+// Runs every rule over an already-read catalog and builds the stored scan result. catalogTotal is
+// how many products the store has when a plan limit left some unscanned.
+export async function scanProducts(products, graphql, shop, startedAt = Date.now(), catalogTotal = products.length) {
   const { speller, storeWords, ignored, settings, locale } = await scanContext(graphql, shop);
   const names = catalogNames(products, speller);
   const ctx = { speller, customWords: seedWords(products, storeWords), nameWords: new Set(names), settings, locale };
@@ -287,15 +290,21 @@ export async function scanProducts(products, graphql, shop, startedAt = Date.now
     ...summarize(products, findings, settings),
     findings,
     names,
+    catalogTotal: Math.max(catalogTotal, products.length),
+    truncated: catalogTotal > products.length,
     ignoredCount: all.length - findings.length,
     scannedAt: new Date().toISOString(),
     durationMs: Date.now() - startedAt,
   };
 }
 
-export async function scanCatalog(graphql, shop) {
+// A full scan of a small catalog, or of its first `limit` products when the plan allows fewer than
+// the store has. The count is read first so the result can say how many were left out.
+export async function scanCatalog(graphql, shop, limit = null) {
   const started = Date.now();
-  return scanProducts(await fetchCatalog(graphql), graphql, shop, started);
+  const count = await countProducts(graphql);
+  const products = await fetchCatalog(graphql, limit);
+  return scanProducts(products, graphql, shop, started, count);
 }
 
 // Re-reads only the given products and re-runs the product rules on them, splicing the results
@@ -318,6 +327,7 @@ export async function recheckProducts(graphql, shop, latest, ids, dropRuleId = n
     ...summarizeFindings(total, findings, settings),
     findings,
     names,
+    catalogTotal: latest.catalogTotal || total,
     ignoredCount: latest.ignoredCount || 0,
     scannedAt: new Date().toISOString(),
     durationMs: Date.now() - started,
