@@ -8,6 +8,13 @@ async function mutate(graphql, query, variables, pickErrors) {
   return userErrors.map((e) => e.message);
 }
 
+async function read(graphql, query, variables) {
+  const response = await graphql(query, { variables });
+  const { data, errors } = await response.json();
+  if (errors?.length) throw new Error(errors.map((e) => e.message).join("; "));
+  return data;
+}
+
 const PRODUCT_UPDATE = `#graphql
   mutation ProductUpdate($product: ProductUpdateInput!) {
     productUpdate(product: $product) {
@@ -44,6 +51,85 @@ const MEDIA_UPDATE = `#graphql
   }
 `;
 
+const OPTION_UPDATE = `#graphql
+  mutation OptionUpdate($productId: ID!, $option: OptionUpdateInput!, $optionValuesToUpdate: [OptionValueUpdateInput!]) {
+    productOptionUpdate(productId: $productId, option: $option, optionValuesToUpdate: $optionValuesToUpdate) {
+      product { id }
+      userErrors { field message code }
+    }
+  }
+`;
+
+const PUBLISH = `#graphql
+  mutation Publish($id: ID!, $input: [PublicationInput!]!) {
+    publishablePublish(id: $id, input: $input) {
+      userErrors { field message }
+    }
+  }
+`;
+
+const UNPUBLISH = `#graphql
+  mutation Unpublish($id: ID!, $input: [PublicationInput!]!) {
+    publishableUnpublish(id: $id, input: $input) {
+      userErrors { field message }
+    }
+  }
+`;
+
+const PUBLICATIONS = `#graphql
+  query Publications {
+    publications(first: 25) { nodes { id name } }
+  }
+`;
+
+const SET_QUANTITIES = `#graphql
+  mutation SetAvailable($input: InventorySetQuantitiesInput!) {
+    inventorySetQuantities(input: $input) {
+      inventoryAdjustmentGroup { id }
+      userErrors { field message code }
+    }
+  }
+`;
+
+const INVENTORY_LEVEL = `#graphql
+  query InventoryLevel($id: ID!) {
+    inventoryItem(id: $id) {
+      inventoryLevels(first: 1) {
+        nodes {
+          location { id }
+          quantities(names: ["available"]) { name quantity }
+        }
+      }
+    }
+  }
+`;
+
+const METAFIELDS_SET = `#graphql
+  mutation MetafieldsSet($metafields: [MetafieldsSetInput!]!) {
+    metafieldsSet(metafields: $metafields) {
+      metafields { id }
+      userErrors { field message code }
+    }
+  }
+`;
+
+const METAFIELDS_DELETE = `#graphql
+  mutation MetafieldsDelete($metafields: [MetafieldIdentifierInput!]!) {
+    metafieldsDelete(metafields: $metafields) {
+      deletedMetafields { namespace key }
+      userErrors { field message }
+    }
+  }
+`;
+
+const METAFIELD_READ = `#graphql
+  query MetafieldRead($id: ID!, $namespace: String!, $key: String!) {
+    product(id: $id) {
+      metafield(namespace: $namespace, key: $key) { type value }
+    }
+  }
+`;
+
 const PRODUCT_READ = `#graphql
   query ProductRead($id: ID!) {
     product(id: $id) {
@@ -53,6 +139,7 @@ const PRODUCT_READ = `#graphql
       vendor
       productType
       tags
+      status
       seo { title description }
     }
   }
@@ -67,7 +154,9 @@ export const PRODUCT_TEXT_FIELDS = [
   "seoTitle",
   "seoDescription",
 ];
-export const VARIANT_FIELDS = ["sku", "barcode", "price", "compareAt"];
+// Product fields that are not text but are still set through productUpdate.
+export const PRODUCT_ENUM_FIELDS = ["status"];
+export const VARIANT_FIELDS = ["sku", "barcode", "price", "compareAt", "inventoryPolicy"];
 
 export async function readProduct(graphql, productId) {
   const response = await graphql(PRODUCT_READ, { variables: { id: productId } });
@@ -80,6 +169,7 @@ export async function readProduct(graphql, productId) {
     vendor: p.vendor || "",
     productType: p.productType || "",
     tags: p.tags || [],
+    status: p.status || "",
     seoTitle: p.seo?.title || "",
     seoDescription: p.seo?.description || "",
   };
@@ -137,14 +227,106 @@ export async function setAlt(graphql, productId, mediaId, alt) {
   );
 }
 
+// Renames one value of a product option (the value keeps its id, so every variant follows).
+export async function renameOptionValue(graphql, productId, optionId, valueId, name) {
+  return mutate(
+    graphql,
+    OPTION_UPDATE,
+    { productId, option: { id: optionId }, optionValuesToUpdate: [{ id: valueId, name }] },
+    (d) => d.productOptionUpdate?.userErrors,
+  );
+}
+
+// The Online Store sales channel of this store, or null when the store has none.
+export async function onlineStorePublicationId(graphql) {
+  const data = await read(graphql, PUBLICATIONS);
+  const nodes = data?.publications?.nodes || [];
+  const hit = nodes.find((n) => n.name === "Online Store") || nodes.find((n) => /online store/i.test(n.name || ""));
+  return hit ? hit.id : null;
+}
+
+export async function setPublished(graphql, productId, publicationId, on) {
+  const query = on ? PUBLISH : UNPUBLISH;
+  return mutate(
+    graphql,
+    query,
+    { id: productId, input: [{ publicationId }] },
+    (d) => (on ? d.publishablePublish : d.publishableUnpublish)?.userErrors,
+  );
+}
+
+// Where the item is stocked first, with its available quantity, or null when it is stocked nowhere.
+export async function readAvailable(graphql, inventoryItemId) {
+  const data = await read(graphql, INVENTORY_LEVEL, { id: inventoryItemId });
+  const level = data?.inventoryItem?.inventoryLevels?.nodes?.[0];
+  if (!level?.location?.id) return null;
+  const available = (level.quantities || []).find((q) => q.name === "available");
+  return { locationId: level.location.id, quantity: available ? available.quantity : 0 };
+}
+
+export async function setAvailable(graphql, inventoryItemId, locationId, quantity) {
+  return mutate(
+    graphql,
+    SET_QUANTITIES,
+    {
+      input: {
+        name: "available",
+        reason: "correction",
+        ignoreCompareQuantity: true,
+        quantities: [{ inventoryItemId, locationId, quantity: Number(quantity) }],
+      },
+    },
+    (d) => d.inventorySetQuantities?.userErrors,
+  );
+}
+
+const splitKey = (key) => {
+  const i = String(key).indexOf(".");
+  return i === -1 ? { namespace: "custom", key: String(key) } : { namespace: key.slice(0, i), key: key.slice(i + 1) };
+};
+
+// The metafield as it is now ({ type, value }), or null when the product has none by that key.
+export async function readMetafield(graphql, productId, key) {
+  const { namespace, key: k } = splitKey(key);
+  const data = await read(graphql, METAFIELD_READ, { id: productId, namespace, key: k });
+  const m = data?.product?.metafield;
+  return m ? { type: m.type, value: m.value } : null;
+}
+
+export async function setMetafield(graphql, productId, key, type, value) {
+  const { namespace, key: k } = splitKey(key);
+  return mutate(
+    graphql,
+    METAFIELDS_SET,
+    { metafields: [{ ownerId: productId, namespace, key: k, type, value: String(value) }] },
+    (d) => d.metafieldsSet?.userErrors,
+  );
+}
+
+export async function deleteMetafield(graphql, productId, key) {
+  const { namespace, key: k } = splitKey(key);
+  return mutate(
+    graphql,
+    METAFIELDS_DELETE,
+    { metafields: [{ ownerId: productId, namespace, key: k }] },
+    (d) => d.metafieldsDelete?.userErrors,
+  );
+}
+
 // Reverse one FixLog entry. Returns error strings, empty on success.
 export async function revert(graphql, entry) {
   const before = JSON.parse(entry.before);
   const f = entry.field;
-  if (PRODUCT_TEXT_FIELDS.includes(f)) return setProductField(graphql, entry.productId, f, before);
+  if (PRODUCT_TEXT_FIELDS.includes(f) || PRODUCT_ENUM_FIELDS.includes(f)) return setProductField(graphql, entry.productId, f, before);
   if (VARIANT_FIELDS.includes(f)) return setVariantField(graphql, entry.productId, entry.targetId, f, before);
   if (f === "weight") return setWeight(graphql, entry.targetId, before.value, before.unit);
   if (f === "alt") return setAlt(graphql, entry.productId, entry.targetId, before);
   if (f === "cost") return setCost(graphql, entry.targetId, before);
+  if (f === "optionValue") return renameOptionValue(graphql, entry.productId, before.optionId, entry.targetId, before.name);
+  if (f === "publication") return setPublished(graphql, entry.productId, entry.targetId, Boolean(before));
+  if (f === "available") return setAvailable(graphql, entry.targetId, before.locationId, before.quantity);
+  if (f === "metafield") {
+    return before ? setMetafield(graphql, entry.productId, entry.targetId, before.type, before.value) : deleteMetafield(graphql, entry.productId, entry.targetId);
+  }
   return [`Unknown field ${f}`];
 }

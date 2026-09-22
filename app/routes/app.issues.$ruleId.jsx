@@ -88,7 +88,7 @@ export async function action({ request, params }) {
       edit = await applyEdit(admin.graphql, session.shop, descriptor, form.get("value"));
       // The row stays, marked saved, so the change can be undone in place; Refresh re-checks it.
       const finding = form.get("finding") ? JSON.parse(form.get("finding")) : null;
-      change = edit.ok && finding ? { kind: "saved", key: ignoreKey(finding), batchId: edit.batchId, value: form.get("value") } : null;
+      change = edit.ok && finding ? { kind: "saved", key: ignoreKey(finding), batchId: edit.batchId, value: form.get("value"), quick: form.get("quick") === "1" } : null;
     }
     if (intent === "refresh") {
       // Re-check every product this check lists (a full rescan on a small catalog).
@@ -120,7 +120,7 @@ const CORRECTED_TRACKS = {
 };
 const NUMERIC_FIELDS = new Set(["price", "compareAt"]);
 function isNumericEdit(e) {
-  return e.kind === "weight" || e.kind === "cost" || (e.kind === "variant" && NUMERIC_FIELDS.has(e.field));
+  return e.kind === "weight" || e.kind === "cost" || e.kind === "inventory" || (e.kind === "variant" && NUMERIC_FIELDS.has(e.field));
 }
 // The Current value column keeps a track of its own so a value and its note wrap as a block.
 const CURRENT_TRACK = "@container (inline-size > 1100px) 200px, (inline-size > 900px) and (inline-size <= 1100px) 160px, 140px";
@@ -149,16 +149,18 @@ function detailColumns(findings, features) {
   };
 }
 
-// What a row is about right now: the value a correction would replace, with the finding's detail
-// as a note when it says more, or the detail itself when nothing can be edited in place.
+// What a row is about right now: the edit's current value, or the finding's own current text, or
+// its detail, with the detail as a note when it says more. Empty means the field really is empty.
 function currentValue(f) {
   let detail = f.detail && f.detail !== f.productTitle ? f.detail : "";
   // Variant details start with the variant title, which the Product column already shows.
   if (f.variantTitle && detail.startsWith(f.variantTitle)) detail = detail.slice(f.variantTitle.length).replace(/^:\s*/, "");
-  if (!f.edit) return { value: detail, note: "", empty: false };
-  const edit = f.edit;
-  const raw = String(edit.current ?? "");
-  const value = edit.kind === "weight" && raw ? `${raw} ${(edit.unit || "").toLowerCase()}` : truncate(raw, edit.multiline ? 80 : 40);
+  const source = f.edit ? f.edit.current : f.current;
+  if (source === undefined || source === null) return { value: detail, note: "", empty: false };
+  const raw = String(source);
+  // A bare weight gets its unit; a weight that already names one keeps it.
+  const unit = f.edit?.kind === "weight" && /^[\d.]+$/.test(raw) ? ` ${(f.edit.unit || "").toLowerCase()}` : "";
+  const value = `${truncate(raw, f.edit?.multiline ? 80 : 60)}${unit}`;
   // A misspelling's detail repeats the word; keep the part that says where it is.
   const note = f.word ? detail.replace(/^"[^"]*"\s*/, "") : detail && detail !== raw ? detail : "";
   return { value, note, empty: raw === "" };
@@ -171,22 +173,36 @@ function SkuCell({ f }) {
   return null;
 }
 
+// The controls of a row: an input when a value can be typed, Quick apply when a safe suggestion
+// exists, a small select for rows with alternatives, or View Product when nothing can be edited
+// here; then Trust word and Ignore when the plan includes them.
 function FindingRow({ f, columns, features, onSave, onLearn, onIgnore, onUndo, busy }) {
   const edit = f.edit;
   const [value, setValue] = useState(edit?.suggested ?? "");
-  const canSave = edit && value.trim() !== "" && value !== edit.current;
+  const [choice, setChoice] = useState(0);
   const current = currentValue(f);
   const fieldLabel = `Corrected value for ${f.productTitle}`;
   const variant = f.variantTitle && f.variantTitle !== "Default Title" ? f.variantTitle : "";
   const canEdit = Boolean(edit) && features.inlineEdits;
-  // Save or View Product, then Trust word and Ignore when the plan includes them.
-  const buttons = 1 + (f.word && features.dictionary ? 1 : 0) + (features.ignores ? 1 : 0);
+  const isChoice = canEdit && edit.kind === "choice";
+  const hasInput = canEdit && !isChoice && !edit.noInput;
+  const applyValue = edit?.applyValue !== undefined ? edit.applyValue : edit?.suggested;
+  const canApply = canEdit && !isChoice && Boolean(edit.apply) && applyValue !== undefined;
+  const raw = String(edit?.raw ?? edit?.current ?? "");
+  const canSave = hasInput && value.trim() !== "" && value !== raw;
+  const viewOnly = !hasInput && !canApply && !isChoice;
+  // Auto tracks after the input: the select and Apply, Quick apply, Save, or View Product, then
+  // Trust word and Ignore when the plan includes them, and the upgrade link for a locked edit.
+  const actions =
+    (isChoice ? 2 : 0) + (canApply ? 1 : 0) + (hasInput ? 1 : 0) + (viewOnly ? 1 : 0) + (edit && !canEdit ? 1 : 0) + (f.word && features.dictionary ? 1 : 0) + (features.ignores ? 1 : 0);
   const currentCell = (
     <s-stack gap="small-500">
-      {current.empty ? <s-text color="subdued">(empty)</s-text> : current.value ? <s-text>{current.value}</s-text> : null}
+      {current.empty ? <s-text color="subdued">Empty</s-text> : current.value ? <s-text>{current.value}</s-text> : null}
       {current.note ? <s-text color="subdued">{truncate(current.note, 80)}</s-text> : null}
     </s-stack>
   );
+  // A choice is an edit of its own; it borrows the row's rule, product and title for the log.
+  const pick = (i) => ({ ...edit.choices[i], ruleId: edit.ruleId, productId: edit.productId, title: edit.title });
 
   return (
     <s-table-row>
@@ -213,24 +229,24 @@ function FindingRow({ f, columns, features, onSave, onLearn, onIgnore, onUndo, b
       </s-table-cell>
       <s-table-cell>
         {f.saved ? (
-          // Saved from this page: the row stays so the change can be undone here; Refresh re-checks it.
+          // Saved or applied from this page: the row stays so the change can be undone here; Refresh re-checks it.
           <s-stack gap="small-500">
             <s-stack direction="inline" gap="small-200" alignItems="center">
               <s-icon type="check-circle" tone="success" />
-              <s-text>Saved</s-text>
-              <s-button variant="tertiary" onClick={() => onUndo(f.saved.batchId, f)} disabled={busy || undefined} accessibilityLabel={`Undo the saved change to ${f.productTitle}`}>
+              <s-text>{f.saved.quick ? "Applied" : "Saved"}</s-text>
+              <s-button variant="tertiary" onClick={() => onUndo(f.saved.batchId, f)} disabled={busy || undefined} accessibilityLabel={`Undo the ${f.saved.quick ? "applied" : "saved"} change to ${f.productTitle}`}>
                 Undo
               </s-button>
             </s-stack>
             {f.saved.value ? <s-text color="subdued">{truncate(f.saved.value, 60)}</s-text> : null}
           </s-stack>
         ) : (
-          <s-grid gridTemplateColumns={canEdit ? fixTracks(columns.fixTrack, buttons) : actionTracks(buttons + (edit ? 1 : 0))} gap="small-200" alignItems="center" justifyContent="start">
+          <s-grid gridTemplateColumns={hasInput ? fixTracks(columns.fixTrack, actions) : actionTracks(actions)} gap="small-200" alignItems="center" justifyContent="start">
             {edit && !canEdit ? (
               // The correction field is part of a paid plan; the row can still be fixed in Shopify.
               <s-link href="/app/plans">Upgrade to {planFor("inlineEdits").name}</s-link>
             ) : null}
-            {canEdit ? (
+            {hasInput ? (
               edit.multiline ? (
                 <s-text-area
                   label={fieldLabel}
@@ -250,18 +266,53 @@ function FindingRow({ f, columns, features, onSave, onLearn, onIgnore, onUndo, b
                 ></s-text-field>
               )
             ) : null}
-            {canEdit ? (
+            {isChoice ? (
+              <s-select
+                label={`Fix for ${f.productTitle}`}
+                labelAccessibilityVisibility="exclusive"
+                value={String(choice)}
+                onInput={(e) => setChoice(Number(e.target.value))}
+                onChange={(e) => setChoice(Number(e.target.value))}
+              >
+                {edit.choices.map((c, i) => (
+                  <s-option key={c.label} value={String(i)}>{c.label}</s-option>
+                ))}
+              </s-select>
+            ) : null}
+            {isChoice ? (
+              <s-button
+                variant="secondary"
+                onClick={() => onSave(pick(choice), edit.choices[choice].value, f, true)}
+                disabled={busy || undefined}
+                accessibilityLabel={`Apply ${edit.choices[choice].label} to ${f.productTitle}`}
+              >
+                Apply
+              </s-button>
+            ) : null}
+            {canApply ? (
+              // Saves the suggestion as it is, in one click.
+              <s-button
+                variant="secondary"
+                onClick={() => onSave(edit, applyValue, f, true)}
+                disabled={busy || undefined}
+                accessibilityLabel={`${edit.applyLabel || "Quick apply"} for ${f.productTitle}${applyValue ? `: ${applyValue}` : ""}`}
+              >
+                {edit.applyLabel || "Quick apply"}
+              </s-button>
+            ) : null}
+            {hasInput ? (
               // Secondary, not primary: a row full of disabled primary buttons reads as broken, and
               // the page-level primary action stays the one primary button on the page.
               <s-button
                 variant="secondary"
-                onClick={() => onSave(edit, value, f)}
+                onClick={() => onSave(edit, value, f, false)}
                 disabled={!canSave || busy || undefined}
                 accessibilityLabel={`${edit.kind === "word" ? "Replace the word for" : "Save corrected value for"} ${f.productTitle}`}
               >
                 {edit.kind === "word" ? "Replace" : "Save"}
               </s-button>
-            ) : (
+            ) : null}
+            {viewOnly ? (
               // A link styled as a tertiary button (s-button with href renders an anchor), so the
               // cluster keeps the same height and gap as rows that have a Save button.
               <s-button
@@ -273,7 +324,7 @@ function FindingRow({ f, columns, features, onSave, onLearn, onIgnore, onUndo, b
               >
                 View Product
               </s-button>
-            )}
+            ) : null}
             {f.word && features.dictionary ? (
               <s-button variant="tertiary" onClick={() => onLearn(f.word)} disabled={busy || undefined} accessibilityLabel={`Trust word ${f.word}: add it to the dictionary`}>
                 Trust word
@@ -303,7 +354,7 @@ function Detail({ rule, findings, features, onSave, onLearn, onIgnore, onUndo, o
   const help = !features.inlineEdits
     ? `View each product to fix it in Shopify. Inline edits are part of the ${planFor("inlineEdits").name} plan.`
     : columns.fix
-      ? "Check the current value, type the correction and save, or ignore what is intentional. Saved changes stay listed until you refresh."
+      ? "Check the current value, then Quick apply the suggestion, type a correction and save, or ignore what is intentional. Changes stay listed until you refresh."
       : "View each product to fix it in Shopify, or ignore what is intentional.";
 
   return (
@@ -398,7 +449,7 @@ export default function IssuePage() {
   const runUndo = (batchId, finding) => submit(finding ? { intent: "undo", batchId, finding: JSON.stringify(finding) } : { intent: "undo", batchId });
   const learnWord = (word) => submit({ intent: "learn", word });
   const ignoreFinding = (f) => submit({ intent: "ignore", finding: JSON.stringify(f) });
-  const saveEdit = (edit, value, finding) => submit({ intent: "edit", edit: JSON.stringify(edit), value, finding: JSON.stringify(finding) });
+  const saveEdit = (edit, value, finding, quick = false) => submit({ intent: "edit", edit: JSON.stringify(edit), value, finding: JSON.stringify(finding), quick: quick ? "1" : "0" });
   const runRefresh = () => submit({ intent: "refresh" });
   const ignoreCheck = () => submit({ intent: "disableRule" });
   const refreshing = busy && fetcher.formData?.get("intent") === "refresh";

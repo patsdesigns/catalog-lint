@@ -26,7 +26,7 @@ function productFields(paged) {
     id title handle status createdAt updatedAt publishedAt totalInventory vendor productType tags descriptionHtml
     variantsCount { count }
     seo { title description }
-    options { name optionValues { name } }
+    options { id name optionValues { id name } }
     category { id name fullName isLeaf level }
     feedback { details { app { title } messages { message } state } }
     resourcePublicationsCount { count }
@@ -127,6 +127,7 @@ function normalize(node) {
     totalInventory: node.totalInventory ?? 0,
     variantsCount: node.variantsCount?.count ?? 0,
     collectionCount: (node.collections?.nodes || []).length,
+    collectionIds: (node.collections?.nodes || []).map((c) => c.id).filter(Boolean),
     vendor: node.vendor,
     productType: node.productType,
     tags: node.tags || [],
@@ -145,8 +146,10 @@ function normalize(node) {
       .filter((d) => d.state === "REQUIRES_ACTION")
       .map((d) => ({ app: d.app?.title || "A sales channel", messages: (d.messages || []).map((m) => m.message).filter(Boolean) })),
     options: (node.options || []).map((o) => ({
+      id: o.id,
       name: o.name,
       values: (o.optionValues || []).map((v) => v.name),
+      valueIds: (o.optionValues || []).map((v) => v.id),
     })),
     metafields: (node.metafields?.nodes || []).map((m) => ({
       key: `${m.namespace}.${m.key}`,

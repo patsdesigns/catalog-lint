@@ -101,7 +101,7 @@ export async function refreshAfter(graphql, shop, change, limit = null) {
       if (ignoreKey(f) !== change.key) return f;
       const next = { ...f };
       delete next.saved;
-      if (change.kind === "saved") next.saved = { batchId: change.batchId, value: change.value, at: new Date().toISOString() };
+      if (change.kind === "saved") next.saved = { batchId: change.batchId, value: change.value, at: new Date().toISOString(), quick: Boolean(change.quick) };
       return next;
     });
     await saveScan(shop, withFindings(latest, findings, settings));

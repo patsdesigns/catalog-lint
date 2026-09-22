@@ -7,14 +7,22 @@ import {
   setWeight,
   setAlt,
   setCost,
+  renameOptionValue,
+  onlineStorePublicationId,
+  setPublished,
+  readAvailable,
+  setAvailable,
+  readMetafield,
+  setMetafield,
 } from "./writes.server";
 
 function escapeRegex(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-// Apply one merchant typed correction described by a finding's edit descriptor.
-// Returns { ok, error, batchId }.
+// Applies one correction described by a finding's edit descriptor: a value the merchant typed, or
+// the suggested one when Quick apply was used. Every change is logged like a bulk fix, so it shows
+// under Recent fixes and can be undone. Returns { ok, error, batchId }.
 export async function applyEdit(graphql, shop, edit, value) {
   const entries = [];
   const log = (e) => entries.push(e);
@@ -43,7 +51,14 @@ export async function applyEdit(graphql, shop, edit, value) {
     if (!errs.length) log({ field: edit.field, targetId: edit.productId, productId: edit.productId, before, after });
   } else if (edit.kind === "variant") {
     errs = await setVariantField(graphql, edit.productId, edit.variantId, edit.field, value);
-    if (!errs.length) log({ field: edit.field, targetId: edit.variantId, productId: edit.productId, before: edit.current, after: value });
+    if (!errs.length) log({ field: edit.field, targetId: edit.variantId, productId: edit.productId, before: edit.raw ?? edit.current, after: value });
+  } else if (edit.kind === "policy") {
+    // Continue selling when out of stock, on every variant of the product.
+    for (const variantId of edit.variantIds || []) {
+      const e = await setVariantField(graphql, edit.productId, variantId, "inventoryPolicy", value);
+      if (e.length) errs.push(...e);
+      else log({ field: "inventoryPolicy", targetId: variantId, productId: edit.productId, before: edit.before || "DENY", after: value });
+    }
   } else if (edit.kind === "weight") {
     errs = await setWeight(graphql, edit.inventoryItemId, value, edit.unit);
     if (!errs.length) {
@@ -51,7 +66,7 @@ export async function applyEdit(graphql, shop, edit, value) {
         field: "weight",
         targetId: edit.inventoryItemId,
         productId: edit.productId,
-        before: { value: Number(edit.current) || 0, unit: edit.unit },
+        before: { value: Number(edit.raw ?? edit.current) || 0, unit: edit.unit },
         after: { value: Number(value), unit: edit.unit },
       });
     }
@@ -59,11 +74,39 @@ export async function applyEdit(graphql, shop, edit, value) {
     errs = await setCost(graphql, edit.inventoryItemId, value);
     if (!errs.length) log({ field: "cost", targetId: edit.inventoryItemId, productId: edit.productId, before: edit.current === "" ? null : edit.current, after: value });
   } else if (edit.kind === "alt") {
-    for (const mediaId of edit.mediaIds) {
-      const e = await setAlt(graphql, edit.productId, mediaId, value);
+    // One value for every image, or, numbered, the value plus the image number for each.
+    const ids = edit.mediaIds || [];
+    for (let i = 0; i < ids.length; i++) {
+      const alt = edit.numbered ? `${value} ${i + 1}` : value;
+      const e = await setAlt(graphql, edit.productId, ids[i], alt);
       if (e.length) errs.push(...e);
-      else log({ field: "alt", targetId: mediaId, productId: edit.productId, before: "", after: value });
+      else log({ field: "alt", targetId: ids[i], productId: edit.productId, before: edit.current || "", after: alt });
     }
+  } else if (edit.kind === "option") {
+    // The other spellings of an option value take the chosen one; each value keeps its id.
+    for (const v of edit.values || []) {
+      if (v.name === value) continue;
+      const e = await renameOptionValue(graphql, edit.productId, edit.optionId, v.id, value);
+      if (e.length) errs.push(...e);
+      else log({ field: "optionValue", targetId: v.id, productId: edit.productId, before: { optionId: edit.optionId, name: v.name }, after: { optionId: edit.optionId, name: value } });
+    }
+  } else if (edit.kind === "publish") {
+    const publicationId = await onlineStorePublicationId(graphql);
+    if (!publicationId) return { ok: false, error: "This store has no Online Store sales channel." };
+    errs = await setPublished(graphql, edit.productId, publicationId, true);
+    if (!errs.length) log({ field: "publication", targetId: publicationId, productId: edit.productId, before: false, after: true });
+  } else if (edit.kind === "inventory") {
+    const level = await readAvailable(graphql, edit.inventoryItemId);
+    if (!level) return { ok: false, error: "This variant is not stocked at any location." };
+    errs = await setAvailable(graphql, edit.inventoryItemId, level.locationId, value);
+    if (!errs.length) {
+      log({ field: "available", targetId: edit.inventoryItemId, productId: edit.productId, before: level, after: { locationId: level.locationId, quantity: Number(value) } });
+    }
+  } else if (edit.kind === "metafield") {
+    const before = await readMetafield(graphql, edit.productId, edit.key);
+    const type = before?.type || edit.type || "single_line_text_field";
+    errs = await setMetafield(graphql, edit.productId, edit.key, type, value);
+    if (!errs.length) log({ field: "metafield", targetId: edit.key, productId: edit.productId, before, after: { type, value: String(value) } });
   } else {
     return { ok: false, error: "This finding cannot be edited here" };
   }

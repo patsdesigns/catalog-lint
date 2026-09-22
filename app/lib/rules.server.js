@@ -52,6 +52,122 @@ function gtinValid(code) {
   for (let i = 0; i < 13; i++) sum += Number(padded[i]) * (i % 2 === 0 ? 3 : 1);
   return (10 - (sum % 10)) % 10 === Number(padded[13]);
 }
+
+// ---- what the issue page shows and offers ----
+// An edit descriptor tells the issue page what a row is about: `current` is the human readable
+// value in the Current value column ("" only when the field really is empty), `suggested` prefills
+// the input, `raw` is the stored value a typed correction is compared with (defaults to current),
+// and `apply` allows Quick apply, which saves `applyValue` (defaults to suggested) in one click.
+// `applyLabel` names that button, `noInput` rows offer only buttons, and `choices` offer a small
+// select of alternatives, each an edit of its own with its value.
+const productEdit = (field, current, suggested = "", more = {}) => ({ kind: "product", field, current, suggested, ...more });
+const variantEdit = (v, field, current, suggested = "", more = {}) => ({ kind: "variant", variantId: v.id, field, current, suggested, ...more });
+
+// The first `n` characters, with an ellipsis when there are more.
+function first(text, n) {
+  const t = String(text || "").trim();
+  return t.length > n ? `${t.slice(0, n).trim()}…` : t;
+}
+// The word where it sits: up to `span` characters either side of its first occurrence.
+function around(text, word, span = 20) {
+  const t = String(text || "");
+  const w = String(word || "");
+  const i = t.toLowerCase().indexOf(w.toLowerCase());
+  if (i === -1) return first(t, 2 * span + 20);
+  const start = Math.max(0, i - span);
+  const end = Math.min(t.length, i + w.length + span);
+  return `${start > 0 ? "…" : ""}${t.slice(start, end)}${end < t.length ? "…" : ""}`;
+}
+// Trimmed to at most `max` characters at a word boundary, without a dangling separator.
+function trimAt(text, max) {
+  const t = String(text || "").trim();
+  if (t.length <= max) return t;
+  const cut = t.slice(0, max + 1);
+  const i = cut.lastIndexOf(" ");
+  return (i > max * 0.6 ? cut.slice(0, i) : cut.slice(0, max)).replace(/[\s,;:.\-–]+$/, "");
+}
+function money(n) {
+  return Number(n || 0).toFixed(2);
+}
+// Edit distance between two values, for the closest of a few candidates.
+function distance(a, b) {
+  const s = norm(a);
+  const t = norm(b);
+  const prev = Array.from({ length: t.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= s.length; i++) {
+    let last = prev[0];
+    prev[0] = i;
+    for (let j = 1; j <= t.length; j++) {
+      const tmp = prev[j];
+      prev[j] = Math.min(prev[j] + 1, prev[j - 1] + 1, last + (s[i - 1] === t[j - 1] ? 0 : 1));
+      last = tmp;
+    }
+  }
+  return prev[t.length];
+}
+// The candidate closest to a value, when it is close enough to be the same thing misspelled.
+function closest(value, candidates) {
+  let best = "";
+  let bestDistance = Infinity;
+  for (const c of candidates) {
+    const d = distance(value, c);
+    if (d < bestDistance) {
+      best = c;
+      bestDistance = d;
+    }
+  }
+  const limit = Math.max(2, Math.floor(norm(value).length / 3));
+  return bestDistance <= limit ? best : "";
+}
+// The smallest amount at or above `amount` whose cents are `ending` ("99", "00", ...).
+function withEnding(amount, ending) {
+  const cents = Number(ending) || 0;
+  let candidate = Math.floor(Number(amount)) + cents / 100;
+  if (candidate < Number(amount)) candidate += 1;
+  return candidate.toFixed(2);
+}
+// The SKU a variant would get from its product handle and its own title: SNOWBOARD-BLUE.
+function skuFor(p, v) {
+  const part = (s) => String(s || "").toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  const base = part(p.handle) || part(p.title);
+  const suffix = v.title && v.title !== "Default Title" ? part(v.title) : "";
+  return suffix ? `${base}-${suffix}` : base;
+}
+// What the catalog as a whole suggests, computed once per run for the product rules: the price
+// ending most prices use, the vendor most products have when it covers most of them, and the
+// product type most products in each collection have.
+function catalogContext(products) {
+  const endings = new Map();
+  const vendors = new Map();
+  const byCollection = new Map();
+  for (const p of products) {
+    for (const v of p.variants || []) {
+      const n = Number(v.price);
+      if (n > 0) {
+        const e = money(n).slice(-2);
+        endings.set(e, (endings.get(e) || 0) + 1);
+      }
+    }
+    const vendor = (p.vendor || "").trim();
+    if (vendor) vendors.set(vendor, (vendors.get(vendor) || 0) + 1);
+    const type = (p.productType || "").trim();
+    for (const c of p.collectionIds || []) {
+      if (!byCollection.has(c)) byCollection.set(c, new Map());
+      if (type) byCollection.get(c).set(type, (byCollection.get(c).get(type) || 0) + 1);
+    }
+  }
+  const top = (m) => [...m.entries()].sort((a, b) => b[1] - a[1])[0];
+  const priced = [...endings.values()].reduce((a, b) => a + b, 0);
+  const priceEnding = priced >= 10 && top(endings) ? top(endings)[0] : "99";
+  const vendorTop = products.length >= 10 ? top(vendors) : null;
+  const commonVendor = vendorTop && vendorTop[1] / products.length > 0.6 ? vendorTop[0] : "";
+  const typeByCollection = new Map();
+  for (const [c, types] of byCollection) {
+    const t = top(types);
+    if (t && t[1] >= 3) typeByCollection.set(c, t[0]);
+  }
+  return { priceEnding, commonVendor, typeByCollection };
+}
 const KG = { KILOGRAMS: 1, GRAMS: 0.001, POUNDS: 0.45359237, OUNCES: 0.028349523125 };
 const toKg = (value, unit) => Number(value) * (KG[unit] ?? 1);
 // Word and Google Docs pastes leave <font> tags, mso- classes and inline styles behind.
@@ -99,8 +215,6 @@ function finding(rule, product, extra = {}) {
   if (RISK_RULE_IDS.has(rule.id)) f.price = lowestPrice(product);
   return f;
 }
-const productEdit = (field, current, suggested = "", multiline = false) => ({ kind: "product", field, current, suggested, multiline });
-const variantEdit = (v, field, current, suggested = "") => ({ kind: "variant", variantId: v.id, field, current, suggested });
 
 // ---------------- product rules ----------------
 
@@ -110,7 +224,7 @@ export const PRODUCT_RULES = [
     id: "missing_description", category: "description", label: "No description", severity: "high",
     check(p) {
       return wordCount(stripHtml(p.descriptionHtml)) === 0
-        ? [finding(this, p, { edit: productEdit("descriptionHtml", "", "", true) })] : [];
+        ? [finding(this, p, { edit: productEdit("descriptionHtml", "", "", { multiline: true }) })] : [];
     },
   },
   {
@@ -119,28 +233,37 @@ export const PRODUCT_RULES = [
       const text = stripHtml(p.descriptionHtml);
       const words = wordCount(text);
       return words > 0 && words < 20
-        ? [finding(this, p, { detail: `${words} words`, edit: productEdit("descriptionHtml", text, text, true) })] : [];
+        ? [finding(this, p, { detail: `${words} words`, edit: productEdit("descriptionHtml", `${words} words: ${first(text, 80)}`, text, { raw: text, multiline: true }) })] : [];
     },
   },
   {
     id: "placeholder_text", category: "description", label: "Placeholder text", severity: "high",
     check(p) {
-      const hay = `${p.title} ${stripHtml(p.descriptionHtml)}`.toLowerCase();
-      const hit = PLACEHOLDERS.find((ph) => hay.includes(ph));
-      return hit ? [finding(this, p, { detail: `"${hit}"` })] : [];
+      const text = stripHtml(p.descriptionHtml);
+      const inTitle = PLACEHOLDERS.find((ph) => p.title.toLowerCase().includes(ph));
+      const hit = inTitle || PLACEHOLDERS.find((ph) => text.toLowerCase().includes(ph));
+      if (!hit) return [];
+      // The phrase where it sits, in the field that holds it.
+      const edit = inTitle
+        ? productEdit("title", around(p.title, hit), p.title, { raw: p.title })
+        : productEdit("descriptionHtml", around(text, hit), text, { raw: text, multiline: true });
+      return [finding(this, p, { detail: `"${hit}"`, edit })];
     },
   },
   {
     id: "spelling", category: "description", label: "Possible misspelling", severity: "medium",
     check(p, ctx) {
       if (!ctx?.speller) return [];
-      return findMisspellings(textFields(p), ctx).slice(0, 8).map((m) =>
-        finding(this, p, {
+      const fields = textFields(p);
+      return findMisspellings(fields, ctx).slice(0, 8).map((m) => {
+        const text = fields.find((f) => f.field === m.field)?.text || "";
+        return finding(this, p, {
           word: m.word,
           detail: m.suggestion ? `"${m.word}" in ${m.field} (maybe "${m.suggestion}")` : `"${m.word}" in ${m.field}`,
-          edit: m.key ? { kind: "word", field: m.key, word: m.word, current: m.word, suggested: m.suggestion || "" } : null,
-        }),
-      );
+          // The word where it sits; the dictionary suggestion is ready to replace it in one click.
+          edit: m.key ? { kind: "word", field: m.key, word: m.word, current: around(text, m.word), raw: m.word, suggested: m.suggestion || "", apply: Boolean(m.suggestion) } : null,
+        });
+      });
     },
   },
   {
@@ -148,43 +271,58 @@ export const PRODUCT_RULES = [
     check(p) {
       const letters = p.title.replace(/[^A-Za-z]/g, "");
       return letters.length >= 6 && letters === letters.toUpperCase()
-        ? [finding(this, p, { edit: productEdit("title", p.title, titleCase(p.title)) })] : [];
+        ? [finding(this, p, { edit: productEdit("title", p.title, titleCase(p.title), { apply: true }) })] : [];
     },
   },
   {
     id: "title_too_long", category: "description", label: "Title over 70 characters", severity: "low",
     check(p) {
       return p.title.length > 70
-        ? [finding(this, p, { detail: `${p.title.length} characters`, edit: productEdit("title", p.title, p.title) })] : [];
+        ? [finding(this, p, { detail: `${p.title.length} characters`, edit: productEdit("title", `${p.title} (${p.title.length} characters)`, p.title, { raw: p.title }) })] : [];
     },
   },
   {
     id: "title_formatting", category: "description", label: "Title has stray spaces or punctuation", severity: "low",
     check(p) {
       const cleaned = p.title.replace(/\s{2,}/g, " ").trim().replace(/[.,;:!?-]+$/, "").trim();
+      // Quoted, so the extra spaces and the stray punctuation show.
       return cleaned !== p.title
-        ? [finding(this, p, { edit: productEdit("title", p.title, cleaned) })] : [];
+        ? [finding(this, p, { edit: productEdit("title", `"${p.title}"`, cleaned, { raw: p.title, apply: true }) })] : [];
     },
   },
   {
     id: "description_is_title", category: "description", label: "Description just repeats the title", severity: "medium",
     check(p) {
-      const d = norm(stripHtml(p.descriptionHtml));
+      const text = stripHtml(p.descriptionHtml);
+      const d = norm(text);
       return d && d === norm(p.title)
-        ? [finding(this, p, { edit: productEdit("descriptionHtml", stripHtml(p.descriptionHtml), "", true) })] : [];
+        ? [finding(this, p, { edit: productEdit("descriptionHtml", text, "", { raw: text, multiline: true }) })] : [];
     },
   },
   {
     id: "description_junk", category: "description", label: "Description has junk (raw URL, empty tags, spam phrases)", severity: "low",
     check(p) {
       const html = p.descriptionHtml || "";
-      const text = stripHtml(html).toLowerCase();
+      const plain = stripHtml(html);
+      const text = plain.toLowerCase();
       const hits = [];
-      if (/https?:\/\/\S+/i.test(text)) hits.push("raw URL");
-      if (/<(p|div|span|h\d)>\s*(<br\s*\/?>)?\s*<\/\1>/i.test(html)) hits.push("empty tags");
+      const snippets = [];
+      const url = /https?:\/\/\S+/i.exec(plain);
+      if (url) {
+        hits.push("raw URL");
+        snippets.push(around(plain, url[0], 12));
+      }
+      if (/<(p|div|span|h\d)>\s*(<br\s*\/?>)?\s*<\/\1>/i.test(html)) {
+        hits.push("empty tags");
+        snippets.push("empty tags");
+      }
       const phrase = JUNK_PHRASES.find((j) => text.includes(j));
-      if (phrase) hits.push(`"${phrase}"`);
-      return hits.length ? [finding(this, p, { detail: hits.join(", ") })] : [];
+      if (phrase) {
+        hits.push(`"${phrase}"`);
+        snippets.push(around(plain, phrase));
+      }
+      return hits.length
+        ? [finding(this, p, { detail: hits.join(", "), edit: productEdit("descriptionHtml", snippets[0], plain, { raw: plain, multiline: true }) })] : [];
     },
   },
 
@@ -192,15 +330,18 @@ export const PRODUCT_RULES = [
     id: "description_too_long", category: "description", label: "Description over 2,000 words", severity: "low",
     check(p) {
       const words = wordCount(stripHtml(p.descriptionHtml));
-      return words > 2000 ? [finding(this, p, { detail: `${words} words` })] : [];
+      // Too long to correct in a row: the product page is the place for it.
+      return words > 2000 ? [finding(this, p, { detail: `${words} words`, current: `${words.toLocaleString("en-US")} words` })] : [];
     },
   },
   {
     id: "language_mismatch", category: "description", label: "Description may not be in your store language", severity: "medium",
     check(p, ctx) {
       if (!(ctx?.locale || "en").startsWith("en")) return [];
-      const ratio = englishRatio(stripHtml(p.descriptionHtml));
-      return ratio !== null && ratio < 0.04 ? [finding(this, p)] : [];
+      const text = stripHtml(p.descriptionHtml);
+      const ratio = englishRatio(text);
+      // A description in another language needs rewriting, not a quick correction.
+      return ratio !== null && ratio < 0.04 ? [finding(this, p, { current: first(text, 80) })] : [];
     },
   },
   {
@@ -213,14 +354,14 @@ export const PRODUCT_RULES = [
       if (count < 2) return [];
       const idx = p.title.toLowerCase().lastIndexOf(v);
       const suggested = (p.title.slice(0, idx) + p.title.slice(idx + v.length)).replace(/\s{2,}/g, " ").trim();
-      return [finding(this, p, { edit: productEdit("title", p.title, suggested) })];
+      return [finding(this, p, { edit: productEdit("title", p.title, suggested, { apply: true }) })];
     },
   },
   {
     id: "emoji_in_title", category: "description", label: "Emoji in title", severity: "low",
     check(p) {
       return EMOJI_RE.test(p.title)
-        ? [finding(this, p, { edit: productEdit("title", p.title, p.title.replace(new RegExp(EMOJI_RE.source, "gu"), "").replace(/\s{2,}/g, " ").trim()) })] : [];
+        ? [finding(this, p, { edit: productEdit("title", p.title, p.title.replace(new RegExp(EMOJI_RE.source, "gu"), "").replace(/\s{2,}/g, " ").trim(), { apply: true }) })] : [];
     },
   },
 
@@ -229,29 +370,29 @@ export const PRODUCT_RULES = [
     id: "seo_title_missing", category: "seo", label: "SEO title missing", severity: "medium",
     check(p) {
       return !p.seoTitle.trim()
-        ? [finding(this, p, { edit: productEdit("seoTitle", "", p.title.slice(0, 60)) })] : [];
+        ? [finding(this, p, { edit: productEdit("seoTitle", "", trimAt(p.title, 60), { apply: true }) })] : [];
     },
   },
   {
     id: "seo_title_too_long", category: "seo", label: "SEO title over 60 characters", severity: "medium",
     check(p) {
       return p.seoTitle.length > 60
-        ? [finding(this, p, { detail: `${p.seoTitle.length} characters`, edit: productEdit("seoTitle", p.seoTitle, p.seoTitle.slice(0, 60).trim()) })] : [];
+        ? [finding(this, p, { detail: `${p.seoTitle.length} characters`, edit: productEdit("seoTitle", `${p.seoTitle} (${p.seoTitle.length} characters)`, trimAt(p.seoTitle, 60), { raw: p.seoTitle, apply: true }) })] : [];
     },
   },
   {
     id: "meta_description_missing", category: "seo", label: "Meta description missing", severity: "medium",
     check(p) {
       if (p.seoDescription.trim()) return [];
-      const suggested = stripHtml(p.descriptionHtml).slice(0, 155).trim();
-      return [finding(this, p, { edit: productEdit("seoDescription", "", suggested, true) })];
+      const suggested = trimAt(stripHtml(p.descriptionHtml), 155);
+      return [finding(this, p, { edit: productEdit("seoDescription", "", suggested, { apply: Boolean(suggested), multiline: true }) })];
     },
   },
   {
     id: "meta_description_too_long", category: "seo", label: "Meta description over 160 characters", severity: "low",
     check(p) {
       return p.seoDescription.length > 160
-        ? [finding(this, p, { detail: `${p.seoDescription.length} characters`, edit: productEdit("seoDescription", p.seoDescription, p.seoDescription.slice(0, 157).trim() + "...", true) })] : [];
+        ? [finding(this, p, { detail: `${p.seoDescription.length} characters`, edit: productEdit("seoDescription", p.seoDescription, trimAt(p.seoDescription, 160), { apply: true, multiline: true }) })] : [];
     },
   },
   {
@@ -262,7 +403,8 @@ export const PRODUCT_RULES = [
       const tail = /-(\d+)$/.exec(h);
       const numbered = Boolean(tail) && !norm(p.title).replace(/[^a-z0-9]+$/, "").endsWith(tail[1]);
       const bad = /copy-of|untitled/.test(h) || /^\d+$/.test(h) || numbered;
-      return bad ? [finding(this, p, { detail: `/${h}` })] : [];
+      // Changing a handle breaks links, so the product page is the place for it.
+      return bad ? [finding(this, p, { detail: `/${h}`, current: `/${h}` })] : [];
     },
   },
 
@@ -272,18 +414,18 @@ export const PRODUCT_RULES = [
       const meta = norm(p.seoDescription);
       const desc = norm(stripHtml(p.descriptionHtml));
       if (!meta || meta.length < 40 || !desc) return [];
-      return desc.startsWith(meta.replace(/\.{3}$/, "")) ? [finding(this, p, { edit: productEdit("seoDescription", p.seoDescription, "", true) })] : [];
+      return desc.startsWith(meta.replace(/\.{3}$/, "")) ? [finding(this, p, { edit: productEdit("seoDescription", p.seoDescription, "", { multiline: true }) })] : [];
     },
   },
 
   // Images
   {
     id: "missing_image", category: "media", label: "No product image", severity: "high",
-    check(p) { return p.images.length === 0 ? [finding(this, p)] : []; },
+    check(p) { return p.images.length === 0 ? [finding(this, p, { current: "No images" })] : []; },
   },
   {
     id: "few_images", category: "media", label: "Only one image", severity: "low",
-    check(p) { return p.images.length === 1 ? [finding(this, p)] : []; },
+    check(p) { return p.images.length === 1 ? [finding(this, p, { current: "1 image" })] : []; },
   },
   {
     id: "missing_alt_text", category: "media", label: "Image has no alt text", severity: "low",
@@ -291,7 +433,7 @@ export const PRODUCT_RULES = [
     check(p) {
       const missing = p.images.filter((img) => !(img.alt || "").trim());
       return missing.length
-        ? [finding(this, p, { detail: `${missing.length} of ${p.images.length} images`, edit: { kind: "alt", mediaIds: missing.map((m) => m.id), current: "", suggested: p.title } })]
+        ? [finding(this, p, { detail: `${missing.length} of ${p.images.length} images`, edit: { kind: "alt", mediaIds: missing.map((m) => m.id), current: `${missing.length} of ${p.images.length} images without alt`, raw: "", suggested: p.title, apply: true } })]
         : [];
     },
   },
@@ -300,14 +442,19 @@ export const PRODUCT_RULES = [
     check(p) {
       if (p.images.length < 2) return [];
       const alts = new Set(p.images.map((i) => (i.alt || "").trim()).filter(Boolean));
-      return alts.size === 1 && p.images.every((i) => (i.alt || "").trim()) ? [finding(this, p, { detail: `"${[...alts][0]}"` })] : [];
+      if (!(alts.size === 1 && p.images.every((i) => (i.alt || "").trim()))) return [];
+      const alt = [...alts][0];
+      // Numbered: the value plus the image number on each image.
+      return [finding(this, p, { detail: `"${alt}"`, edit: { kind: "alt", mediaIds: p.images.map((i) => i.id), numbered: true, current: alt, suggested: p.title, apply: true, applyLabel: "Number them" } })];
     },
   },
   {
     id: "small_image", category: "media", label: "Image under 800px", severity: "medium",
     check(p) {
       const small = p.images.filter((i) => i.width && i.height && Math.max(i.width, i.height) < 800);
-      return small.length ? [finding(this, p, { detail: `${small.length} image${small.length > 1 ? "s" : ""}, smallest ${Math.min(...small.map((i) => Math.max(i.width, i.height)))}px` })] : [];
+      if (!small.length) return [];
+      const smallest = Math.min(...small.map((i) => Math.max(i.width, i.height)));
+      return [finding(this, p, { detail: `${small.length} image${small.length > 1 ? "s" : ""}, smallest ${smallest}px`, current: `${smallest}px` })];
     },
   },
 
@@ -317,7 +464,7 @@ export const PRODUCT_RULES = [
       const ratios = p.images.filter((i) => i.width && i.height).map((i) => i.width / i.height);
       if (ratios.length < 2) return [];
       const min = Math.min(...ratios), max = Math.max(...ratios);
-      return max / min > 1.25 ? [finding(this, p, { detail: `${ratios.length} images, ratios from ${min.toFixed(2)} to ${max.toFixed(2)}` })] : [];
+      return max / min > 1.25 ? [finding(this, p, { detail: `${ratios.length} images, ratios from ${min.toFixed(2)} to ${max.toFixed(2)}`, current: `${min.toFixed(2)} to ${max.toFixed(2)}` })] : [];
     },
   },
 
@@ -326,7 +473,7 @@ export const PRODUCT_RULES = [
     id: "missing_sku", category: "inventory", label: "No SKU", severity: "high",
     check(p) {
       return p.variants.filter((v) => !(v.sku || "").trim())
-        .map((v) => finding(this, p, { variantId: v.id, detail: v.title, edit: variantEdit(v, "sku", "") }));
+        .map((v) => finding(this, p, { variantId: v.id, detail: v.title, edit: variantEdit(v, "sku", "", skuFor(p, v), { apply: true }) }));
     },
   },
   {
@@ -344,7 +491,7 @@ export const PRODUCT_RULES = [
         finding(this, p, {
           variantId: v.id, detail: v.title,
           edit: v.inventoryItemId
-            ? { kind: "weight", inventoryItemId: v.inventoryItemId, unit: v.weightUnit, current: "0", suggested: donor ? String(donor.weight) : "", hint: v.weightUnit.toLowerCase() }
+            ? { kind: "weight", inventoryItemId: v.inventoryItemId, unit: v.weightUnit, current: "0", suggested: donor ? String(donor.weight) : "", apply: Boolean(donor), hint: v.weightUnit.toLowerCase() }
             : null,
         }),
       );
@@ -353,8 +500,10 @@ export const PRODUCT_RULES = [
   {
     id: "zero_price", category: "pricing", label: "No price set", severity: "high",
     check(p) {
+      const siblings = p.variants.map((v) => Number(v.price)).filter((n) => n > 0);
+      const suggested = siblings.length ? money(median(siblings)) : "";
       return p.variants.filter((v) => Number(v.price) === 0)
-        .map((v) => finding(this, p, { variantId: v.id, detail: v.title, edit: variantEdit(v, "price", "0") }));
+        .map((v) => finding(this, p, { variantId: v.id, detail: v.title, edit: variantEdit(v, "price", "0.00", suggested, { raw: "0", apply: Boolean(suggested) }) }));
     },
   },
   {
@@ -362,7 +511,7 @@ export const PRODUCT_RULES = [
     fixable: true, fixLabel: "Clear the compare at price",
     check(p) {
       return p.variants.filter((v) => v.compareAtPrice != null && Number(v.compareAtPrice) <= Number(v.price))
-        .map((v) => finding(this, p, { variantId: v.id, detail: `${v.title}: ${v.compareAtPrice} vs ${v.price}`, edit: variantEdit(v, "compareAt", String(v.compareAtPrice), "") }));
+        .map((v) => finding(this, p, { variantId: v.id, detail: `${v.title}: ${v.compareAtPrice} vs ${v.price}`, edit: variantEdit(v, "compareAt", `compare ${money(v.compareAtPrice)} vs price ${money(v.price)}`, "", { raw: String(v.compareAtPrice), apply: true, applyValue: "", applyLabel: "Clear compare at" }) }));
     },
   },
   {
@@ -374,30 +523,43 @@ export const PRODUCT_RULES = [
   },
   {
     id: "price_below_cost", category: "pricing", label: "Price below cost", severity: "high",
-    check(p) {
+    check(p, ctx) {
+      const ending = ctx?.catalog?.priceEnding || "99";
       return p.variants.filter((v) => v.cost != null && Number(v.price) > 0 && Number(v.price) < Number(v.cost))
-        .map((v) => finding(this, p, { variantId: v.id, detail: `${v.title}: price ${v.price}, cost ${v.cost}`, edit: variantEdit(v, "price", String(v.price), "") }));
+        .map((v) => finding(this, p, { variantId: v.id, detail: `${v.title}: price ${v.price}, cost ${v.cost}`, edit: variantEdit(v, "price", `price ${money(v.price)}, cost ${money(v.cost)}`, withEnding(v.cost, ending), { raw: String(v.price), apply: true }) }));
     },
   },
   {
     id: "option_values_inconsistent", category: "variants", label: "Option values spelled two ways", severity: "medium",
     check(p) {
       const out = [];
+      // How often each spelling appears in the variant titles decides the one to keep.
+      const uses = new Map();
+      for (const v of p.variants) for (const part of String(v.title || "").split(" / ")) uses.set(part, (uses.get(part) || 0) + 1);
       for (const o of p.options) {
         const groups = new Map();
-        for (const v of o.values) {
-          const k = norm(v);
-          if (!groups.has(k)) groups.set(k, new Set());
-          groups.get(k).add(v);
+        o.values.forEach((value, i) => {
+          const k = norm(value);
+          if (!groups.has(k)) groups.set(k, []);
+          groups.get(k).push({ id: o.valueIds?.[i], name: value });
+        });
+        for (const [, values] of groups) {
+          if (values.length < 2) continue;
+          const names = values.map((x) => x.name);
+          const keep = [...names].sort((a, b) => (uses.get(b) || 0) - (uses.get(a) || 0))[0];
+          const withIds = o.id && values.every((x) => x.id);
+          out.push(finding(this, p, {
+            detail: `${o.name}: ${names.join(" / ")}`,
+            edit: withIds ? { kind: "option", optionId: o.id, values, current: names.join(" / "), raw: names.join(" / "), suggested: keep, apply: true, applyLabel: `Use ${keep}` } : null,
+          }));
         }
-        for (const [, set] of groups) if (set.size > 1) out.push(finding(this, p, { detail: `${o.name}: ${[...set].join(" / ")}` }));
       }
       return out;
     },
   },
   {
     id: "too_many_variants", category: "variants", label: "More than 100 variants", severity: "low",
-    check(p) { return p.variantsCount > 100 ? [finding(this, p, { detail: `${p.variantsCount} variants` })] : []; },
+    check(p) { return p.variantsCount > 100 ? [finding(this, p, { detail: `${p.variantsCount} variants`, current: `${p.variantsCount} variants` })] : []; },
   },
 
   // Pricing
@@ -409,7 +571,7 @@ export const PRODUCT_RULES = [
       const med = median(prices);
       return p.variants
         .filter((v) => Number(v.price) > 0 && (Number(v.price) > med * 5 || Number(v.price) < med / 5))
-        .map((v) => finding(this, p, { variantId: v.id, detail: `${v.title}: ${v.price}, others around ${med.toFixed(2)}`, edit: variantEdit(v, "price", String(v.price), "") }));
+        .map((v) => finding(this, p, { variantId: v.id, detail: `${v.title}: ${v.price}, others around ${med.toFixed(2)}`, edit: variantEdit(v, "price", `${money(v.price)}, others around ${money(med)}`, money(med), { raw: String(v.price), apply: true }) }));
     },
   },
   {
@@ -417,7 +579,7 @@ export const PRODUCT_RULES = [
     check(p) {
       return p.variants
         .filter((v) => v.compareAtPrice != null && Number(v.compareAtPrice) > Number(v.price) && (Date.now() - new Date(v.updatedAt).getTime()) / DAY > 90)
-        .map((v) => finding(this, p, { variantId: v.id, detail: `${v.title}: ${v.price} was ${v.compareAtPrice}`, edit: variantEdit(v, "compareAt", String(v.compareAtPrice), "") }));
+        .map((v) => finding(this, p, { variantId: v.id, detail: `${v.title}: ${v.price} was ${v.compareAtPrice}`, edit: variantEdit(v, "compareAt", `on sale since ${String(v.updatedAt).slice(0, 10)}`, "", { raw: String(v.compareAtPrice), apply: true, applyValue: "", applyLabel: "End sale" }) }));
     },
   },
 
@@ -426,7 +588,15 @@ export const PRODUCT_RULES = [
     id: "draft_stale", category: "status", label: "Draft for more than 30 days", severity: "low",
     check(p) {
       const age = (Date.now() - new Date(p.createdAt).getTime()) / DAY;
-      return p.status === "DRAFT" && age > 30 ? [finding(this, p, { detail: `${Math.round(age)} days` })] : [];
+      if (!(p.status === "DRAFT" && age > 30)) return [];
+      const days = Math.round(age);
+      return [finding(this, p, {
+        detail: `${days} days`,
+        edit: { kind: "choice", current: `Draft for ${days} days`, noInput: true, choices: [
+          { label: "Set active", kind: "product", field: "status", value: "ACTIVE" },
+          { label: "Archive", kind: "product", field: "status", value: "ARCHIVED" },
+        ] },
+      })];
     },
   },
   {
@@ -435,43 +605,65 @@ export const PRODUCT_RULES = [
       if (p.status !== "ACTIVE") return [];
       const tracked = p.variants.some((v) => v.tracked);
       const canSell = p.variants.some((v) => v.inventoryPolicy === "CONTINUE");
-      return tracked && !canSell && p.totalInventory <= 0 ? [finding(this, p)] : [];
+      if (!(tracked && !canSell && p.totalInventory <= 0)) return [];
+      return [finding(this, p, {
+        edit: { kind: "choice", current: "Quantity 0, does not continue selling", noInput: true, choices: [
+          { label: "Set to Draft", kind: "product", field: "status", value: "DRAFT" },
+          { label: "Continue selling when out of stock", kind: "policy", variantIds: p.variants.map((v) => v.id), before: "DENY", value: "CONTINUE" },
+        ] },
+      })];
     },
   },
   {
     id: "no_collection", category: "organization", label: "Not in any collection", severity: "low",
-    check(p) { return p.status === "ACTIVE" && p.collectionCount === 0 ? [finding(this, p)] : []; },
+    check(p) { return p.status === "ACTIVE" && p.collectionCount === 0 ? [finding(this, p, { current: "0 collections" })] : []; },
   },
   {
     id: "not_published", category: "publishing", label: "Not visible on your store", severity: "medium",
     // Published somewhere but not on the Online Store; a product on no channel at all is
     // unpublished_everywhere instead.
-    check(p) { return p.status === "ACTIVE" && !p.publishedAt && (p.publications == null || p.publications > 0) ? [finding(this, p)] : []; },
+    check(p) {
+      return p.status === "ACTIVE" && !p.publishedAt && (p.publications == null || p.publications > 0)
+        ? [finding(this, p, { edit: { kind: "publish", current: "Unpublished", suggested: "Online Store", apply: true, applyLabel: "Publish to Online Store", noInput: true } })] : [];
+    },
   },
 
   {
     id: "negative_inventory", category: "inventory", label: "Negative inventory", severity: "medium",
     check(p) {
       return p.variants.filter((v) => v.tracked && v.inventoryQuantity < 0)
-        .map((v) => finding(this, p, { variantId: v.id, detail: `${v.title}: ${v.inventoryQuantity}` }));
+        .map((v) => finding(this, p, {
+          variantId: v.id, detail: `${v.title}: ${v.inventoryQuantity}`,
+          edit: v.inventoryItemId ? { kind: "inventory", inventoryItemId: v.inventoryItemId, current: String(v.inventoryQuantity), suggested: "0", apply: true } : null,
+        }));
     },
   },
   {
     id: "no_location", category: "inventory", label: "Tracked variant with no location", severity: "medium",
     check(p) {
       return p.variants.filter((v) => v.tracked && v.locations === 0)
-        .map((v) => finding(this, p, { variantId: v.id, detail: v.title }));
+        .map((v) => finding(this, p, { variantId: v.id, detail: v.title, current: "Not stocked at any location" }));
     },
   },
 
   // Organization
   {
     id: "missing_vendor", category: "organization", label: "No vendor", severity: "medium",
-    check(p) { return !(p.vendor || "").trim() ? [finding(this, p, { edit: productEdit("vendor", "") })] : []; },
+    check(p, ctx) {
+      if ((p.vendor || "").trim()) return [];
+      // The vendor most of the catalog has, when one covers most of it.
+      const common = ctx?.catalog?.commonVendor || "";
+      return [finding(this, p, { edit: productEdit("vendor", "", common, { apply: Boolean(common) }) })];
+    },
   },
   {
     id: "missing_product_type", category: "organization", label: "No product type", severity: "medium",
-    check(p) { return !(p.productType || "").trim() ? [finding(this, p, { edit: productEdit("productType", "") })] : []; },
+    check(p, ctx) {
+      if ((p.productType || "").trim()) return [];
+      // The type most products in the same collection have.
+      const common = (p.collectionIds || []).map((c) => ctx?.catalog?.typeByCollection?.get(c)).find(Boolean) || "";
+      return [finding(this, p, { edit: productEdit("productType", "", common, { apply: Boolean(common) }) })];
+    },
   },
   {
     id: "no_tags", category: "organization", label: "No tags", severity: "low",
@@ -486,7 +678,9 @@ export const PRODUCT_RULES = [
       const v = (p.vendor || "").trim();
       if (!v) return [];
       const ok = list.some((w) => norm(w) === norm(v));
-      return ok ? [] : [finding(this, p, { detail: v, edit: productEdit("vendor", v, list.find((w) => norm(w).startsWith(norm(v).slice(0, 3))) || "") })];
+      if (ok) return [];
+      const near = closest(v, list);
+      return [finding(this, p, { detail: v, edit: productEdit("vendor", v, near, { apply: Boolean(near) }) })];
     },
   },
 
@@ -500,7 +694,7 @@ export const PRODUCT_RULES = [
       for (const r of rules) {
         if (r.productType && norm(r.productType) !== norm(p.productType)) continue;
         const mf = p.metafields.find((m) => m.key === r.key);
-        if (!mf || !(mf.value || "").trim()) out.push(finding(this, p, { detail: r.key }));
+        if (!mf || !(mf.value || "").trim()) out.push(finding(this, p, { detail: r.key, edit: { kind: "metafield", key: r.key, type: mf?.type || null, current: "", suggested: "" } }));
       }
       return out;
     },
@@ -517,7 +711,7 @@ export const PRODUCT_RULES = [
         if (!mf || !(mf.value || "").trim()) continue;
         let re;
         try { re = new RegExp(r.pattern); } catch { continue; }
-        if (!re.test(mf.value)) out.push(finding(this, p, { detail: `${r.key} = "${mf.value.slice(0, 40)}"` }));
+        if (!re.test(mf.value)) out.push(finding(this, p, { detail: `${r.key} = "${mf.value.slice(0, 40)}"`, edit: { kind: "metafield", key: r.key, type: mf.type || null, current: mf.value, suggested: "" } }));
       }
       return out;
     },
@@ -540,7 +734,11 @@ export const CATALOG_RULES = [
       const out = [];
       for (const [sku, hits] of bySku) {
         if (hits.length < 2) continue;
-        for (const { p, v } of hits) out.push(finding(this, p, { variantId: v.id, detail: `${v.title}: ${sku} used ${hits.length} times`, edit: variantEdit(v, "sku", sku, sku) }));
+        // The first keeps the SKU; the others get a numbered suffix.
+        hits.forEach(({ p, v }, i) => {
+          const suggested = i === 0 ? sku : `${sku}-${i + 1}`;
+          out.push(finding(this, p, { variantId: v.id, detail: `${v.title}: ${sku} used ${hits.length} times`, edit: variantEdit(v, "sku", `${sku} used ${hits.length} times`, suggested, { raw: sku, apply: i > 0 }) }));
+        });
       }
       return out;
     },
@@ -555,7 +753,7 @@ export const CATALOG_RULES = [
         byTitle.get(k).push(p);
       }
       const out = [];
-      for (const [, hits] of byTitle) if (hits.length > 1) for (const p of hits) out.push(finding(this, p, { detail: `${hits.length} products`, edit: productEdit("title", p.title, p.title) }));
+      for (const [, hits] of byTitle) if (hits.length > 1) for (const p of hits) out.push(finding(this, p, { detail: `${hits.length} products`, edit: productEdit("title", `${p.title} · ${hits.length} products`, p.title, { raw: p.title }) }));
       return out;
     },
   },
@@ -570,7 +768,13 @@ export const CATALOG_RULES = [
         byDesc.get(k).push(p);
       }
       const out = [];
-      for (const [, hits] of byDesc) if (hits.length >= 3) for (const p of hits) out.push(finding(this, p, { detail: `shared by ${hits.length} products` }));
+      for (const [, hits] of byDesc) {
+        if (hits.length < 3) continue;
+        for (const p of hits) {
+          const text = stripHtml(p.descriptionHtml);
+          out.push(finding(this, p, { detail: `shared by ${hits.length} products`, edit: productEdit("descriptionHtml", `${first(text, 80)} · shared by ${hits.length}`, text, { raw: text, multiline: true }) }));
+        }
+      }
       return out;
     },
   },
@@ -585,7 +789,7 @@ export const CATALOG_RULES = [
       return styles.filter((x) => x.tc !== majorityTitleCase).map(({ p }) =>
         finding(this, p, {
           detail: majorityTitleCase ? "most titles use Title Case" : "most titles use sentence case",
-          edit: productEdit("title", p.title, majorityTitleCase ? titleCase(p.title) : p.title.charAt(0).toUpperCase() + p.title.slice(1).toLowerCase()),
+          edit: productEdit("title", p.title, majorityTitleCase ? titleCase(p.title) : p.title.charAt(0).toUpperCase() + p.title.slice(1).toLowerCase(), { apply: true }),
         }),
       );
     },
@@ -610,7 +814,7 @@ export const CATALOG_RULES = [
         const canonical = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
         for (const p of products) {
           const raw = (p.vendor || "").trim();
-          if (spellings.includes(raw)) out.push(finding(this, p, { detail: spellings.join(" / "), edit: productEdit("vendor", raw, canonical) }));
+          if (spellings.includes(raw)) out.push(finding(this, p, { detail: spellings.join(" / "), edit: productEdit("vendor", raw, canonical, { apply: raw !== canonical }) }));
         }
       }
       return out;
@@ -630,7 +834,13 @@ CATALOG_RULES.push(
         by.get(k).push(p);
       }
       const out = [];
-      for (const [, hits] of by) if (hits.length > 1) for (const p of hits) out.push(finding(this, p, { detail: `${hits.length} products`, edit: productEdit("seoTitle", p.seoTitle, p.seoTitle) }));
+      for (const [, hits] of by) {
+        if (hits.length < 2) continue;
+        for (const p of hits) {
+          const suggested = trimAt(p.title, 60);
+          out.push(finding(this, p, { detail: `${hits.length} products`, edit: productEdit("seoTitle", p.seoTitle, suggested, { apply: norm(suggested) !== norm(p.seoTitle) }) }));
+        }
+      }
       return out;
     },
   },
@@ -639,12 +849,17 @@ CATALOG_RULES.push(
     check(products) {
       if (products.length < 20) return [];
       const counts = new Map();
-      for (const p of products) { const k = norm(p.productType); if (k) counts.set(k, (counts.get(k) || 0) + 1); }
-      const common = [...counts.entries()].filter(([, n]) => n > 1).map(([k]) => k);
-      return products.filter((p) => norm(p.productType) && counts.get(norm(p.productType)) === 1).map((p) => {
+      const spelled = new Map();
+      for (const p of products) {
         const k = norm(p.productType);
-        const near = common.find((c) => c.slice(0, 4) === k.slice(0, 4)) || "";
-        return finding(this, p, { detail: p.productType, edit: productEdit("productType", p.productType, near ? titleCase(near) : "") });
+        if (!k) continue;
+        counts.set(k, (counts.get(k) || 0) + 1);
+        if (!spelled.has(k)) spelled.set(k, p.productType.trim());
+      }
+      const common = [...counts.entries()].filter(([, n]) => n > 1).map(([k]) => spelled.get(k));
+      return products.filter((p) => norm(p.productType) && counts.get(norm(p.productType)) === 1).map((p) => {
+        const near = closest(p.productType, common);
+        return finding(this, p, { detail: p.productType, edit: productEdit("productType", p.productType, near, { apply: Boolean(near) }) });
       });
     },
   },
@@ -657,7 +872,7 @@ CATALOG_RULES.push(
       const out = [];
       for (const p of products) {
         const lone = p.tags.filter((t) => counts.get(norm(t)) === 1);
-        if (lone.length) out.push(finding(this, p, { detail: lone.join(", "), edit: productEdit("tags", p.tags.join(", "), p.tags.filter((t) => !lone.includes(t)).join(", ")) }));
+        if (lone.length) out.push(finding(this, p, { detail: lone.join(", "), edit: productEdit("tags", lone.join(", "), p.tags.filter((t) => !lone.includes(t)).join(", "), { raw: p.tags.join(", "), apply: true, applyLabel: "Remove it" }) }));
       }
       return out;
     },
@@ -677,7 +892,10 @@ CATALOG_RULES.push(
       const out = [];
       for (const p of products) {
         const fixed = p.tags.map((t) => canon.get(norm(t)) || t);
-        if (fixed.join("|") !== p.tags.join("|")) out.push(finding(this, p, { detail: p.tags.filter((t, i) => t !== fixed[i]).join(", "), edit: productEdit("tags", p.tags.join(", "), fixed.join(", ")) }));
+        if (fixed.join("|") !== p.tags.join("|")) {
+          const changed = p.tags.filter((t, i) => t !== fixed[i]);
+          out.push(finding(this, p, { detail: changed.join(", "), edit: productEdit("tags", changed.join(", "), fixed.join(", "), { raw: p.tags.join(", "), apply: true }) }));
+        }
       }
       return out;
     },
@@ -692,7 +910,7 @@ PRODUCT_RULES.push(
       const html = p.descriptionHtml || "";
       if (!PASTED_RE.test(html)) return [];
       const marker = /<font\b/i.test(html) ? "<font> tags" : /mso-|<o:p>/i.test(html) ? "Word markup" : "inline styles";
-      return [finding(this, p, { detail: marker, edit: productEdit("descriptionHtml", html, cleanFormatting(html), true) })];
+      return [finding(this, p, { detail: marker, edit: productEdit("descriptionHtml", marker, cleanFormatting(html), { raw: html, apply: true, applyLabel: "Clean formatting", multiline: true }) })];
     },
   },
   {
@@ -700,7 +918,7 @@ PRODUCT_RULES.push(
     check(p) {
       const imgs = (p.descriptionHtml || "").match(/<img\b[^>]*>/gi) || [];
       const missing = imgs.filter((tag) => !/\balt\s*=\s*"[^"]*\S[^"]*"/i.test(tag));
-      return missing.length ? [finding(this, p, { detail: `${missing.length} of ${imgs.length} images` })] : [];
+      return missing.length ? [finding(this, p, { detail: `${missing.length} of ${imgs.length} images`, current: `${missing.length} of ${imgs.length} images without alt` })] : [];
     },
   },
   {
@@ -708,7 +926,7 @@ PRODUCT_RULES.push(
     check(p) {
       const links = (p.descriptionHtml || "").match(/<a\b[^>]*>/gi) || [];
       const dead = links.filter((tag) => !/\bhref\s*=\s*"[^"]+"/i.test(tag) || /\bhref\s*=\s*"(#|javascript:)/i.test(tag));
-      return dead.length ? [finding(this, p, { detail: `${dead.length} of ${links.length} links` })] : [];
+      return dead.length ? [finding(this, p, { detail: `${dead.length} of ${links.length} links`, current: `${dead.length} of ${links.length} links` })] : [];
     },
   },
   {
@@ -716,7 +934,7 @@ PRODUCT_RULES.push(
     check(p) {
       const d = p.seoDescription.trim();
       return d && d.length < 50
-        ? [finding(this, p, { detail: `${d.length} characters`, edit: productEdit("seoDescription", p.seoDescription, p.seoDescription, true) })] : [];
+        ? [finding(this, p, { detail: `${d.length} characters`, edit: productEdit("seoDescription", p.seoDescription, p.seoDescription, { multiline: true }) })] : [];
     },
   },
 
@@ -726,10 +944,10 @@ PRODUCT_RULES.push(
     check(p) {
       const hits = p.images.filter((i) => FILENAME_ALT_RE.test((i.alt || "").trim()));
       if (!hits.length) return [];
-      const first = hits[0].alt.trim();
+      const firstAlt = hits[0].alt.trim();
       return [finding(this, p, {
-        detail: `"${first}"${hits.length > 1 ? ` and ${hits.length - 1} more` : ""}`,
-        edit: { kind: "alt", mediaIds: hits.map((i) => i.id), current: first, suggested: p.title },
+        detail: `"${firstAlt}"${hits.length > 1 ? ` and ${hits.length - 1} more` : ""}`,
+        edit: { kind: "alt", mediaIds: hits.map((i) => i.id), current: firstAlt, suggested: p.title, apply: true },
       })];
     },
   },
@@ -738,10 +956,10 @@ PRODUCT_RULES.push(
     check(p) {
       const hits = p.images.filter((i) => (i.alt || "").trim().length > 125);
       if (!hits.length) return [];
-      const first = hits[0].alt.trim();
+      const firstAlt = hits[0].alt.trim();
       return [finding(this, p, {
         detail: `${hits.length} of ${p.images.length} images, longest ${Math.max(...hits.map((i) => i.alt.trim().length))} characters`,
-        edit: { kind: "alt", mediaIds: hits.map((i) => i.id), current: first, suggested: first.slice(0, 125).replace(/\s+\S*$/, "") },
+        edit: { kind: "alt", mediaIds: hits.map((i) => i.id), current: firstAlt, suggested: trimAt(firstAlt, 125), apply: true },
       })];
     },
   },
@@ -749,8 +967,9 @@ PRODUCT_RULES.push(
     id: "huge_image", category: "media", label: "Image over 5,000px", severity: "low",
     check(p) {
       const big = p.images.filter((i) => Math.max(i.width || 0, i.height || 0) > 5000);
-      return big.length
-        ? [finding(this, p, { detail: `${big.length} image${big.length > 1 ? "s" : ""}, largest ${Math.max(...big.map((i) => Math.max(i.width, i.height)))}px` })] : [];
+      if (!big.length) return [];
+      const largest = Math.max(...big.map((i) => Math.max(i.width, i.height)));
+      return [finding(this, p, { detail: `${big.length} image${big.length > 1 ? "s" : ""}, largest ${largest}px`, current: `${largest}px` })];
     },
   },
 
@@ -766,7 +985,7 @@ PRODUCT_RULES.push(
     id: "inventory_not_tracked", category: "inventory", label: "Inventory not tracked", severity: "low",
     check(p) {
       if (p.status !== "ACTIVE") return [];
-      return p.variants.filter((v) => v.inventoryItemId && !v.tracked).map((v) => finding(this, p, { variantId: v.id, detail: v.title }));
+      return p.variants.filter((v) => v.inventoryItemId && !v.tracked).map((v) => finding(this, p, { variantId: v.id, detail: v.title, current: "Not tracked" }));
     },
   },
   {
@@ -774,12 +993,12 @@ PRODUCT_RULES.push(
     check(p) {
       if (p.status !== "ACTIVE") return [];
       return p.variants.filter((v) => v.tracked && v.inventoryPolicy === "CONTINUE" && v.inventoryQuantity <= 0)
-        .map((v) => finding(this, p, { variantId: v.id, detail: `${v.title}: ${v.inventoryQuantity} in stock` }));
+        .map((v) => finding(this, p, { variantId: v.id, detail: `${v.title}: ${v.inventoryQuantity} in stock`, current: `${v.inventoryQuantity} in stock, continues selling` }));
     },
   },
   {
     id: "archived_with_stock", category: "status", label: "Archived with stock on hand", severity: "low",
-    check(p) { return p.status === "ARCHIVED" && p.totalInventory > 0 ? [finding(this, p, { detail: `${p.totalInventory} units` })] : []; },
+    check(p) { return p.status === "ARCHIVED" && p.totalInventory > 0 ? [finding(this, p, { detail: `${p.totalInventory} units`, current: `Archived, ${p.totalInventory} units` })] : []; },
   },
 
   // Pricing
@@ -789,7 +1008,7 @@ PRODUCT_RULES.push(
       const margin = (v) => (Number(v.price) - Number(v.cost)) / Number(v.price);
       return p.variants
         .filter((v) => v.cost != null && Number(v.price) > 0 && Number(v.price) >= Number(v.cost) && margin(v) < MIN_MARGIN)
-        .map((v) => finding(this, p, { variantId: v.id, detail: `${v.title}: price ${v.price}, cost ${v.cost} (${Math.round(margin(v) * 100)}% margin)`, edit: variantEdit(v, "price", String(v.price), "") }));
+        .map((v) => finding(this, p, { variantId: v.id, detail: `${v.title}: price ${v.price}, cost ${v.cost} (${Math.round(margin(v) * 100)}% margin)`, edit: variantEdit(v, "price", `price ${money(v.price)}, cost ${money(v.cost)} (${Math.round(margin(v) * 100)}% margin)`, "", { raw: String(v.price) }) }));
     },
   },
   {
@@ -798,7 +1017,7 @@ PRODUCT_RULES.push(
       const off = (v) => 1 - Number(v.price) / Number(v.compareAtPrice);
       return p.variants
         .filter((v) => v.compareAtPrice != null && Number(v.price) > 0 && Number(v.compareAtPrice) > Number(v.price) && off(v) > 0.8)
-        .map((v) => finding(this, p, { variantId: v.id, detail: `${v.title}: ${v.price} was ${v.compareAtPrice} (${Math.round(off(v) * 100)}% off)`, edit: variantEdit(v, "compareAt", String(v.compareAtPrice), "") }));
+        .map((v) => finding(this, p, { variantId: v.id, detail: `${v.title}: ${v.price} was ${v.compareAtPrice} (${Math.round(off(v) * 100)}% off)`, edit: variantEdit(v, "compareAt", `${money(v.price)} was ${money(v.compareAtPrice)} (${Math.round(off(v) * 100)}% off)`, "", { raw: String(v.compareAtPrice) }) }));
     },
   },
   {
@@ -839,7 +1058,7 @@ PRODUCT_RULES.push(
         try { parsed = JSON.parse(m.value); } catch { bad.push(`${m.key}: invalid JSON`); continue; }
         if (type.startsWith("list.") && (!Array.isArray(parsed) || parsed.length === 0)) bad.push(`${m.key}: empty list`);
       }
-      return bad.length ? [finding(this, p, { detail: bad.join(", ") })] : [];
+      return bad.length ? [finding(this, p, { detail: bad.join(", "), current: bad.join(", ") })] : [];
     },
   },
 );
@@ -858,7 +1077,7 @@ CATALOG_RULES.push(
       const out = [];
       for (const [b, hits] of by) {
         if (hits.length < 2) continue;
-        for (const { p, v } of hits) out.push(finding(this, p, { variantId: v.id, detail: `${v.title}: ${b} used ${hits.length} times`, edit: variantEdit(v, "barcode", b, b) }));
+        for (const { p, v } of hits) out.push(finding(this, p, { variantId: v.id, detail: `${v.title}: ${b} used ${hits.length} times`, edit: variantEdit(v, "barcode", `${b} used ${hits.length} times`, b, { raw: b }) }));
       }
       return out;
     },
@@ -880,7 +1099,7 @@ CATALOG_RULES.push(
         const canonical = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
         for (const p of products) {
           const raw = (p.productType || "").trim();
-          if (counts.has(raw) && raw !== canonical) out.push(finding(this, p, { detail: [...counts.keys()].join(" / "), edit: productEdit("productType", raw, canonical) }));
+          if (counts.has(raw) && raw !== canonical) out.push(finding(this, p, { detail: [...counts.keys()].join(" / "), edit: productEdit("productType", raw, canonical, { apply: true }) }));
         }
       }
       return out;
@@ -901,7 +1120,7 @@ CATALOG_RULES.push(
         out.push(finding(this, p, {
           variantId: v.id, detail: `${v.title}: ${v.weight} ${v.weightUnit.toLowerCase()}, most use ${majority.toLowerCase()}`,
           edit: v.inventoryItemId
-            ? { kind: "weight", inventoryItemId: v.inventoryItemId, unit: majority, current: String(v.weight), suggested: (toKg(v.weight, v.weightUnit) / KG[majority]).toFixed(2), hint: majority.toLowerCase() }
+            ? { kind: "weight", inventoryItemId: v.inventoryItemId, unit: majority, current: `${v.weight} ${v.weightUnit.toLowerCase()}`, raw: String(v.weight), suggested: (toKg(v.weight, v.weightUnit) / KG[majority]).toFixed(2), apply: true, hint: majority.toLowerCase() }
             : null,
         }));
       }
@@ -915,28 +1134,31 @@ PRODUCT_RULES.push(
   // marketplaces read.
   {
     id: "category_missing", category: "organization", label: "No product category", severity: "medium",
-    check(p) { return p.category ? [] : [finding(this, p)]; },
+    check(p) { return p.category ? [] : [finding(this, p, { current: "" })]; },
   },
   {
     id: "category_broad", category: "organization", label: "Product category could be more specific", severity: "low",
-    check(p) { return p.category && !p.category.isLeaf ? [finding(this, p, { detail: p.category.fullName })] : []; },
+    check(p) { return p.category && !p.category.isLeaf ? [finding(this, p, { detail: p.category.fullName, current: p.category.fullName })] : []; },
   },
 
   // Sales channels
   {
     id: "unpublished_everywhere", category: "publishing", label: "Not on any sales channel", severity: "medium",
-    check(p) { return p.status === "ACTIVE" && p.publications === 0 ? [finding(this, p)] : []; },
+    check(p) {
+      return p.status === "ACTIVE" && p.publications === 0
+        ? [finding(this, p, { edit: { kind: "publish", current: "On no sales channel", suggested: "Online Store", apply: true, applyLabel: "Publish to Online Store", noInput: true } })] : [];
+    },
   },
   {
     id: "channel_feedback", category: "publishing", label: "A sales channel reports a problem", severity: "high",
     check(p) {
       if (p.channelIssues?.length) {
-        return p.channelIssues.map((c) => finding(this, p, { detail: `${c.app}: ${c.messages[0] || "needs attention"}` }));
+        return p.channelIssues.map((c) => finding(this, p, { detail: `${c.app}: ${c.messages[0] || "needs attention"}`, current: `${c.app}: ${c.messages[0] || "needs attention"}` }));
       }
       // Channels do not always expose their feedback text; a publication with errors still drops
       // out of the error-free count.
       const broken = p.publications != null && p.publicationsOk != null ? p.publications - p.publicationsOk : 0;
-      return broken > 0 ? [finding(this, p, { detail: `${broken} of ${p.publications} channels` })] : [];
+      return broken > 0 ? [finding(this, p, { detail: `${broken} of ${p.publications} channels`, current: `${broken} of ${p.publications} channels with errors` })] : [];
     },
   },
 );
@@ -958,17 +1180,20 @@ function enabled(rules, ctx) {
 
 export function runRules(products, ctx = {}) {
   const findings = [];
-  const productRules = enabled(PRODUCT_RULES, ctx);
-  for (const p of products) for (const rule of productRules) findings.push(...rule.check(p, ctx));
-  for (const rule of enabled(CATALOG_RULES, ctx)) findings.push(...rule.check(products, ctx));
+  // What the catalog as a whole suggests (catalogContext) rides along for the product rules.
+  const run = { ...ctx, catalog: catalogContext(products) };
+  const productRules = enabled(PRODUCT_RULES, run);
+  for (const p of products) for (const rule of productRules) findings.push(...rule.check(p, run));
+  for (const rule of enabled(CATALOG_RULES, run)) findings.push(...rule.check(products, run));
   return findings;
 }
 
 // Product rules only, for re-checking a handful of products without reading the whole catalog.
 export function runProductRules(products, ctx = {}) {
   const findings = [];
-  const productRules = enabled(PRODUCT_RULES, ctx);
-  for (const p of products) for (const rule of productRules) findings.push(...rule.check(p, ctx));
+  const run = { ...ctx, catalog: ctx.catalog || catalogContext(products) };
+  const productRules = enabled(PRODUCT_RULES, run);
+  for (const p of products) for (const rule of productRules) findings.push(...rule.check(p, run));
   return findings;
 }
 export const CATALOG_RULE_IDS = new Set(CATALOG_RULES.map((r) => r.id));
