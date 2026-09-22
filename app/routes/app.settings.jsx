@@ -213,7 +213,7 @@ export default function Settings() {
         </s-stack>
       </s-section>
 
-      <s-section heading="Approved vendors">
+      <s-section heading="Approved Vendors">
         <s-stack gap="base">
           <s-paragraph>
             One vendor per line. Leave empty to skip this check. Products whose vendor is not on this list get flagged under Organization.
@@ -232,7 +232,7 @@ export default function Settings() {
         </s-stack>
       </s-section>
 
-      <s-section heading={`Metafield rules (${rules.length})`}>
+      <s-section heading={`Metafield Rules (${rules.length})`}>
         <s-stack gap="base">
           <s-paragraph>
             Require a metafield, optionally only for one product type, and optionally check its value against a pattern.
@@ -290,7 +290,7 @@ export default function Settings() {
         </s-stack>
       </s-section>
 
-      <s-section slot="aside" heading={`Ignored findings (${ignores.length})`}>
+      <s-section slot="aside" heading={`Ignored Findings (${ignores.length})`}>
         <s-stack gap="small">
           <s-paragraph>Findings you chose to ignore. Restore one to see it again on the next scan.</s-paragraph>
           {ignores.map((i) => (

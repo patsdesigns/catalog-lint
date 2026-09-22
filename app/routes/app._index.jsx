@@ -594,7 +594,7 @@ function StartHere({ result, onSelect, busy, showPanel }) {
   ) : null;
   return (
     <s-section padding="none">
-      <CardHeader heading="Start here" badges={<s-badge tone="warning" size="small">Highest impact</s-badge>} aside={<s-text color="subdued">Most findings, weighted by severity</s-text>} />
+      <CardHeader heading="Start Here" badges={<s-badge tone="warning" size="small">Highest impact</s-badge>} aside={<s-text color="subdued">Most findings, weighted by severity</s-text>} />
       <CardBody table={table} panel={panel} />
     </s-section>
   );
@@ -612,7 +612,7 @@ function CategoryFilter({ result, filter, onChange }) {
   return (
     <s-stack direction="inline" gap="small-200" alignItems="center">
       <s-clickable-chip color={filter ? "base" : "strong"} onClick={() => onChange(null)} accessibilityLabel={`Show all areas, ${total} findings`}>
-        All areas · {total}
+        All Areas · {total}
       </s-clickable-chip>
       {cards.map(({ cat, count }) => (
         <s-clickable-chip
@@ -708,7 +708,7 @@ function RecentFixes({ fixes, onUndo, busy, showPanel }) {
   // When / Action columns sit exactly under Findings / Issue / Severity / Action.
   return (
     <s-section padding="none">
-      <CardHeader heading="Recent fixes" aside={<s-text color="subdued">Every fix can be undone</s-text>} />
+      <CardHeader heading="Recent Fixes" aside={<s-text color="subdued">Every fix can be undone</s-text>} />
       <CardBody table={table} panel={showPanel ? <div /> : null} />
     </s-section>
   );
