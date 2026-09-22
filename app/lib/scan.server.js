@@ -326,6 +326,7 @@ export async function scanProducts(products, graphql, shop, startedAt = Date.now
     catalogTotal: Math.max(catalogTotal, products.length),
     truncated: catalogTotal > products.length,
     readAt: new Date(startedAt).toISOString(),
+    productIds: products.map((p) => p.id),
     ignoredCount: all.length - findings.length,
     scannedAt: new Date().toISOString(),
     durationMs: Date.now() - startedAt,
@@ -356,13 +357,23 @@ export async function recheckProducts(graphql, shop, latest, ids, dropRuleId = n
     (f) => !touched.has(f.productId) || (CATALOG_RULE_IDS.has(f.ruleId) && f.ruleId !== dropRuleId),
   );
   const findings = [...kept, ...fresh];
-  const total = Math.max(0, latest.total - (ids.length - products.length)); // products deleted since the scan
+  // Products the scan covers: an id it did not know is an addition (a webhook, a queued product),
+  // an id it knew that Shopify no longer returns is a deletion. Scans saved before ids were recorded
+  // treat every id as known.
+  const known = latest.productIds?.length ? new Set(latest.productIds) : null;
+  const fetched = new Set(products.map((p) => p.id));
+  const deleted = ids.filter((id) => (known ? known.has(id) : true) && !fetched.has(id));
+  const added = known ? products.filter((p) => !known.has(p.id)).map((p) => p.id) : [];
+  const gone = new Set(deleted);
+  const productIds = known ? [...latest.productIds.filter((id) => !gone.has(id)), ...added] : latest.productIds || [];
+  const total = Math.max(0, latest.total - deleted.length + added.length);
   return {
     ...summarizeFindings(total, findings, settings),
     findings,
     names,
-    catalogTotal: latest.catalogTotal || total,
+    catalogTotal: Math.max(total, (latest.catalogTotal || latest.total) - deleted.length + added.length),
     readAt: latest.readAt,
+    productIds,
     ignoredCount: latest.ignoredCount || 0,
     scannedAt: new Date().toISOString(),
     durationMs: Date.now() - started,
@@ -374,7 +385,8 @@ export async function recheckProducts(graphql, shop, latest, ids, dropRuleId = n
 // now. Catalog-wide rules are not re-run (a full scan does that). Returns null when nothing is new.
 export async function scanNewProducts(graphql, shop, latest) {
   const started = Date.now();
-  const ids = await fetchNewProductIds(graphql, latest.readAt || latest.scannedAt);
+  const known = new Set(latest.productIds || []);
+  const ids = (await fetchNewProductIds(graphql, latest.readAt || latest.scannedAt)).filter((id) => !known.has(id));
   if (!ids.length) return null;
   const products = await fetchProductsByIds(graphql, ids);
   const { speller, storeWords, ignored, settings, locale } = await scanContext(graphql, shop);
@@ -390,6 +402,7 @@ export async function scanNewProducts(graphql, shop, latest) {
     names,
     catalogTotal: (latest.catalogTotal || latest.total) + products.length,
     readAt: new Date(started).toISOString(),
+    productIds: [...(latest.productIds || []), ...products.map((p) => p.id)],
     ignoredCount: latest.ignoredCount || 0,
     scannedAt: new Date().toISOString(),
     durationMs: Date.now() - started,

@@ -95,10 +95,26 @@ export function Notices({ data, onUndo, busy }) {
         </s-banner>
       ) : null}
       {scanNew ? (
-        <s-banner tone="success" heading={scanNew.added ? `Scanned ${scanNew.added} new ${scanNew.added === 1 ? "product" : "products"}` : "No new products since the last scan"}>
-          {scanNew.added ? (
+        <s-banner
+          tone="success"
+          heading={
+            scanNew.queued
+              ? scanNew.added
+                ? `Re-checked ${scanNew.added} ${scanNew.added === 1 ? "product that changed" : "products that changed"}`
+                : "Nothing queued to re-check"
+              : scanNew.added
+                ? `Scanned ${scanNew.added} new ${scanNew.added === 1 ? "product" : "products"}`
+                : "No new products since the last scan"
+          }
+        >
+          {scanNew.added && !scanNew.queued ? (
             <s-paragraph>
               {scanNew.findings} {scanNew.findings === 1 ? "finding" : "findings"} added to the list.
+            </s-paragraph>
+          ) : null}
+          {scanNew.held ? (
+            <s-paragraph>
+              {scanNew.held} more {scanNew.held === 1 ? "is" : "are"} waiting: the product limit of your plan is reached.
             </s-paragraph>
           ) : null}
         </s-banner>

@@ -1,4 +1,5 @@
 import prisma from "../db.server";
+import { ensureDailySnapshot } from "./snapshots.server";
 
 // One row per scan. Findings, the rule summary and the list of checks that ran are stored as
 // JSON strings so the overview can render instantly without re-reading the catalog.
@@ -17,8 +18,11 @@ export async function saveScan(shop, result) {
       names: JSON.stringify(result.names || []),
       catalogTotal: result.catalogTotal ?? result.total,
       readAt: result.readAt ? new Date(result.readAt) : new Date(),
+      productIds: JSON.stringify(result.productIds || []),
     },
   });
+  // The first result saved on a day is that day's snapshot (clean streak, weekly digest).
+  await ensureDailySnapshot(shop, result);
   return toResult(row);
 }
 
@@ -68,6 +72,7 @@ function toResult(row) {
     catalogTotal: row.catalogTotal || row.total,
     truncated: (row.catalogTotal || row.total) > row.total, // a plan limit left products unscanned
     readAt: (row.readAt || row.createdAt).toISOString(), // when the catalog was read: new products are those added since
+    productIds: JSON.parse(row.productIds || "[]"), // every product the scan covers
     scannedAt: row.createdAt.toISOString(),
   };
 }

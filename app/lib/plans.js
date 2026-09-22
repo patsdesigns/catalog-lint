@@ -8,6 +8,8 @@ const NONE = {
   dictionary: false,
   ignores: false,
   newProductScans: false,
+  autoRescan: false,
+  weeklyDigest: false,
   customRules: false,
   vendorWhitelist: false,
 };
@@ -26,7 +28,7 @@ export const PLANS = [
     name: "Quick Clean",
     price: 10,
     productLimit: null,
-    features: { ...NONE, inlineEdits: true, export: true, dictionary: true, ignores: true, newProductScans: true },
+    features: { ...NONE, inlineEdits: true, export: true, dictionary: true, ignores: true, newProductScans: true, autoRescan: true, weeklyDigest: true },
     extras: [],
   },
   {
@@ -41,6 +43,8 @@ export const PLANS = [
       dictionary: true,
       ignores: true,
       newProductScans: true,
+      autoRescan: true,
+      weeklyDigest: true,
       customRules: true,
       vendorWhitelist: true,
     },
@@ -58,6 +62,8 @@ export const FEATURE_LABELS = {
   dictionary: "Spelling dictionary",
   ignores: "Ignore findings",
   newProductScans: "Scan newly added products",
+  autoRescan: "Automatic re-check when products change",
+  weeklyDigest: "Weekly email digest",
   customRules: "Custom metafield rules",
   vendorWhitelist: "Approved vendor list",
 };

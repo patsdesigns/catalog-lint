@@ -45,6 +45,7 @@ model Scan {
   names      String   @default("[]")
   catalogTotal Int    @default(0)
   readAt     DateTime?
+  productIds String   @default("[]")
   createdAt  DateTime @default(now())
 
   @@index([shop, createdAt])
@@ -119,4 +120,35 @@ model SupportMessage {
   createdAt DateTime @default(now())
 
   @@index([shop, createdAt])
+}
+
+// Products a webhook reported on Dust Off, waiting for the Scan New Products button.
+model PendingProduct {
+  id        Int      @id @default(autoincrement())
+  shop      String
+  productId String
+  created   Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@unique([shop, productId])
+}
+
+// One row per shop per day: the first saved result of the day (see app/lib/snapshots.server.js).
+model DailySnapshot {
+  id                   Int      @id @default(autoincrement())
+  shop                 String
+  date                 String
+  potentialProblems    Int
+  highSeverityProblems Int
+  fixed                Int
+  createdAt            DateTime @default(now())
+
+  @@unique([shop, date])
+}
+
+model DigestSettings {
+  shop      String   @id
+  enabled   Boolean  @default(false)
+  email     String   @default("")
+  updatedAt DateTime @updatedAt
 }

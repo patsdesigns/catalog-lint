@@ -45,6 +45,15 @@ api_version = "2026-10"
   uri = "/webhooks/app/scopes_update"
   topics = [ "app/scopes_update" ]
 
+  # Product changes keep the stored scan current (app/lib/events.server.js).
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/products/create"
+  topics = [ "products/create" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/products/update"
+  topics = [ "products/update" ]
+
   # Privacy (GDPR) webhooks, required for a public app; handled by app/routes/webhooks.compliance.jsx.
   [[webhooks.subscriptions]]
   uri = "/webhooks/compliance"

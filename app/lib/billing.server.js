@@ -25,6 +25,19 @@ export async function currentPlan(billing) {
   };
 }
 
+// The shop's plan from a webhook or background context, which has an Admin API client but no
+// billing helper: the active subscriptions are read directly.
+const SUBSCRIPTIONS_QUERY = `#graphql
+  query ActiveSubscriptions { currentAppInstallation { activeSubscriptions { name status test } } }
+`;
+export async function planForShop(graphql) {
+  const response = await graphql(SUBSCRIPTIONS_QUERY);
+  const { data } = await response.json();
+  const active = (data?.currentAppInstallation?.activeSubscriptions || []).filter((s) => s.status === "ACTIVE" && (BILLING_TEST || !s.test));
+  const sub = active.find((s) => PAID_PLANS.some((p) => p.name === s.name));
+  return (sub && PAID_PLANS.find((p) => p.name === sub.name)) || DEFAULT_PLAN;
+}
+
 // The shop's plan for a request: a paid plan with an active subscription, or Dust Off.
 export async function getCurrentPlan(request) {
   const { billing } = await authenticate.admin(request);

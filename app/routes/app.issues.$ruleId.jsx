@@ -219,7 +219,7 @@ function FindingRow({ f, columns, features, onSave, onLearn, onIgnore, onUndo, b
                 <s-text-area
                   label={fieldLabel}
                   labelAccessibilityVisibility="exclusive"
-                  rows={2}
+                  rows={edit.field === "descriptionHtml" ? 5 : 2}
                   placeholder={edit.hint || "Type a value"}
                   value={value}
                   onInput={(e) => setValue(e.target.value)}

@@ -4,6 +4,8 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { startScan, advanceJob, refreshAfter } from "../lib/rescan.server";
 import { countProducts, createdSince, scanNewProducts } from "../lib/scan.server";
+import { pendingCount, scanPendingProducts } from "../lib/events.server";
+import { cleanStreak } from "../lib/snapshots.server";
 import { undoFix, recentFixes, fixedCount } from "../lib/fixes.server";
 import { latestScan, scanHistory, saveScan } from "../lib/scans.server";
 import { currentPlan } from "../lib/billing.server";
@@ -26,7 +28,9 @@ async function loadState(shop) {
   ]);
   // The home page shows counts, never findings: those can run to megabytes on a big catalog and
   // belong to the issue pages. checkCount is for the first-run page before any scan is stored.
-  const summary = result ? { ...result, findings: undefined, open: result.findings.length } : null;
+  const summary = result
+    ? { ...result, findings: undefined, productIds: undefined, open: result.findings.length, high: result.findings.filter((f) => f.severity === "high").length }
+    : null;
   return { result: summary, history, fixes, fixedWeek, fixedTotal, checkCount: RULE_CATALOG.length };
 }
 
@@ -38,7 +42,10 @@ export async function loader({ request }) {
   const state = await loadState(session.shop);
   // Products added since the catalog was last read, for the Scan New Products button and its hint.
   const newProducts = state.result && !job ? await countNewProducts(admin.graphql, state.result.readAt) : 0;
-  return { ...state, job, plan, newProducts };
+  // Products webhooks queued (Dust Off), and the clean streak when nothing high is open.
+  const pending = state.result ? await pendingCount(session.shop) : 0;
+  const streak = state.result && state.result.high === 0 ? await cleanStreak(session.shop) : 0;
+  return { ...state, job, plan, newProducts, pending, streak };
 }
 
 async function countNewProducts(graphql, since) {
@@ -63,13 +70,20 @@ export async function action({ request }) {
       job = await startScan(admin.graphql, session.shop, plan.productLimit);
     }
     if (intent === "scanNew") {
-      if (!plan.features.newProductScans) {
-        return { ok: false, error: `Scanning newly added products is part of the ${planFor("newProductScans").name} plan and up. Upgrade in Plans.` };
-      }
       const latest = await latestScan(session.shop);
-      const next = latest ? await scanNewProducts(admin.graphql, session.shop, latest) : null;
-      if (next) await saveScan(session.shop, next);
-      scanNew = { added: next?.added || 0, findings: next?.addedFindings || 0 };
+      if (!latest) {
+        scanNew = { added: 0, findings: 0 };
+      } else if (plan.features.newProductScans) {
+        // Paid plans: anything a webhook queued, then everything added since the catalog was last read.
+        const queued = await scanPendingProducts(admin.graphql, session.shop, latest, plan);
+        const next = await scanNewProducts(admin.graphql, session.shop, queued?.next || latest);
+        if (next) await saveScan(session.shop, next);
+        scanNew = { added: (next?.added || 0) + (queued?.scanned || 0), findings: next?.addedFindings || 0 };
+      } else {
+        // Dust Off: only the products webhooks queued, within the product limit.
+        const queued = await scanPendingProducts(admin.graphql, session.shop, latest, plan);
+        scanNew = { added: queued?.scanned || 0, findings: 0, held: queued?.held || 0, queued: true };
+      }
     }
     if (intent === "undo") {
       undo = await undoFix(admin.graphql, session.shop, form.get("batchId"));
@@ -222,7 +236,7 @@ function Trend({ history }) {
 
 // The summary: how many potential problems the last scan left and how many problems the app has
 // fixed, either side of a divider. Below 640px of card width the two stack.
-function Summary({ result, history, fixedWeek, fixedTotal, checksOn, checksTotal, newProducts }) {
+function Summary({ result, history, fixedWeek, fixedTotal, checksOn, checksTotal, newProducts, streak }) {
   const open = result.open || 0;
   const previous = history && history.length >= 2 ? history[history.length - 2].open : null;
   const delta = previous == null ? 0 : open - previous;
@@ -248,6 +262,15 @@ function Summary({ result, history, fixedWeek, fixedTotal, checksOn, checksTotal
               }
               hint={open ? `In ${n(affected)} of ${products}, from ${n(result.rules.length)} ${result.rules.length === 1 ? "check" : "checks"}` : "Nothing to fix"}
             >
+              {result.high === 0 ? (
+                // The clean streak: consecutive daily snapshots with nothing high open.
+                <s-stack direction="inline" gap="small-200" alignItems="center">
+                  <s-icon type="check-circle" tone="success" />
+                  <s-text color="subdued">
+                    {streak > 0 ? `No high severity problems for ${streak} ${streak === 1 ? "day" : "days"}` : "No high severity problems"}
+                  </s-text>
+                </s-stack>
+              ) : null}
               <Trend history={history} />
             </Figure>
             <s-box display={HERO_DIVIDER_DISPLAY}>
@@ -590,7 +613,7 @@ function RecentFixes({ fixes, onUndo, busy, showPanel }) {
 // Remembered per browser: whether the cards list every passed check or just the count.
 const SHOW_PASSED_KEY = "catalog-lint:show-passed";
 
-function Overview({ result, history, fixes, fixedWeek, fixedTotal, plan, newProducts, onSelect, onUndo, busy }) {
+function Overview({ result, history, fixes, fixedWeek, fixedTotal, plan, newProducts, streak, onSelect, onUndo, busy }) {
   const [filter, setFilter] = useState(null);
   const [showPassed, setShowPassed] = useState(false);
   const checks = result.checks || [];
@@ -615,7 +638,7 @@ function Overview({ result, history, fixes, fixedWeek, fixedTotal, plan, newProd
 
   return (
     <>
-      <Summary result={result} history={history} fixedWeek={fixedWeek} fixedTotal={fixedTotal} checksOn={checksOn} checksTotal={checks.length} newProducts={newProducts} />
+      <Summary result={result} history={history} fixedWeek={fixedWeek} fixedTotal={fixedTotal} checksOn={checksOn} checksTotal={checks.length} newProducts={newProducts} streak={streak} />
 
       {newProducts > 0 && !plan.features.newProductScans ? (
         // The free plan can only run a full scan; the paid plans get a Scan New Products button.
@@ -726,7 +749,7 @@ export default function Index() {
   const data = fetcher.data;
   // The loader is revalidated after every action and while a background scan runs, so it is the
   // source of truth for the page; the fetcher's data only carries the action's notices.
-  const { result, history, fixes, fixedWeek, fixedTotal, job, checkCount, plan, newProducts } = initial;
+  const { result, history, fixes, fixedWeek, fixedTotal, job, checkCount, plan, newProducts, pending, streak } = initial;
   const revalidator = useRevalidator();
   const scanning = job?.status === "running";
 
@@ -751,16 +774,21 @@ export default function Index() {
       <s-button slot="primary-action" variant="primary" onClick={runScan} loading={busy || undefined} disabled={scanning || undefined}>
         {scanning ? "Scanning…" : result ? "Scan Again" : "Run Full Scan"}
       </s-button>
-      {result && plan.features.newProductScans ? (
-        // Only the products added since the last read: quick, and it leaves the rest of the scan as is.
+      {result && (plan.features.newProductScans || pending > 0) ? (
+        // Paid plans: the products added since the last read (webhooks handle changes as they happen).
+        // Dust Off: the products webhooks queued, once there are any.
         <s-button
           slot="secondary-actions"
           onClick={runScanNew}
           loading={scanningNew || undefined}
-          disabled={busy || scanning || !newProducts || undefined}
-          accessibilityLabel={newProducts ? `Scan ${newProducts} new products` : "No new products to scan"}
+          disabled={busy || scanning || (!newProducts && !pending) || undefined}
+          accessibilityLabel={plan.features.newProductScans ? (newProducts ? `Scan ${newProducts} new products` : "No new products to scan") : `Re-check ${pending} changed products`}
         >
-          {newProducts ? `Scan New Products (${newProducts})` : "Scan New Products"}
+          {plan.features.newProductScans
+            ? newProducts
+              ? `Scan New Products (${newProducts})`
+              : "Scan New Products"
+            : `Scan Changed Products (${pending})`}
         </s-button>
       ) : null}
 
@@ -778,6 +806,7 @@ export default function Index() {
           fixedTotal={fixedTotal}
           plan={plan}
           newProducts={newProducts}
+          streak={streak}
           onSelect={openIssue}
           onUndo={runUndo}
           busy={busy}

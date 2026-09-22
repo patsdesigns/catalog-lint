@@ -10,17 +10,19 @@ import { refreshAfter } from "../lib/rescan.server";
 import { PASS_LABELS } from "../lib/checkLabels";
 import { FAMILIES, TIERS } from "../lib/checkGroups";
 import { currentPlan } from "../lib/billing.server";
+import { getDigestSettings, saveDigestSettings, sendDigest } from "../lib/digest.server";
 import { planFor } from "../lib/plans";
 
 export async function loader({ request }) {
   const { session, billing } = await authenticate.admin(request);
   const { plan } = await currentPlan(billing);
-  const [words, ignores, settings] = await Promise.all([
+  const [words, ignores, settings, digest] = await Promise.all([
     listWords(session.shop),
     getIgnores(session.shop),
     getSettings(session.shop),
+    getDigestSettings(session.shop),
   ]);
-  return { words, ignores: ignores.map((i) => ({ ...i, createdAt: i.createdAt.toISOString() })), settings, rules: RULE_CATALOG, plan };
+  return { words, ignores: ignores.map((i) => ({ ...i, createdAt: i.createdAt.toISOString() })), settings, rules: RULE_CATALOG, plan, digest };
 }
 
 export async function action({ request }) {
@@ -33,6 +35,24 @@ export async function action({ request }) {
   // dictionary has its own page (app.dictionary.jsx).
   if (intent === "removeIgnore" && !allowed.ignores) {
     return { ok: false, error: `Ignored findings are part of the ${planFor("ignores").name} plan and up.` };
+  }
+  if (intent === "saveDigest" || intent === "sendTestDigest") {
+    if (!allowed.weeklyDigest) return { ok: false, error: `The weekly email is part of the ${planFor("weeklyDigest").name} plan and up.` };
+    const email = String(form.get("email") || "").trim();
+    const valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+    if (intent === "saveDigest") {
+      const enabled = form.get("enabled") === "true";
+      if (enabled && !valid) return { ok: false, error: "Enter an email address to turn the weekly email on." };
+      await saveDigestSettings(session.shop, { enabled, email });
+      return { ok: true, digestSaved: true };
+    }
+    if (!valid) return { ok: false, error: "Enter an email address to send the test to." };
+    try {
+      await sendDigest(session.shop, email);
+      return { ok: true, testSent: email };
+    } catch (err) {
+      return { ok: false, error: err.message || String(err) };
+    }
   }
   if (intent === "removeIgnore") await removeIgnore(session.shop, form.get("id"));
   if (intent === "saveSettings") {
@@ -70,7 +90,7 @@ function UpgradeSection({ heading, feature, what, slot }) {
 }
 
 export default function Settings() {
-  const { words, ignores, settings, rules: checks, plan } = useLoaderData();
+  const { words, ignores, settings, rules: checks, plan, digest } = useLoaderData();
   const features = plan.features;
   const fetcher = useFetcher();
   const busy = fetcher.state !== "idle";
@@ -112,6 +132,8 @@ export default function Settings() {
   const runningCount = checks.length - off.size;
 
   const [whitelist, setWhitelist] = useState(settings.vendorWhitelist.join("\n"));
+  const [digestEnabled, setDigestEnabled] = useState(digest.enabled);
+  const [digestEmail, setDigestEmail] = useState(digest.email);
   const [rules, setRules] = useState(settings.metafieldRules);
   const [draft, setDraft] = useState({ key: "", productType: "", pattern: "" });
 
@@ -131,7 +153,7 @@ export default function Settings() {
   return (
     <s-page heading="Settings">
       {fetcher.data && !fetcher.data.ok ? (
-        <s-banner tone="critical" heading="Not included in your plan">
+        <s-banner tone="critical" heading="Something went wrong">
           <s-paragraph>{fetcher.data.error}</s-paragraph>
         </s-banner>
       ) : null}
@@ -276,6 +298,30 @@ export default function Settings() {
       </s-section>
       ) : (
         <UpgradeSection slot="aside" heading="Dictionary" feature="dictionary" what="The spelling dictionary is" />
+      )}
+
+      {features.weeklyDigest ? (
+      <s-section slot="aside" heading="Weekly Email">
+        <s-stack gap="base">
+          <s-paragraph>
+            A summary every week: potential problems, the change since last week and the five issues to start with.
+          </s-paragraph>
+          <s-switch label="Send the weekly email" checked={digestEnabled || undefined} onInput={(e) => setDigestEnabled(e.target.checked)}></s-switch>
+          <s-text-field label="Email address" type="email" placeholder="you@example.com" value={digestEmail} onInput={(e) => setDigestEmail(e.target.value)}></s-text-field>
+          <s-stack direction="inline" gap="small">
+            <s-button variant="primary" onClick={() => submit({ intent: "saveDigest", enabled: String(digestEnabled), email: digestEmail })} disabled={busy || undefined}>
+              Save
+            </s-button>
+            <s-button onClick={() => submit({ intent: "sendTestDigest", email: digestEmail })} disabled={busy || !digestEmail.trim() || undefined}>
+              Send test email
+            </s-button>
+          </s-stack>
+          {fetcher.data?.ok && fetcher.data.testSent ? <s-text color="subdued">Test email sent to {fetcher.data.testSent}.</s-text> : null}
+          {fetcher.data?.ok && fetcher.data.digestSaved ? <s-text color="subdued">Saved.</s-text> : null}
+        </s-stack>
+      </s-section>
+      ) : (
+        <UpgradeSection slot="aside" heading="Weekly Email" feature="weeklyDigest" what="The weekly email is" />
       )}
 
       {features.ignores ? (
