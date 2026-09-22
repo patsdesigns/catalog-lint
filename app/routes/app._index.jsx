@@ -11,6 +11,7 @@ import { applyEdit } from "../lib/edits.server";
 import { RULE_CATALOG } from "../lib/rules.server";
 import { CATEGORIES, categoryOf } from "../lib/categories";
 import { PASS_LABELS, SETUP_LABELS } from "../lib/checkLabels";
+import { timeAgo, adminUrl, truncate } from "../lib/format";
 
 // ---------- server ----------
 
@@ -149,21 +150,6 @@ function ruleLabel(id) {
 function splitLabel(label) {
   const m = /^(.*\S)\s+(\([^()]*\))$/.exec(label);
   return m ? { main: m[1], aside: m[2] } : { main: label, aside: "" };
-}
-function adminUrl(gid) {
-  return `shopify://admin/products/${gid.split("/").pop()}`;
-}
-function truncate(text, n) {
-  const t = String(text ?? "");
-  return t.length > n ? `${t.slice(0, n)}...` : t;
-}
-function timeAgo(iso) {
-  const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins} min ago`;
-  const hours = Math.round(mins / 60);
-  if (hours < 24) return `${hours} h ago`;
-  return `${Math.round(hours / 24)} d ago`;
 }
 // Passing-state sentence for a rule: "Passes when every product has a description."
 function passesWhen(ruleId, fallback) {
@@ -671,7 +657,17 @@ function RecentFixes({ fixes, onUndo, busy, showPanel }) {
         {fixes.map((f) => (
           <s-table-row key={f.batchId}>
             <s-table-cell><s-text fontVariantNumeric="tabular-nums">{f.count}</s-text></s-table-cell>
-            <s-table-cell><s-text>{ruleLabel(f.ruleId)}</s-text></s-table-cell>
+            <s-table-cell>
+              {/* One product: its name. Several: a link to the batch page, where each can be undone alone. */}
+              <s-stack gap="small-500">
+                <s-text>{f.label || ruleLabel(f.ruleId)}</s-text>
+                {f.productCount === 1 ? (
+                  <s-text color="subdued">{truncate(f.productTitle, 70)}</s-text>
+                ) : f.productCount > 1 ? (
+                  <s-link href={`/app/fixes/${f.batchId}`}>{f.productCount} products</s-link>
+                ) : null}
+              </s-stack>
+            </s-table-cell>
             <s-table-cell><s-text color="subdued">{timeAgo(f.at)}</s-text></s-table-cell>
             <s-table-cell>
               <s-button

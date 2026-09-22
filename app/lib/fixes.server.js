@@ -1,3 +1,4 @@
+import { RULE_CATALOG } from "./rules.server";
 import { randomUUID } from "node:crypto";
 import prisma from "../db.server";
 import { fetchProductsByIds } from "./scan.server";
@@ -129,9 +130,10 @@ export async function applyFix(graphql, shop, ruleId, findings) {
   return { ...result, batchId: entries.length ? batchId : null, productIds: [...new Set(entries.map((e) => e.productId))] };
 }
 
-export async function undoFix(graphql, shop, batchId) {
+// Reverts a batch, or only one product of it when productId is given.
+export async function undoFix(graphql, shop, batchId, productId = null) {
   const entries = await prisma.fixLog.findMany({
-    where: { shop, batchId, undone: false },
+    where: { shop, batchId, undone: false, ...(productId ? { productId } : {}) },
   });
   const result = { undone: 0, errors: [] };
 
@@ -146,6 +148,8 @@ export async function undoFix(graphql, shop, batchId) {
   return { ...result, productIds: [...new Set(entries.map((e) => e.productId))] };
 }
 
+// The latest batches still in place. A batch that touched one product carries its title; the
+// batch page (fixBatch) lists the products of bigger ones.
 export async function recentFixes(shop, limit = 5) {
   const rows = await prisma.fixLog.groupBy({
     by: ["batchId", "ruleId"],
@@ -155,12 +159,73 @@ export async function recentFixes(shop, limit = 5) {
     orderBy: { _max: { createdAt: "desc" } },
     take: limit,
   });
-  return rows.map((r) => ({
-    batchId: r.batchId,
-    ruleId: r.ruleId,
-    count: r._count._all,
-    at: r._max.createdAt.toISOString(),
-  }));
+  const perProduct = rows.length
+    ? await prisma.fixLog.groupBy({
+        by: ["batchId", "productId"],
+        where: { shop, undone: false, batchId: { in: rows.map((r) => r.batchId) } },
+        _max: { title: true },
+      })
+    : [];
+  const titles = new Map();
+  for (const p of perProduct) {
+    if (!titles.has(p.batchId)) titles.set(p.batchId, []);
+    titles.get(p.batchId).push(p._max.title || "");
+  }
+  return rows.map((r) => {
+    const products = titles.get(r.batchId) || [];
+    return {
+      batchId: r.batchId,
+      ruleId: r.ruleId,
+      label: fixLabel(r.ruleId),
+      count: r._count._all,
+      productCount: products.length,
+      productTitle: products.length === 1 ? products[0] : null,
+      at: r._max.createdAt.toISOString(),
+    };
+  });
+}
+
+// One batch still in place: its products, each with how many changes and which fields, or null
+// once everything in it has been undone.
+export async function fixBatch(shop, batchId) {
+  const entries = await prisma.fixLog.findMany({
+    where: { shop, batchId, undone: false },
+    select: { ruleId: true, productId: true, title: true, field: true, createdAt: true },
+    orderBy: { id: "asc" },
+  });
+  if (!entries.length) return null;
+  const products = new Map();
+  for (const e of entries) {
+    const p = products.get(e.productId) || { productId: e.productId, title: e.title, changes: 0, fields: [] };
+    p.changes += 1;
+    if (!p.fields.includes(e.field)) p.fields.push(e.field);
+    products.set(e.productId, p);
+  }
+  return {
+    batchId,
+    ruleId: entries[0].ruleId,
+    label: fixLabel(entries[0].ruleId),
+    count: entries.length,
+    at: entries[0].createdAt.toISOString(),
+    products: [...products.values()].sort((a, b) => a.title.localeCompare(b.title)),
+  };
+}
+
+// What a fix is called in the Recent Fixes card and on its page: a short name for the bulk fixes,
+// the check label for saved edits.
+const FIX_NAMES = {
+  vendor_casing: "Vendor spelling",
+  missing_weight: "Shipping weight",
+  missing_alt_text: "Image alt text",
+  compare_at_not_higher: "Sale price",
+  zero_price: "Price",
+  missing_sku: "SKU",
+  duplicate_sku: "Duplicate SKU",
+};
+export function fixLabel(ruleId) {
+  if (FIX_NAMES[ruleId]) return FIX_NAMES[ruleId];
+  const rule = RULE_CATALOG.find((r) => r.id === ruleId);
+  return rule ? rule.label : ruleId === "edit" ? "Edit" : ruleId.replace(/_/g, " ");
 }
 
 // Fixes still in place (bulk fixes and saved edits alike): within the last `days`, or ever.
