@@ -42,16 +42,17 @@ export async function action({ request }) {
     const valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
     if (intent === "saveDigest") {
       const enabled = form.get("enabled") === "true";
-      if (enabled && !valid) return { ok: false, error: "Enter an email address to turn the weekly email on." };
+      if (enabled && !valid) return { ok: false, digest: "save", error: "Enter an email address to turn the weekly email on." };
       await saveDigestSettings(session.shop, { enabled, email });
       return { ok: true, digestSaved: true };
     }
-    if (!valid) return { ok: false, error: "Enter an email address to send the test to." };
+    if (!valid) return { ok: false, digest: "test", error: "Enter an email address to send the test to." };
     try {
       await sendDigest(session.shop, email);
       return { ok: true, testSent: email };
     } catch (err) {
-      return { ok: false, error: err.message || String(err) };
+      // Reported inside the Weekly Email card, where the button is, not in the page banner.
+      return { ok: false, digest: "test", error: err.message || String(err) };
     }
   }
   if (intent === "removeIgnore") await removeIgnore(session.shop, form.get("id"));
@@ -152,7 +153,7 @@ export default function Settings() {
 
   return (
     <s-page heading="Settings">
-      {fetcher.data && !fetcher.data.ok ? (
+      {fetcher.data && !fetcher.data.ok && !fetcher.data.digest ? (
         <s-banner tone="critical" heading="Something went wrong">
           <s-paragraph>{fetcher.data.error}</s-paragraph>
         </s-banner>
@@ -316,6 +317,11 @@ export default function Settings() {
               Send test email
             </s-button>
           </s-stack>
+          {fetcher.data && !fetcher.data.ok && fetcher.data.digest ? (
+            <s-banner tone="critical" heading={fetcher.data.digest === "test" ? "The test email was not sent" : "Not saved"}>
+              <s-paragraph>{fetcher.data.error}</s-paragraph>
+            </s-banner>
+          ) : null}
           {fetcher.data?.ok && fetcher.data.testSent ? <s-text color="subdued">Test email sent to {fetcher.data.testSent}.</s-text> : null}
           {fetcher.data?.ok && fetcher.data.digestSaved ? <s-text color="subdued">Saved.</s-text> : null}
         </s-stack>

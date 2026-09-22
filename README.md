@@ -30,6 +30,11 @@ The database is SQLite at `prisma/dev.sqlite`. Migrations run with `npm run setu
    - `NODE_ENV=production`.
    - `BILLING_TEST`: `false` for real charges. Unset, production means real charges and anything else means test charges, which are the only kind a development store accepts.
    - `SUPPORT_WEBHOOK_URL` (optional): support form messages are also posted here as JSON with a `text` field, which suits a Slack incoming webhook, Zapier or Make.
+   - `RESEND_API_KEY`: the weekly email is sent with [Resend](https://resend.com). Without a key, Send test email in Settings reports that the key is missing and nothing is sent.
+   - `DIGEST_FROM` (optional): the sender, such as `TidyUp <hello@yourdomain.com>`, once that domain is verified in Resend. Unset, the Resend onboarding sender is used, which only delivers to the address of the Resend account.
+   - `CRON_SECRET`: the scheduler on the host calls `GET /cron/digest` once a week with this value as a bearer token or an `X-Cron-Secret` header. Unset, the route answers 503 and no weekly email goes out.
+
+   In development, put any of these in a `.env` file at the project root: the Shopify CLI loads it when `npm run dev` starts, so restart the dev server after changing it.
 3. Put the hosted URL in `shopify.app.production.toml` (`application_url` and `redirect_urls`), then `npm run deploy -- -c production` to push the config, the app name and the webhook subscriptions to Shopify. The plain `shopify.app.toml` is the localhost development config and carries no webhook subscriptions, because a localhost session cannot register them.
 
 ## Billing and plans
