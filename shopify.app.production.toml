@@ -1,5 +1,6 @@
-# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
-
+# Production configuration: deploy with `npm run deploy -- -c production`.
+# Set application_url and redirect_urls to the hosted app before deploying. Webhook subscriptions
+# live here and not in shopify.app.toml because a localhost dev session cannot register them.
 client_id = "a4108e281b2a36735a7df89a42fef412"
 application_url = "https://example.com"
 embedded = true
@@ -36,8 +37,18 @@ type = "multi_line_text_field"
 [webhooks]
 api_version = "2026-10"
 
-  # Webhook subscriptions are in shopify.app.production.toml: a localhost dev session cannot
-  # register webhook URIs, and the CLI refuses to start when it tries. Handlers: app/routes/webhooks.*.jsx.
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/app/uninstalled"
+  topics = [ "app/uninstalled" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/app/scopes_update"
+  topics = [ "app/scopes_update" ]
+
+  # Privacy (GDPR) webhooks, required for a public app; handled by app/routes/webhooks.compliance.jsx.
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/compliance"
+  compliance_topics = [ "customers/data_request", "customers/redact", "shop/redact" ]
 
 [auth]
 redirect_urls = [ "https://example.com/api/auth" ]

@@ -30,7 +30,7 @@ The database is SQLite at `prisma/dev.sqlite`. Migrations run with `npm run setu
    - `NODE_ENV=production`.
    - `BILLING_TEST`: `false` for real charges. Unset, production means real charges and anything else means test charges, which are the only kind a development store accepts.
    - `SUPPORT_WEBHOOK_URL` (optional): support form messages are also posted here as JSON with a `text` field, which suits a Slack incoming webhook, Zapier or Make.
-3. Put the hosted URL in `shopify.app.toml` (`application_url` and `redirect_urls`), then `npm run deploy` to push the config, the app name and the webhook subscriptions to Shopify.
+3. Put the hosted URL in `shopify.app.production.toml` (`application_url` and `redirect_urls`), then `npm run deploy -- -c production` to push the config, the app name and the webhook subscriptions to Shopify. The plain `shopify.app.toml` is the localhost development config and carries no webhook subscriptions, because a localhost session cannot register them.
 
 ## Billing and plans
 
@@ -38,7 +38,7 @@ Plans are defined once in `app/lib/plans.js`: name, price, product limit and fea
 
 ## Webhooks
 
-`shopify.app.toml` subscribes to `app/uninstalled`, `app/scopes_update` and the three privacy topics (`customers/data_request`, `customers/redact`, `shop/redact`). The handlers are in `app/routes/webhooks.*.jsx`; `shop/redact` deletes everything stored for the shop. Webhooks reach the app only when it is hosted at a public URL.
+`shopify.app.production.toml` subscribes to `app/uninstalled`, `app/scopes_update` and the three privacy topics (`customers/data_request`, `customers/redact`, `shop/redact`). The handlers are in `app/routes/webhooks.*.jsx`; `shop/redact` deletes everything stored for the shop. Webhooks reach the app only when it is hosted at a public URL.
 
 ## Layout
 
