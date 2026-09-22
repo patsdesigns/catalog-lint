@@ -136,7 +136,6 @@ export function withFindings(latest, findings, settings, ignoredDelta = 0) {
   const summary = summarizeFindings(latest.total, findings, settings);
   return {
     ...summary,
-    atRisk: { ...summary.atRisk, currency: latest.atRisk?.currency || null },
     findings,
     names: latest.names || [],
     catalogTotal: latest.catalogTotal || latest.total,

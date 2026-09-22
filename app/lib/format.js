@@ -43,15 +43,3 @@ export function timeAgo(iso) {
   if (hours < 24) return `${hours} h ago`;
   return `${Math.round(hours / 24)} d ago`;
 }
-
-// "$1,234" or "CA$1,234": whole units in the store currency, en-US digits. Without a currency, the
-// bare number.
-export function formatMoney(amount, currency) {
-  const value = Math.round(Number(amount) || 0);
-  if (!currency) return value.toLocaleString("en-US");
-  try {
-    return new Intl.NumberFormat("en-US", { style: "currency", currency, maximumFractionDigits: 0 }).format(value);
-  } catch {
-    return `${value.toLocaleString("en-US")} ${currency}`;
-  }
-}

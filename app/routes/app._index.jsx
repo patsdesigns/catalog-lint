@@ -150,8 +150,6 @@ const HEADER_COLUMNS = "@container (inline-size <= 900px) 1fr, 11fr 9fr";
 const STAT_COLUMNS = "@container (inline-size <= 480px) 1fr, 176px 1fr";
 // A Start here row: rank, issue and area, finding count, action.
 const START_COLUMNS = "auto 1fr auto auto";
-// Revenue at risk: what each contributing check means, short enough for one line.
-const RISK_LABELS = { zero_price: "no price", price_below_cost: "priced below cost", not_published: "not visible on store", active_no_stock: "out of stock", missing_image: "no image" };
 const BLURB_COLUMNS = "@container (inline-size <= 700px) 1fr, 1fr 1fr 1fr";
 
 // "Description has junk (raw URL, empty tags, spam phrases)" -> the label and its aside, so the aside
@@ -239,7 +237,7 @@ const STAT_STYLE = { fontSize: "32px", lineHeight: 1, fontWeight: 650, letterSpa
 const FILL_COLUMN = { height: "100%", display: "flex", flexDirection: "column", justifyContent: "space-between", gap: "16px" };
 function Stat({ label, value, text, badge, children }) {
   return (
-    <s-grid gridTemplateColumns={STAT_COLUMNS} gap="base" alignItems="center">
+    <s-grid gridTemplateColumns={STAT_COLUMNS} gap="base" alignItems="start">
       <s-stack gap="small-200">
         <s-text color="subdued">{label}</s-text>
         <s-stack direction="inline" gap="small" alignItems="center">
@@ -291,8 +289,8 @@ function Trend({ history }) {
   );
 }
 
-// The summary: three compact tiles stacked, potential problems, problems fixed and revenue at risk,
-// with the last scan and the checks running at the bottom. Beside Start here in the header.
+// The summary: two compact tiles stacked, potential problems and problems fixed, with the last
+// scan and the checks running at the bottom. Beside Start here in the header.
 function Summary({ result, history, fixedWeek, fixedTotal, checksOn, checksTotal, newProducts, streak, locked }) {
   const open = result.open || 0;
   const lockedFindings = result.rules.filter((r) => locked.includes(r.category)).reduce((sum, r) => sum + r.count, 0);
@@ -301,9 +299,6 @@ function Summary({ result, history, fixedWeek, fixedTotal, checksOn, checksTotal
   const affected = Math.max(0, result.total - result.clean);
   const n = (v) => (v || 0).toLocaleString("en-US");
   const products = `${n(result.total)} ${result.total === 1 ? "product" : "products"}`;
-  // Revenue at risk: results saved before it was recorded carry a computed one (scans.server.js).
-  const atRisk = result.atRisk || { products: 0, amount: 0, currency: null, byRule: {} };
-  const riskTop = Object.entries(atRisk.byRule || {}).sort((a, b) => b[1] - a[1]);
   const lastScan = `Last scan ${timeAgo(result.scannedAt)} · ${products}${result.ignoredCount ? ` · ${n(result.ignoredCount)} ignored` : ""}${newProducts ? ` · ${n(newProducts)} added since` : ""}`;
   return (
     <s-section accessibilityLabel="Catalog summary">
@@ -346,28 +341,6 @@ function Summary({ result, history, fixedWeek, fixedTotal, checksOn, checksTotal
               <s-link href="/app/fixes">Recent fixes</s-link>
               {fixedTotal ? " · every fix can be undone there" : ""}
             </s-text>
-          </Stat>
-          <s-divider></s-divider>
-          {/* The count of products, not an amount: a product with no price would add nothing to one. */}
-          <Stat label="Revenue at risk" value={atRisk.products}>
-            <s-text color="subdued">
-              {atRisk.products
-                ? `${atRisk.products === 1 ? "Product that cannot" : "Products that cannot"} sell or cannot be found`
-                : "Every product can be bought and found"}
-            </s-text>
-            {riskTop.length ? (
-              // Every check behind it, biggest first, each a link to its issue page.
-              <s-text color="subdued">
-                {riskTop.map(([ruleId, count], i) => (
-                  <Fragment key={ruleId}>
-                    {i ? " · " : ""}
-                    <s-link href={`/app/issues/${ruleId}`}>
-                      {n(count)} {RISK_LABELS[ruleId] || ruleId.replace(/_/g, " ")}
-                    </s-link>
-                  </Fragment>
-                ))}
-              </s-text>
-            ) : null}
           </Stat>
           </s-stack>
         </s-query-container>
