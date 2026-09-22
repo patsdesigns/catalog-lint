@@ -3,9 +3,11 @@ import { useFetcher, useLoaderData, useNavigate, useRevalidator } from "react-ro
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { startScan, advanceJob, refreshAfter } from "../lib/rescan.server";
+import { countProducts, createdSince, scanNewProducts } from "../lib/scan.server";
 import { undoFix, recentFixes, fixedCount } from "../lib/fixes.server";
-import { latestScan, scanHistory } from "../lib/scans.server";
+import { latestScan, scanHistory, saveScan } from "../lib/scans.server";
 import { currentPlan } from "../lib/billing.server";
+import { planFor } from "../lib/plans";
 import { RULE_CATALOG } from "../lib/rules.server";
 import { CATEGORIES, categoryOf } from "../lib/categories";
 import { PASS_LABELS, SETUP_LABELS } from "../lib/checkLabels";
@@ -33,7 +35,18 @@ export async function loader({ request }) {
   const { plan } = await currentPlan(billing);
   // Moves a background scan along (and finishes it) every time the page loads or polls.
   const job = await advanceJob(admin.graphql, session.shop, plan.productLimit);
-  return { ...(await loadState(session.shop)), job, plan };
+  const state = await loadState(session.shop);
+  // Products added since the catalog was last read, for the Scan New Products button and its hint.
+  const newProducts = state.result && !job ? await countNewProducts(admin.graphql, state.result.readAt) : 0;
+  return { ...state, job, plan, newProducts };
+}
+
+async function countNewProducts(graphql, since) {
+  try {
+    return since ? await countProducts(graphql, createdSince(since)) : 0;
+  } catch {
+    return 0; // a count that fails only hides the hint
+  }
 }
 
 export async function action({ request }) {
@@ -45,8 +58,18 @@ export async function action({ request }) {
   try {
     let undo = null;
     let job = null;
+    let scanNew = null;
     if (intent === "scan") {
       job = await startScan(admin.graphql, session.shop, plan.productLimit);
+    }
+    if (intent === "scanNew") {
+      if (!plan.features.newProductScans) {
+        return { ok: false, error: `Scanning newly added products is part of the ${planFor("newProductScans").name} plan and up. Upgrade in Plans.` };
+      }
+      const latest = await latestScan(session.shop);
+      const next = latest ? await scanNewProducts(admin.graphql, session.shop, latest) : null;
+      if (next) await saveScan(session.shop, next);
+      scanNew = { added: next?.added || 0, findings: next?.addedFindings || 0 };
     }
     if (intent === "undo") {
       undo = await undoFix(admin.graphql, session.shop, form.get("batchId"));
@@ -54,7 +77,7 @@ export async function action({ request }) {
       await refreshAfter(admin.graphql, session.shop, { kind: "products", ids: undo.productIds, full: true }, plan.productLimit);
     }
     const state = await loadState(session.shop);
-    return { ok: true, ...state, undo, job, plan };
+    return { ok: true, ...state, undo, scanNew, job, plan };
   } catch (err) {
     return { ok: false, error: err.message || String(err) };
   }
@@ -199,14 +222,14 @@ function Trend({ history }) {
 
 // The summary: how many potential problems the last scan left and how many problems the app has
 // fixed, either side of a divider. Below 640px of card width the two stack.
-function Summary({ result, history, fixedWeek, fixedTotal, checksOn, checksTotal }) {
+function Summary({ result, history, fixedWeek, fixedTotal, checksOn, checksTotal, newProducts }) {
   const open = result.open || 0;
   const previous = history && history.length >= 2 ? history[history.length - 2].open : null;
   const delta = previous == null ? 0 : open - previous;
   const affected = Math.max(0, result.total - result.clean);
   const n = (v) => (v || 0).toLocaleString("en-US");
   const products = `${n(result.total)} ${result.total === 1 ? "product" : "products"}`;
-  const lastScan = `Last scan ${timeAgo(result.scannedAt)} · ${products}${result.ignoredCount ? ` · ${n(result.ignoredCount)} ignored` : ""}`;
+  const lastScan = `Last scan ${timeAgo(result.scannedAt)} · ${products}${result.ignoredCount ? ` · ${n(result.ignoredCount)} ignored` : ""}${newProducts ? ` · ${n(newProducts)} added since` : ""}`;
   return (
     <s-section accessibilityLabel="Catalog summary">
       <s-query-container>
@@ -567,7 +590,7 @@ function RecentFixes({ fixes, onUndo, busy, showPanel }) {
 // Remembered per browser: whether the cards list every passed check or just the count.
 const SHOW_PASSED_KEY = "catalog-lint:show-passed";
 
-function Overview({ result, history, fixes, fixedWeek, fixedTotal, plan, onSelect, onUndo, busy }) {
+function Overview({ result, history, fixes, fixedWeek, fixedTotal, plan, newProducts, onSelect, onUndo, busy }) {
   const [filter, setFilter] = useState(null);
   const [showPassed, setShowPassed] = useState(false);
   const checks = result.checks || [];
@@ -592,7 +615,17 @@ function Overview({ result, history, fixes, fixedWeek, fixedTotal, plan, onSelec
 
   return (
     <>
-      <Summary result={result} history={history} fixedWeek={fixedWeek} fixedTotal={fixedTotal} checksOn={checksOn} checksTotal={checks.length} />
+      <Summary result={result} history={history} fixedWeek={fixedWeek} fixedTotal={fixedTotal} checksOn={checksOn} checksTotal={checks.length} newProducts={newProducts} />
+
+      {newProducts > 0 && !plan.features.newProductScans ? (
+        // The free plan can only run a full scan; the paid plans get a Scan New Products button.
+        <s-banner tone="info" heading={`${newProducts.toLocaleString("en-US")} ${newProducts === 1 ? "product" : "products"} added since your last scan`}>
+          <s-paragraph>
+            Scanning only what is new is part of the {planFor("newProductScans").name} plan. <s-link href="/app/plans">Upgrade</s-link>, or run
+            a full scan.
+          </s-paragraph>
+        </s-banner>
+      ) : null}
 
       {result.truncated ? (
         // The plan's product limit left products out of the scan.
@@ -693,7 +726,7 @@ export default function Index() {
   const data = fetcher.data;
   // The loader is revalidated after every action and while a background scan runs, so it is the
   // source of truth for the page; the fetcher's data only carries the action's notices.
-  const { result, history, fixes, fixedWeek, fixedTotal, job, checkCount, plan } = initial;
+  const { result, history, fixes, fixedWeek, fixedTotal, job, checkCount, plan, newProducts } = initial;
   const revalidator = useRevalidator();
   const scanning = job?.status === "running";
 
@@ -708,6 +741,8 @@ export default function Index() {
   const submit = (payload) => fetcher.submit(payload, { method: "post" });
   const runScan = () => submit({ intent: "scan" });
   const runUndo = (batchId) => submit({ intent: "undo", batchId });
+  const runScanNew = () => submit({ intent: "scanNew" });
+  const scanningNew = busy && fetcher.formData?.get("intent") === "scanNew";
   // Each check has a page of its own (app.issues.$ruleId.jsx) with the products it flagged.
   const openIssue = (ruleId) => navigate(`/app/issues/${ruleId}`);
 
@@ -716,6 +751,18 @@ export default function Index() {
       <s-button slot="primary-action" variant="primary" onClick={runScan} loading={busy || undefined} disabled={scanning || undefined}>
         {scanning ? "Scanning…" : result ? "Scan Again" : "Run Full Scan"}
       </s-button>
+      {result && plan.features.newProductScans ? (
+        // Only the products added since the last read: quick, and it leaves the rest of the scan as is.
+        <s-button
+          slot="secondary-actions"
+          onClick={runScanNew}
+          loading={scanningNew || undefined}
+          disabled={busy || scanning || !newProducts || undefined}
+          accessibilityLabel={newProducts ? `Scan ${newProducts} new products` : "No new products to scan"}
+        >
+          {newProducts ? `Scan New Products (${newProducts})` : "Scan New Products"}
+        </s-button>
+      ) : null}
 
       <Notices data={data} onUndo={runUndo} busy={busy} />
       <ScanProgress job={job} />
@@ -730,6 +777,7 @@ export default function Index() {
           fixedWeek={fixedWeek}
           fixedTotal={fixedTotal}
           plan={plan}
+          newProducts={newProducts}
           onSelect={openIssue}
           onUndo={runUndo}
           busy={busy}

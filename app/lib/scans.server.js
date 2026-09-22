@@ -16,6 +16,7 @@ export async function saveScan(shop, result) {
       checks: JSON.stringify(result.checks || []),
       names: JSON.stringify(result.names || []),
       catalogTotal: result.catalogTotal ?? result.total,
+      readAt: result.readAt ? new Date(result.readAt) : new Date(),
     },
   });
   return toResult(row);
@@ -66,6 +67,7 @@ function toResult(row) {
     names: JSON.parse(row.names || "[]"), // catalog names the title spell check trusts
     catalogTotal: row.catalogTotal || row.total,
     truncated: (row.catalogTotal || row.total) > row.total, // a plan limit left products unscanned
+    readAt: (row.readAt || row.createdAt).toISOString(), // when the catalog was read: new products are those added since
     scannedAt: row.createdAt.toISOString(),
   };
 }

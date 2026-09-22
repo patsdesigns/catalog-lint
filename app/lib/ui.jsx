@@ -58,7 +58,7 @@ export function Notices({ data, onUndo, busy }) {
       </s-banner>
     );
   }
-  const { fix, undo, edit, refresh } = data;
+  const { fix, undo, edit, refresh, scanNew } = data;
   return (
     <>
       {fix ? (
@@ -92,6 +92,15 @@ export function Notices({ data, onUndo, busy }) {
                 ? `${refresh.after} still open.`
                 : "All clear."}
           </s-paragraph>
+        </s-banner>
+      ) : null}
+      {scanNew ? (
+        <s-banner tone="success" heading={scanNew.added ? `Scanned ${scanNew.added} new ${scanNew.added === 1 ? "product" : "products"}` : "No new products since the last scan"}>
+          {scanNew.added ? (
+            <s-paragraph>
+              {scanNew.findings} {scanNew.findings === 1 ? "finding" : "findings"} added to the list.
+            </s-paragraph>
+          ) : null}
         </s-banner>
       ) : null}
       {edit && !edit.ok ? (

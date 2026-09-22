@@ -138,6 +138,7 @@ function withFindings(latest, findings, settings, ignoredDelta = 0) {
     findings,
     names: latest.names || [],
     catalogTotal: latest.catalogTotal || latest.total,
+    readAt: latest.readAt,
     ignoredCount: (latest.ignoredCount || 0) + ignoredDelta,
     scannedAt: new Date().toISOString(),
     durationMs: 0,

@@ -44,6 +44,7 @@ model Scan {
   checks     String   @default("[]")
   names      String   @default("[]")
   catalogTotal Int    @default(0)
+  readAt     DateTime?
   createdAt  DateTime @default(now())
 
   @@index([shop, createdAt])

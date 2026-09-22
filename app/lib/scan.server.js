@@ -60,7 +60,18 @@ const BY_IDS_QUERY = `#graphql
 export const BULK_QUERY = `{ products { edges { node { ${productFields(false)} } } } }`;
 
 const COUNT_QUERY = `#graphql
-  query ProductsCount { productsCount { count } }
+  query ProductsCount($query: String) { productsCount(query: $query) { count } }
+`;
+
+// Ids of the products created at or after a time, oldest first, for scanning what was added since
+// the catalog was last read.
+const NEW_IDS_QUERY = `#graphql
+  query NewProductIds($cursor: String, $query: String) {
+    products(first: 250, after: $cursor, query: $query, sortKey: CREATED_AT) {
+      nodes { id }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
 `;
 
 const START_BULK = `#graphql
@@ -168,9 +179,31 @@ export async function fetchPrimaryLocale(graphql) {
   }
 }
 
-export async function countProducts(graphql) {
-  const data = await graphqlJson(graphql, COUNT_QUERY);
+// The store's product count, or the count matching a product search query such as
+// created_at:>='2026-09-22T18:00:00Z'.
+export async function countProducts(graphql, query = null) {
+  const data = await graphqlJson(graphql, COUNT_QUERY, { query });
   return data.productsCount?.count ?? 0;
+}
+
+// A product search clause for everything created at or after an ISO time (to the second).
+export function createdSince(iso) {
+  return `created_at:>='${String(iso).slice(0, 19)}Z'`;
+}
+
+// Ids of products created at or after `since`, capped so one call never pulls a whole catalog.
+export async function fetchNewProductIds(graphql, since, cap = 2000) {
+  const ids = [];
+  let cursor = null;
+  const query = createdSince(since);
+  for (;;) {
+    const data = await graphqlJson(graphql, NEW_IDS_QUERY, { cursor, query });
+    const conn = data.products;
+    ids.push(...conn.nodes.map((n) => n.id));
+    if (ids.length >= cap || !conn.pageInfo.hasNextPage) break;
+    cursor = conn.pageInfo.endCursor;
+  }
+  return ids.slice(0, cap);
 }
 
 // Every product, page by page, or only the first `limit` of them (the plan's product limit).
@@ -292,6 +325,7 @@ export async function scanProducts(products, graphql, shop, startedAt = Date.now
     names,
     catalogTotal: Math.max(catalogTotal, products.length),
     truncated: catalogTotal > products.length,
+    readAt: new Date(startedAt).toISOString(),
     ignoredCount: all.length - findings.length,
     scannedAt: new Date().toISOString(),
     durationMs: Date.now() - startedAt,
@@ -328,8 +362,38 @@ export async function recheckProducts(graphql, shop, latest, ids, dropRuleId = n
     findings,
     names,
     catalogTotal: latest.catalogTotal || total,
+    readAt: latest.readAt,
     ignoredCount: latest.ignoredCount || 0,
     scannedAt: new Date().toISOString(),
     durationMs: Date.now() - started,
+  };
+}
+
+// Scans only the products added since the catalog was last read and merges them into the latest
+// scan: their findings join the list, the totals grow by their number, and the read time moves to
+// now. Catalog-wide rules are not re-run (a full scan does that). Returns null when nothing is new.
+export async function scanNewProducts(graphql, shop, latest) {
+  const started = Date.now();
+  const ids = await fetchNewProductIds(graphql, latest.readAt || latest.scannedAt);
+  if (!ids.length) return null;
+  const products = await fetchProductsByIds(graphql, ids);
+  const { speller, storeWords, ignored, settings, locale } = await scanContext(graphql, shop);
+  const names = latest.names || [];
+  const ctx = { speller, customWords: seedWords(products, storeWords), nameWords: new Set(names), settings, locale };
+  const fresh = runProductRules(products, ctx).filter((f) => !ignored.has(ignoreKey(f)));
+  const added = new Set(ids);
+  const findings = [...latest.findings.filter((f) => !added.has(f.productId)), ...fresh];
+  const total = latest.total + products.length;
+  return {
+    ...summarizeFindings(total, findings, settings),
+    findings,
+    names,
+    catalogTotal: (latest.catalogTotal || latest.total) + products.length,
+    readAt: new Date(started).toISOString(),
+    ignoredCount: latest.ignoredCount || 0,
+    scannedAt: new Date().toISOString(),
+    durationMs: Date.now() - started,
+    added: products.length,
+    addedFindings: fresh.length,
   };
 }
