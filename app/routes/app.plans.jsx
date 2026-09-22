@@ -78,7 +78,7 @@ const THREE_COLUMNS = "@container (inline-size > 900px) 1fr 1fr 1fr, (inline-siz
 const FOUR_COLUMNS = "@container (inline-size > 1000px) 1fr 1fr 1fr 1fr, (inline-size > 560px) and (inline-size <= 1000px) 1fr 1fr, 1fr";
 const FEATURE_ORDER = Object.keys(FEATURE_LABELS);
 
-function PlanCard({ plan, current, note, busy, onChoose }) {
+function PlanCard({ plan, current, note, claimed, busy, onChoose }) {
   const included = FEATURE_ORDER.filter((key) => plan.features[key] && !COMING_SOON.has(key));
   const later = FEATURE_ORDER.filter((key) => plan.features[key] && COMING_SOON.has(key));
   return (
@@ -93,6 +93,7 @@ function PlanCard({ plan, current, note, busy, onChoose }) {
           <s-text color="subdued">{plan.productLimit ? `Up to ${plan.productLimit.toLocaleString("en-US")} products` : "Unlimited products"}</s-text>
           <s-text color="subdued">{plan.areas.length === ALL_AREAS.length ? `All ${ALL_AREAS.length} check areas` : `${plan.areas.length} of ${ALL_AREAS.length} check areas`}</s-text>
           {note ? <s-text>{note}</s-text> : null}
+          {claimed ? <s-text color="subdued">{claimed}</s-text> : null}
         </s-stack>
         <s-unordered-list>
           <s-list-item>Full scan, fix-all buttons and undo</s-list-item>
@@ -125,8 +126,10 @@ export default function PlansPage() {
   const busy = fetcher.state !== "idle";
   const outcome = fetcher.data;
   const choose = (id) => fetcher.submit({ plan: id }, { method: "post" });
-  const cards = earlyBird.show ? [...plans, earlyBird.plan] : plans;
-  const offer = `First ${earlyBird.seats} stores get Deep Clean for $${earlyBird.plan.price} a month, ${earlyBird.claimed} of ${earlyBird.seats} claimed. Keep it as long as you stay subscribed.`;
+  // The offer sits right after the free plan; the subscription condition is a footnote under the cards.
+  const cards = earlyBird.show ? [plans[0], earlyBird.plan, ...plans.slice(1)] : plans;
+  const offer = `First ${earlyBird.seats} stores get Deep Clean for $${earlyBird.plan.price} a month*`;
+  const claimed = `${earlyBird.claimed} of ${earlyBird.seats} claimed`;
 
   return (
     <s-page heading="Plans" inlineSize="large">
@@ -160,12 +163,14 @@ export default function PlansPage() {
                   plan={plan}
                   current={plan.id === currentId}
                   note={plan.earlyBird ? offer : null}
+                  claimed={plan.earlyBird ? claimed : null}
                   busy={busy}
                   onChoose={choose}
                 />
               ))}
             </s-grid>
           </s-query-container>
+          {earlyBird.show ? <s-text color="subdued">* Keep it as long as you stay subscribed.</s-text> : null}
         </s-stack>
       </s-section>
     </s-page>
