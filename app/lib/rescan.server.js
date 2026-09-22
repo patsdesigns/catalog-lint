@@ -1,9 +1,9 @@
 // How the stored scan is kept current.
 //
 // A full scan reads the whole catalog: inline for small catalogs, through a background bulk
-// operation for large ones. After a merchant action (fix, undo, edit, ignore, learn) a small
-// catalog is simply rescanned; a large one is refreshed incrementally so that one edit never
-// waits on a full re-read.
+// operation for large ones. After a merchant action (fix, edit, ignore, learn) the stored scan is
+// refreshed incrementally whatever the catalog size, so a click never waits on a full re-read.
+// Only Refresh on an issue page and Undo ask for a full rescan, and only a small catalog gets one.
 
 import {
   SYNC_LIMIT,
@@ -75,7 +75,8 @@ export async function advanceJob(graphql, shop, limit = null) {
 // Brings the stored scan up to date after an action.
 //   { kind: "ignore", finding }            the finding the merchant chose to ignore
 //   { kind: "learn", word }                a word added to the dictionary
-//   { kind: "products", ids, ruleId }      products that were changed, and the rule acted on
+//   { kind: "products", ids, ruleId, full } products that were changed, and the rule acted on;
+//                                          full: rescan a small catalog instead of re-checking ids
 //   { kind: "settings" }                   checks were turned on or off
 //   { kind: "saved", key, batchId, value } an edit saved from an issue page: mark its finding
 //   { kind: "unsaved", key }               that edit was undone: clear the mark
@@ -107,8 +108,10 @@ export async function refreshAfter(graphql, shop, change, limit = null) {
     return;
   }
 
-  // Small catalogs: a full rescan is quick and keeps catalog-wide rules exact.
-  if (latest.total <= SYNC_LIMIT) {
+  // A small catalog is rescanned in full only when the change asks for it: exact for catalog-wide
+  // rules, but it costs a re-read of every product, so Ignore, Trust word, edits and fixes take the
+  // incremental path below instead.
+  if (change.full && latest.total <= SYNC_LIMIT) {
     await saveScan(shop, await scanCatalog(graphql, shop, limit));
     return;
   }

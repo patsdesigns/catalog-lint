@@ -21,7 +21,7 @@ export async function action({ request, params }) {
   const form = await request.formData();
   try {
     const undo = await undoFix(admin.graphql, session.shop, params.batchId, form.get("productId") || null);
-    if (undo.productIds.length) await refreshAfter(admin.graphql, session.shop, { kind: "products", ids: undo.productIds }, plan.productLimit);
+    if (undo.productIds.length) await refreshAfter(admin.graphql, session.shop, { kind: "products", ids: undo.productIds, full: true }, plan.productLimit);
     return { ok: true, undo };
   } catch (err) {
     return { ok: false, error: err.message || String(err) };

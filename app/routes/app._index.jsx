@@ -69,7 +69,7 @@ export async function action({ request }) {
         undo = await undoFix(admin.graphql, session.shop, form.get("batchId"));
         // From an issue page the undo only clears the row's saved mark; from the home page it re-checks.
         const finding = form.get("finding") ? JSON.parse(form.get("finding")) : null;
-        change = finding ? { kind: "unsaved", key: ignoreKey(finding) } : { kind: "products", ids: undo.productIds };
+        change = finding ? { kind: "unsaved", key: ignoreKey(finding) } : { kind: "products", ids: undo.productIds, full: true };
       }
       if (intent === "learn") {
         const word = form.get("word");
@@ -94,7 +94,7 @@ export async function action({ request }) {
         const latest = await latestScan(session.shop);
         const before = (latest?.findings || []).filter((f) => f.ruleId === ruleId);
         const ids = [...new Set(before.map((f) => f.productId))];
-        if (ids.length) await refreshAfter(admin.graphql, session.shop, { kind: "products", ids }, plan.productLimit);
+        if (ids.length) await refreshAfter(admin.graphql, session.shop, { kind: "products", ids, full: true }, plan.productLimit);
         const after = ((await latestScan(session.shop))?.findings || []).filter((f) => f.ruleId === ruleId).length;
         refresh = { ruleId, products: ids.length, before: before.length, after };
       }
