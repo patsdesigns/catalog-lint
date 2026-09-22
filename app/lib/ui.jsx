@@ -49,7 +49,7 @@ export function CategoryChip({ id, color = "base" }) {
 
 // Banners for the outcome of the last action: a bulk fix (with Undo), an undo, a refresh, a failed
 // save, or any error.
-export function Notices({ data, onUndo, busy }) {
+export function Notices({ data, onUndo, onRestore, busy }) {
   if (!data) return null;
   if (!data.ok) {
     return (
@@ -58,7 +58,7 @@ export function Notices({ data, onUndo, busy }) {
       </s-banner>
     );
   }
-  const { fix, undo, edit, refresh, scanNew } = data;
+  const { fix, undo, edit, refresh, scanNew, ignored, restored } = data;
   return (
     <>
       {fix ? (
@@ -117,6 +117,32 @@ export function Notices({ data, onUndo, busy }) {
               {scanNew.held} more {scanNew.held === 1 ? "is" : "are"} waiting: the product limit of your plan is reached.
             </s-paragraph>
           ) : null}
+        </s-banner>
+      ) : null}
+      {ignored ? (
+        <s-banner tone="success" heading={`${ignored.label} is ignored`}>
+          <s-stack direction="inline" gap="base" alignItems="center" justifyContent="space-between">
+            <s-paragraph>
+              {ignored.count ? `${ignored.count} ${ignored.count === 1 ? "finding" : "findings"} hidden. ` : ""}
+              This is a setting: the check is off in <s-link href="/app/settings">Settings</s-link> until you turn it back on there.
+            </s-paragraph>
+            {onRestore ? (
+              <s-button variant="secondary" onClick={() => onRestore(ignored.ruleId, ignored.scanId)} disabled={busy || undefined}>
+                Undo
+              </s-button>
+            ) : null}
+          </s-stack>
+        </s-banner>
+      ) : null}
+      {restored ? (
+        <s-banner tone="success" heading={`${restored.label} is back on`}>
+          <s-paragraph>
+            {restored.count !== null
+              ? `${restored.count} ${restored.count === 1 ? "finding is" : "findings are"} back in the list.`
+              : restored.rescan
+                ? "The catalog was scanned again."
+                : "It reports again on the next scan."}
+          </s-paragraph>
         </s-banner>
       ) : null}
       {edit && !edit.ok ? (

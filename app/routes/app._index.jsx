@@ -7,6 +7,7 @@ import { countProducts, createdSince, scanNewProducts } from "../lib/scan.server
 import { pendingCount, scanPendingProducts } from "../lib/events.server";
 import { cleanStreak } from "../lib/snapshots.server";
 import { undoFix, fixedCount } from "../lib/fixes.server";
+import { ignoreCheck, restoreCheck } from "../lib/checks.server";
 import { latestScan, scanHistory, saveScan } from "../lib/scans.server";
 import { currentPlan } from "../lib/billing.server";
 import { planFor, lockedAreas, allAreasPlan } from "../lib/plans";
@@ -67,6 +68,8 @@ export async function action({ request }) {
     let undo = null;
     let job = null;
     let scanNew = null;
+    let ignored = null;
+    let restored = null;
     if (intent === "scan") {
       job = await startScan(admin.graphql, session.shop, plan.productLimit);
     }
@@ -91,8 +94,15 @@ export async function action({ request }) {
       // A full rescan on a small catalog brings catalog-wide findings back for the reverted products.
       await refreshAfter(admin.graphql, session.shop, { kind: "products", ids: undo.productIds, full: true }, plan.productLimit);
     }
+    if (intent === "ignoreRule") {
+      // Quick ignore from a table row: the check goes off in Settings; the notice offers Undo.
+      ignored = await ignoreCheck(admin.graphql, session.shop, form.get("ruleId"), plan.productLimit);
+    }
+    if (intent === "restoreRule") {
+      restored = await restoreCheck(admin.graphql, session.shop, form.get("ruleId"), form.get("scanId"), plan.productLimit);
+    }
     const state = await loadState(session.shop);
-    return { ok: true, ...state, undo, scanNew, job, plan };
+    return { ok: true, ...state, undo, scanNew, job, plan, ignored, restored };
   } catch (err) {
     return { ok: false, error: err.message || String(err) };
   }
@@ -109,12 +119,14 @@ const START_HERE_ROWS = 5;
 // carry a grid with a fixed track. The tracks set each column's intrinsic minimum and maximum,
 // identical in every table, so the table algorithm puts every column boundary in the same place no
 // matter what the rows contain. The primary track has a range rather than one size, so the text
-// column is the one that takes the slack. The action track fits the Review and edit button.
+// column is the one that takes the slack. The action tracks fit the Review and edit and the
+// Ignore this check buttons.
 const OVERVIEW_TRACKS = {
   primary: "minmax(240px, 640px)",
   inline: "72px",
   numeric: "56px",
   action: "160px",
+  ignore: "148px",
 };
 // Each card splits into its table (about three quarters) and a side panel. Below ~1000px of card
 // width the panel moves under the table. (Unquoted minmax() breaks Polaris's responsive parser,
@@ -350,12 +362,13 @@ function IssueHeaderRow() {
       <ColumnHeader track="primary" listSlot="primary">Issue</ColumnHeader>
       <ColumnHeader track="inline" listSlot="inline">Severity</ColumnHeader>
       <ColumnHeader track="action" listSlot="secondary">Action</ColumnHeader>
+      <ColumnHeader track="ignore" listSlot="secondary">Ignore</ColumnHeader>
     </s-table-header-row>
   );
 }
 
 // One failing check. `showCategory` adds the section name under the label (for cross-section lists).
-function IssueRow({ rule, onSelect, showCategory }) {
+function IssueRow({ rule, onSelect, onIgnore, busy, showCategory }) {
   const { main, aside } = splitLabel(rule.label);
   const sub = aside || (showCategory ? categoryOf(rule.category).label : "");
   // The aside is context, but it is still part of the rule name for assistive tech.
@@ -390,6 +403,17 @@ function IssueRow({ rule, onSelect, showCategory }) {
           accessibilityLabel={`Review and edit: ${rule.label}`}
         >
           Review and edit
+        </s-button>
+      </s-table-cell>
+      <s-table-cell>
+        {/* Quick ignore: the check goes off in Settings, and the notice that follows can undo it. */}
+        <s-button
+          variant="tertiary"
+          onClick={() => onIgnore(rule.ruleId)}
+          disabled={busy || undefined}
+          accessibilityLabel={`Ignore this check: turn ${rule.label} off in Settings`}
+        >
+          Ignore this check
         </s-button>
       </s-table-cell>
     </s-table-row>
@@ -475,7 +499,7 @@ function CardBody({ table, panel }) {
 
 // The failing checks with the most weight across every section, so a merchant knows where to
 // begin: findings count times severity.
-function StartHere({ result, locked, onSelect, busy, showPanel }) {
+function StartHere({ result, locked, onSelect, onIgnore, busy, showPanel }) {
   const ranked = result.rules
     .filter((r) => !locked.includes(r.category))
     .sort((a, b) => SEVERITY_WEIGHT[b.severity] * b.count - SEVERITY_WEIGHT[a.severity] * a.count || b.count - a.count)
@@ -486,7 +510,7 @@ function StartHere({ result, locked, onSelect, busy, showPanel }) {
       <IssueHeaderRow />
       <s-table-body>
         {ranked.map((rule) => (
-          <IssueRow key={rule.ruleId} rule={rule} onSelect={onSelect} showCategory />
+          <IssueRow key={rule.ruleId} rule={rule} onSelect={onSelect} onIgnore={onIgnore} busy={busy} showCategory />
         ))}
       </s-table-body>
     </s-table>
@@ -551,7 +575,7 @@ function CategoryFilter({ result, locked, filter, onChange }) {
 // Severity / Action sit at the same x from card to card. The visible heading names the section (no
 // accessibilityLabel, which would add a second hidden heading to the outline). `checks` are this
 // category's non-failing checks; `showChecks` is false for scans saved before checks were recorded.
-function CategoryCard({ cat, rules, checks, showChecks, showPassed, locked, onSelect, busy }) {
+function CategoryCard({ cat, rules, checks, showChecks, showPassed, locked, onSelect, onIgnore, busy }) {
   const total = rules.reduce((n, r) => n + r.count, 0);
   if (locked) {
     // Behind the plan: the heading and the real count, one line, and a way to compare plans.
@@ -584,7 +608,7 @@ function CategoryCard({ cat, rules, checks, showChecks, showPassed, locked, onSe
         <IssueHeaderRow />
         <s-table-body>
           {rules.map((rule) => (
-            <IssueRow key={rule.ruleId} rule={rule} onSelect={onSelect} />
+            <IssueRow key={rule.ruleId} rule={rule} onSelect={onSelect} onIgnore={onIgnore} busy={busy} />
           ))}
         </s-table-body>
       </s-table>
@@ -614,7 +638,7 @@ function CategoryCard({ cat, rules, checks, showChecks, showPassed, locked, onSe
 // Remembered per browser: whether the cards list every passed check or just the count.
 const SHOW_PASSED_KEY = "catalog-lint:show-passed";
 
-function Overview({ result, history, fixedWeek, fixedTotal, plan, newProducts, streak, locked, onSelect, busy }) {
+function Overview({ result, history, fixedWeek, fixedTotal, plan, newProducts, streak, locked, onSelect, onIgnore, busy }) {
   const [filter, setFilter] = useState(null);
   const [showPassed, setShowPassed] = useState(false);
   const checks = result.checks || [];
@@ -671,14 +695,20 @@ function Overview({ result, history, fixedWeek, fixedTotal, plan, newProducts, s
           </s-stack>
         </s-section>
       ) : (
-        <StartHere result={result} locked={locked} onSelect={onSelect} busy={busy} showPanel={showChecks} />
+        <StartHere result={result} locked={locked} onSelect={onSelect} onIgnore={onIgnore} busy={busy} showPanel={showChecks} />
       )}
 
       <s-stack direction="inline" gap="base" alignItems="center" justifyContent="space-between">
         <CategoryFilter result={result} locked={locked} filter={filter} onChange={setFilter} />
-        {showChecks ? (
-          <s-switch label="Show passed checks" checked={showPassed || undefined} onInput={(e) => toggleShowPassed(e.target.checked)}></s-switch>
-        ) : null}
+        <s-stack direction="inline" gap="base" alignItems="center">
+          {/* Ignore this check, in every table, is the Settings switch for that check. */}
+          <s-text color="subdued">
+            Ignore this check turns it off in <s-link href="/app/settings">Settings</s-link>.
+          </s-text>
+          {showChecks ? (
+            <s-switch label="Show passed checks" checked={showPassed || undefined} onInput={(e) => toggleShowPassed(e.target.checked)}></s-switch>
+          ) : null}
+        </s-stack>
       </s-stack>
 
       {/* One card per product-page section with anything to show: findings, or checks that ran
@@ -688,7 +718,7 @@ function Overview({ result, history, fixedWeek, fixedTotal, plan, newProducts, s
         const rules = result.rules.filter((r) => r.category === cat.id);
         const catChecks = checks.filter((c) => c.category === cat.id && c.status !== "failed");
         if (rules.length === 0 && catChecks.length === 0) return null;
-        return <CategoryCard key={cat.id} cat={cat} rules={rules} checks={catChecks} showChecks={showChecks} showPassed={showPassed} locked={locked.includes(cat.id)} onSelect={onSelect} busy={busy} />;
+        return <CategoryCard key={cat.id} cat={cat} rules={rules} checks={catChecks} showChecks={showChecks} showPassed={showPassed} locked={locked.includes(cat.id)} onSelect={onSelect} onIgnore={onIgnore} busy={busy} />;
       })}
     </>
   );
@@ -763,6 +793,9 @@ export default function Index() {
   const submit = (payload) => fetcher.submit(payload, { method: "post" });
   const runScan = () => submit({ intent: "scan" });
   const runUndo = (batchId) => submit({ intent: "undo", batchId });
+  // Quick ignore from a table row, and its undo from the notice that follows.
+  const runIgnore = (ruleId) => submit({ intent: "ignoreRule", ruleId });
+  const runRestore = (ruleId, scanId) => submit({ intent: "restoreRule", ruleId, scanId: scanId ?? "" });
   const runScanNew = () => submit({ intent: "scanNew" });
   const scanningNew = busy && fetcher.formData?.get("intent") === "scanNew";
   // Each check has a page of its own (app.issues.$ruleId.jsx) with the products it flagged.
@@ -791,7 +824,7 @@ export default function Index() {
         </s-button>
       ) : null}
 
-      <Notices data={data} onUndo={runUndo} busy={busy} />
+      <Notices data={data} onUndo={runUndo} onRestore={runRestore} busy={busy} />
       <ScanProgress job={job} />
 
       {!result ? (
@@ -807,6 +840,7 @@ export default function Index() {
           streak={streak}
           locked={locked}
           onSelect={openIssue}
+          onIgnore={runIgnore}
           busy={busy}
         />
       )}

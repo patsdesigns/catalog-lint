@@ -34,6 +34,12 @@ export async function latestScan(shop) {
   return row ? toResult(row) : null;
 }
 
+// One stored result by id: the row that still holds the findings of an ignored check (checks.server.js).
+export async function scanById(shop, id) {
+  const row = await prisma.scan.findFirst({ where: { id: Number(id), shop } });
+  return row ? toResult(row) : null;
+}
+
 // The last few results, oldest first, each with its open-problem count. The count comes from the
 // small per-check summary rather than the findings JSON, which can run to megabytes on a big store.
 export async function scanHistory(shop, limit = 12) {

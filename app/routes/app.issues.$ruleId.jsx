@@ -8,7 +8,7 @@ import { latestScan } from "../lib/scans.server";
 import { addWord } from "../lib/dictionary.server";
 import { addIgnore, ignoreKey } from "../lib/ignores.server";
 import { applyEdit } from "../lib/edits.server";
-import { getSettings, saveSettings } from "../lib/settings.server";
+import { ignoreCheck } from "../lib/checks.server";
 import { RULE_CATALOG } from "../lib/rules.server";
 import { currentPlan } from "../lib/billing.server";
 import { planFor, areaLocked, allAreasPlan } from "../lib/plans";
@@ -59,10 +59,7 @@ export async function action({ request, params }) {
     if (intent === "disableRule") {
       // Ignoring a whole check turns it off in Settings, where its switch shows unchecked, and
       // drops its findings. Turning the switch back on brings it back on the next scan.
-      const current = await getSettings(session.shop);
-      const customDisabled = [...new Set([...current.disabledRules, ruleId])];
-      await saveSettings(session.shop, { ...current, preset: "custom", customDisabled });
-      await refreshAfter(admin.graphql, session.shop, { kind: "settings" }, plan.productLimit);
+      await ignoreCheck(admin.graphql, session.shop, ruleId, plan.productLimit);
       return { ok: true, disabledRule: ruleId };
     }
     if (intent === "fix") {

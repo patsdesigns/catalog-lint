@@ -132,7 +132,7 @@ export async function refreshAfter(graphql, shop, change, limit = null) {
   await saveScan(shop, next);
 }
 
-function withFindings(latest, findings, settings, ignoredDelta = 0) {
+export function withFindings(latest, findings, settings, ignoredDelta = 0) {
   return {
     ...summarizeFindings(latest.total, findings, settings),
     findings,
