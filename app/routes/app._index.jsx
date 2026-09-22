@@ -810,7 +810,7 @@ export default function Index() {
           slot="secondary-actions"
           onClick={runScanNew}
           loading={scanningNew || undefined}
-          disabled={busy || scanning || (!newProducts && !pending) || undefined}
+          disabled={busy || scanning || undefined}
           accessibilityLabel={plan.features.newProductScans ? (newProducts ? `Scan ${newProducts} new products` : "No new products to scan") : `Re-check ${pending} changed products`}
         >
           {plan.features.newProductScans
