@@ -162,3 +162,21 @@ model EarlyBirdClaim {
   subscriptionId String
   status         String   @default("active")
 }
+
+// A product metafield the merchant tracks: read with every product and checked like a field
+// (app/lib/metafields.server.js, rules.server.js trackedRules).
+model TrackedMetafield {
+  id          Int      @id @default(autoincrement())
+  shop        String
+  namespace   String
+  key         String
+  name        String
+  type        String
+  required    Boolean  @default(true)
+  unique      Boolean  @default(false)
+  pattern     String   @default("")
+  productType String   @default("")
+  createdAt   DateTime @default(now())
+
+  @@unique([shop, namespace, key])
+}

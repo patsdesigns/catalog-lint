@@ -5,7 +5,8 @@ import { authenticate } from "../shopify.server";
 import { listWords } from "../lib/dictionary.server";
 import { getIgnores } from "../lib/ignores.server";
 import { getSettings, saveSettings } from "../lib/settings.server";
-import { RULE_CATALOG } from "../lib/rules.server";
+import { ruleCatalog } from "../lib/rules.server";
+import { trackMetafield, updateTracked, untrackMetafield, fetchDefinitions } from "../lib/metafields.server";
 import { refreshAfter } from "../lib/rescan.server";
 import { PASS_LABELS } from "../lib/checkLabels";
 import { FAMILIES, TIERS } from "../lib/checkGroups";
@@ -14,16 +15,19 @@ import { getDigestSettings, saveDigestSettings, sendDigest } from "../lib/digest
 import { planFor } from "../lib/plans";
 
 export async function loader({ request }) {
-  const { session, billing } = await authenticate.admin(request);
+  const { admin, session, billing } = await authenticate.admin(request);
   const { plan } = await currentPlan(billing);
-  const [words, ignores, settings, digest] = await Promise.all([
+  const [words, ignores, settings, digest, definitions] = await Promise.all([
     listWords(session.shop),
     getIgnores(session.shop),
     getSettings(session.shop),
     getDigestSettings(session.shop),
+    // The store's product metafield definitions, for the Tracked metafields dropdown.
+    plan.features.customRules ? fetchDefinitions(admin.graphql).catch(() => []) : [],
   ]);
-  // Only the count: the ignored findings have their own page (app.ignored.jsx).
-  return { words, ignoreCount: ignores.length, settings, rules: RULE_CATALOG, plan, digest };
+  // Only the count: the ignored findings have their own page (app.ignored.jsx). The checks list
+  // includes the checks of the tracked metafields.
+  return { words, ignoreCount: ignores.length, settings, rules: ruleCatalog(settings), plan, digest, tracked: settings.trackedMetafields, definitions };
 }
 
 export async function action({ request }) {
@@ -53,13 +57,25 @@ export async function action({ request }) {
       return { ok: false, digest: "test", error: err.message || String(err) };
     }
   }
+  if (intent === "trackMetafield" || intent === "updateTracked" || intent === "untrackMetafield") {
+    if (!allowed.customRules) return { ok: false, error: `Tracked metafields are part of the ${planFor("customRules").name} plan and up.` };
+    try {
+      if (intent === "trackMetafield") await trackMetafield(session.shop, { namespace: form.get("namespace"), key: form.get("key"), name: form.get("name"), type: form.get("type") });
+      if (intent === "updateTracked") await updateTracked(session.shop, form.get("id"), { required: form.get("required") === "true", unique: form.get("unique") === "true", pattern: form.get("pattern"), productType: form.get("productType") });
+      if (intent === "untrackMetafield") await untrackMetafield(session.shop, form.get("id"));
+    } catch (err) {
+      return { ok: false, error: err.message || String(err) };
+    }
+    // Checks that no longer exist (a metafield untracked, a setting turned off) lose their findings now.
+    await refreshAfter(admin.graphql, session.shop, { kind: "settings" });
+    return { ok: true };
+  }
   if (intent === "saveSettings") {
     const current = await getSettings(session.shop);
     const next = { ...current };
     if (form.has("vendorWhitelist") && allowed.vendorWhitelist) {
       next.vendorWhitelist = String(form.get("vendorWhitelist")).split("\n").map((v) => v.trim()).filter(Boolean);
     }
-    if (form.has("metafieldRules") && allowed.customRules) next.metafieldRules = JSON.parse(form.get("metafieldRules"));
     if (form.has("preset")) next.preset = form.get("preset");
     // Flipping any single check means the merchant has their own list.
     if (form.has("disabledRules")) {
@@ -75,6 +91,88 @@ export async function action({ request }) {
 
 const FAMILY_COLUMNS = "@container (inline-size > 720px) 1fr 1fr, 1fr";
 
+// One tracked metafield: its settings, saved together, and Remove.
+function TrackedRow({ t, busy, onSave, onRemove }) {
+  const [form, setForm] = useState({ required: t.required, unique: t.unique, pattern: t.pattern, productType: t.productType });
+  const changed = form.required !== t.required || form.unique !== t.unique || form.pattern !== t.pattern || form.productType !== t.productType;
+  const set = (patch) => setForm({ ...form, ...patch });
+  return (
+    <s-box padding="small" paddingInline="base" border="base" borderRadius="base">
+      <s-stack gap="small">
+        <s-stack gap="none">
+          <s-text type="strong">{t.name}</s-text>
+          <s-text color="subdued">{t.fullKey} · {t.type}</s-text>
+        </s-stack>
+        <s-switch label="Required" details="Flag products where it is empty." checked={form.required || undefined} onInput={(e) => set({ required: e.target.checked })}></s-switch>
+        <s-switch label="Unique across products" details="Flag a value that more than one product has." checked={form.unique || undefined} onInput={(e) => set({ unique: e.target.checked })}></s-switch>
+        <s-text-field label="Value pattern" details={"Optional. A regular expression the value must match, for example ^[A-Z]{3}-\\d{4}$."} placeholder="Any value" value={form.pattern} onInput={(e) => set({ pattern: e.target.value })}></s-text-field>
+        <s-text-field label="Only for product type" details="Leave empty to check every product." placeholder="Wheels" value={form.productType} onInput={(e) => set({ productType: e.target.value })}></s-text-field>
+        <s-stack direction="inline" gap="small">
+          <s-button variant="primary" onClick={() => onSave(t.id, form)} disabled={!changed || busy || undefined}>Save</s-button>
+          <s-button variant="tertiary" onClick={() => onRemove(t.id)} disabled={busy || undefined} accessibilityLabel={`Stop tracking ${t.name}`}>Remove</s-button>
+        </s-stack>
+      </s-stack>
+    </s-box>
+  );
+}
+
+// The Tracked metafields card: a dropdown of the store's product metafield definitions not yet
+// tracked, and the tracked ones with their settings.
+function TrackedMetafields({ tracked, definitions, busy, submit }) {
+  const available = definitions.filter((d) => !tracked.some((t) => t.namespace === d.namespace && t.key === d.key));
+  const [pick, setPick] = useState("");
+  const chosen = available.find((d) => d.id === pick) || available[0] || null;
+  const add = () => {
+    if (!chosen) return;
+    submit({ intent: "trackMetafield", namespace: chosen.namespace, key: chosen.key, name: chosen.name, type: chosen.type });
+    setPick("");
+  };
+  return (
+    <s-section slot="aside" heading={`Tracked Metafields (${tracked.length})`}>
+      <s-stack gap="base">
+        <s-paragraph>
+          Product metafields read with every product and checked like any other field: missing, duplicated, misspelled, a
+          placeholder, too long or with stray spaces. Each also shows as a column on every issue page.
+        </s-paragraph>
+        {available.length ? (
+          <s-stack gap="small">
+            <s-select
+              label="Product metafield"
+              value={chosen ? chosen.id : ""}
+              onInput={(e) => setPick(e.target.value)}
+              onChange={(e) => setPick(e.target.value)}
+            >
+              {available.map((d) => (
+                <s-option key={d.id} value={d.id}>
+                  {d.name} · {d.namespace}.{d.key} · {d.type}
+                </s-option>
+              ))}
+            </s-select>
+            <s-stack direction="inline" gap="small">
+              <s-button variant="primary" onClick={add} disabled={busy || !chosen || undefined}>Add</s-button>
+            </s-stack>
+          </s-stack>
+        ) : (
+          <s-text color="subdued">
+            {definitions.length ? "Every product metafield definition is tracked." : "No product metafield definitions yet. Create one in Shopify under Settings, Custom data, Products."}
+          </s-text>
+        )}
+        {tracked.map((t) => (
+          <TrackedRow
+            key={t.id}
+            t={t}
+            busy={busy}
+            onSave={(id, form) => submit({ intent: "updateTracked", id: String(id), required: String(form.required), unique: String(form.unique), pattern: form.pattern, productType: form.productType })}
+            onRemove={(id) => submit({ intent: "untrackMetafield", id: String(id) })}
+          />
+        ))}
+        {tracked.length === 0 ? <s-text color="subdued">Nothing tracked yet.</s-text> : null}
+        {tracked.length ? <s-text color="subdued">A newly tracked metafield is read on the next scan.</s-text> : null}
+      </s-stack>
+    </s-section>
+  );
+}
+
 // Stands in for a section the plan does not include. `what` names the feature with its verb.
 function UpgradeSection({ heading, feature, what, slot }) {
   const plan = planFor(feature);
@@ -88,7 +186,7 @@ function UpgradeSection({ heading, feature, what, slot }) {
 }
 
 export default function Settings() {
-  const { words, ignoreCount, settings, rules: checks, plan, digest } = useLoaderData();
+  const { words, ignoreCount, settings, rules: checks, plan, digest, tracked, definitions } = useLoaderData();
   const features = plan.features;
   const fetcher = useFetcher();
   const busy = fetcher.state !== "idle";
@@ -103,7 +201,7 @@ export default function Settings() {
   const [expanded, setExpanded] = useState(() => new Set());
   const [query, setQuery] = useState("");
   const q = query.trim().toLowerCase();
-  const matches = (r) => !q || r.label.toLowerCase().includes(q) || (PASS_LABELS[r.id] || "").toLowerCase().includes(q);
+  const matches = (r) => !q || r.label.toLowerCase().includes(q) || (r.passLabel || PASS_LABELS[r.id] || "").toLowerCase().includes(q);
   const visibleCount = checks.filter(matches).length;
 
   function saveOff(next) {
@@ -132,20 +230,9 @@ export default function Settings() {
   const [whitelist, setWhitelist] = useState(settings.vendorWhitelist.join("\n"));
   const [digestEnabled, setDigestEnabled] = useState(digest.enabled);
   const [digestEmail, setDigestEmail] = useState(digest.email);
-  const [rules, setRules] = useState(settings.metafieldRules);
-  const [draft, setDraft] = useState({ key: "", productType: "", pattern: "" });
 
   function saveWhitelist() {
     submit({ intent: "saveSettings", vendorWhitelist: whitelist });
-  }
-  function saveRules(next) {
-    setRules(next);
-    submit({ intent: "saveSettings", metafieldRules: JSON.stringify(next) });
-  }
-  function addRule() {
-    if (!draft.key.trim()) return;
-    saveRules([...rules, { key: draft.key.trim(), productType: draft.productType.trim(), pattern: draft.pattern.trim() }]);
-    setDraft({ key: "", productType: "", pattern: "" });
   }
 
   return (
@@ -208,7 +295,7 @@ export default function Settings() {
                             <s-switch
                               key={r.id}
                               label={r.label}
-                              details={`${TIERS[r.tier]?.label || "Recommended"} · ${PASS_LABELS[r.id] || ""}`}
+                              details={`${TIERS[r.tier]?.label || "Recommended"} · ${r.passLabel || PASS_LABELS[r.id] || ""}`}
                               checked={!off.has(r.id) || undefined}
                               onInput={(e) => toggleCheck(r.id, e.target.checked)}
                             ></s-switch>
@@ -248,40 +335,9 @@ export default function Settings() {
       )}
 
       {features.customRules ? (
-      <s-section slot="aside" heading={`Metafield Rules (${rules.length})`}>
-        <s-stack gap="base">
-          <s-paragraph>
-            Require a metafield on every product or only on one product type, and optionally check its value against a
-            pattern.
-          </s-paragraph>
-          {/* Stacked, not inline: the right column is too narrow for three fields in a row. */}
-          <s-stack gap="small">
-            <s-text-field label="Metafield key" details="namespace.key, for example custom.fitment" placeholder="namespace.key" value={draft.key} onInput={(e) => setDraft({ ...draft, key: e.target.value })}></s-text-field>
-            <s-text-field label="Only for product type" details="Leave empty to apply to every product." placeholder="Wheels" value={draft.productType} onInput={(e) => setDraft({ ...draft, productType: e.target.value })}></s-text-field>
-            <s-text-field label="Value pattern" details={"Optional. A regular expression the value must match, for example ^[A-Z]{3}-\\d{4}$ for codes like ABC-1234."} placeholder="Any value" value={draft.pattern} onInput={(e) => setDraft({ ...draft, pattern: e.target.value })}></s-text-field>
-            <s-stack direction="inline" gap="small">
-              <s-button variant="primary" onClick={addRule} disabled={busy || !draft.key.trim() || undefined}>Add rule</s-button>
-            </s-stack>
-          </s-stack>
-          {rules.map((r, i) => (
-            <s-box key={`${r.key}-${i}`} padding="small" border="base" borderRadius="base">
-              <s-stack direction="inline" gap="base" alignItems="center" justifyContent="space-between">
-                <s-stack gap="none">
-                  <s-text type="strong">{r.key}</s-text>
-                  <s-text color="subdued">
-                    {r.productType ? `Product type ${r.productType}` : "Every product"}
-                    {r.pattern ? ` · must match ${r.pattern}` : ""}
-                  </s-text>
-                </s-stack>
-                <s-button variant="tertiary" onClick={() => saveRules(rules.filter((_, j) => j !== i))} disabled={busy || undefined}>Remove</s-button>
-              </s-stack>
-            </s-box>
-          ))}
-          {rules.length === 0 ? <s-text color="subdued">No rules yet.</s-text> : null}
-        </s-stack>
-      </s-section>
+        <TrackedMetafields tracked={tracked} definitions={definitions} busy={busy} submit={submit} />
       ) : (
-        <UpgradeSection slot="aside" heading="Metafield Rules" feature="customRules" what="Custom metafield rules are" />
+        <UpgradeSection slot="aside" heading="Tracked Metafields" feature="customRules" what="Tracked metafields are" />
       )}
 
       {features.dictionary ? (

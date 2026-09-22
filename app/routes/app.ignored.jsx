@@ -5,7 +5,8 @@ import { authenticate } from "../shopify.server";
 import { getIgnores, removeIgnore } from "../lib/ignores.server";
 import { refreshAfter } from "../lib/rescan.server";
 import { shopTimeZone } from "../lib/shop.server";
-import { RULE_CATALOG } from "../lib/rules.server";
+import { ruleCatalog } from "../lib/rules.server";
+import { getSettings } from "../lib/settings.server";
 import { currentPlan } from "../lib/billing.server";
 import { planFor } from "../lib/plans";
 import { adminUrl, formatWhen, timeAgo, truncate } from "../lib/format";
@@ -19,8 +20,8 @@ const MAX_ROWS = 200;
 export async function loader({ request }) {
   const { admin, session, billing } = await authenticate.admin(request);
   const { plan } = await currentPlan(billing);
-  const [rows, timeZone] = await Promise.all([getIgnores(session.shop), shopTimeZone(admin.graphql, session.shop)]);
-  const labels = new Map(RULE_CATALOG.map((r) => [r.id, r.label]));
+  const [rows, timeZone, settings] = await Promise.all([getIgnores(session.shop), shopTimeZone(admin.graphql, session.shop), getSettings(session.shop)]);
+  const labels = new Map(ruleCatalog(settings).map((r) => [r.id, r.label]));
   const ignores = rows.map((i) => ({
     id: i.id,
     productId: i.productId,

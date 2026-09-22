@@ -9,7 +9,8 @@ import { addWord } from "../lib/dictionary.server";
 import { addIgnore, ignoreKey } from "../lib/ignores.server";
 import { applyEdit } from "../lib/edits.server";
 import { ignoreCheck } from "../lib/checks.server";
-import { RULE_CATALOG } from "../lib/rules.server";
+import { findRule } from "../lib/rules.server";
+import { getSettings } from "../lib/settings.server";
 import { currentPlan } from "../lib/billing.server";
 import { planFor, areaLocked, allAreasPlan } from "../lib/plans";
 import { categoryOf } from "../lib/categories";
@@ -22,14 +23,17 @@ import { TONE, CategoryChip, Notices, passesWhen } from "../lib/ui";
 export async function loader({ request, params }) {
   const { session, billing } = await authenticate.admin(request);
   const { plan } = await currentPlan(billing);
-  const result = await latestScan(session.shop);
+  const [result, settings] = await Promise.all([latestScan(session.shop), getSettings(session.shop)]);
   const rule = result?.rules.find((r) => r.ruleId === params.ruleId) || null;
+  const known = findRule(params.ruleId, settings);
   // A check in an area the plan does not cover has no page: Plans explains what covers it.
-  const category = rule?.category || RULE_CATALOG.find((r) => r.id === params.ruleId)?.category;
+  const category = rule?.category || known?.category;
   if (category && areaLocked(plan, category)) throw redirect("/app/plans");
   const findings = rule ? result.findings.filter((f) => f.ruleId === rule.ruleId) : [];
-  const label = rule?.label || RULE_CATALOG.find((r) => r.id === params.ruleId)?.label || "Check";
-  return { rule, findings, plan, label };
+  const label = rule?.label || known?.label || "Check";
+  // Tracked metafields show as columns, except the one this check is about.
+  const tracked = (settings.trackedMetafields || []).filter((t) => !params.ruleId.endsWith(`:${t.fullKey}`)).map((t) => ({ key: t.fullKey, name: t.name }));
+  return { rule, findings, plan, label, tracked };
 }
 
 export async function action({ request, params }) {
@@ -44,7 +48,7 @@ export async function action({ request, params }) {
     return { ok: false, error: `${gate[1]} part of the ${planFor(gate[0]).name} plan and up. Upgrade in Plans.` };
   }
   // Fixes and edits in an area the plan does not cover are refused here as well.
-  const category = RULE_CATALOG.find((r) => r.id === ruleId)?.category;
+  const category = findRule(ruleId, await getSettings(session.shop))?.category;
   if ((intent === "fix" || intent === "edit") && category && areaLocked(plan, category)) {
     return { ok: false, error: `${categoryOf(category).label} findings are part of the ${allAreasPlan().name} plan. Compare plans to unlock them.` };
   }
@@ -176,7 +180,7 @@ function SkuCell({ f }) {
 // The controls of a row: an input when a value can be typed, Quick apply when a safe suggestion
 // exists, a small select for rows with alternatives, or View Product when nothing can be edited
 // here; then Trust word and Ignore when the plan includes them.
-function FindingRow({ f, columns, features, onSave, onLearn, onIgnore, onUndo, busy }) {
+function FindingRow({ f, columns, tracked, features, onSave, onLearn, onIgnore, onUndo, busy }) {
   const edit = f.edit;
   const [value, setValue] = useState(edit?.suggested ?? "");
   const [choice, setChoice] = useState(0);
@@ -224,6 +228,15 @@ function FindingRow({ f, columns, features, onSave, onLearn, onIgnore, onUndo, b
           <s-grid gridTemplateColumns="minmax(96px, max-content)"><SkuCell f={f} /></s-grid>
         </s-table-cell>
       ) : null}
+      {tracked.map((t) => (
+        // The tracked metafields, so a merchant fixing one thing sees the others at a glance.
+        <s-table-cell key={t.key}>
+          {/* A track of its own, like the SKU, so a code does not wrap at its hyphens. */}
+          <s-grid gridTemplateColumns="minmax(96px, max-content)">
+            {f.meta?.[t.key] ? <s-text>{truncate(f.meta[t.key], 40)}</s-text> : <s-text color="subdued">Empty</s-text>}
+          </s-grid>
+        </s-table-cell>
+      ))}
       <s-table-cell>
         <s-grid gridTemplateColumns={CURRENT_TRACK}>{currentCell}</s-grid>
       </s-table-cell>
@@ -342,7 +355,7 @@ function FindingRow({ f, columns, features, onSave, onLearn, onIgnore, onUndo, b
   );
 }
 
-function Detail({ rule, findings, features, onSave, onLearn, onIgnore, onUndo, onBack, busy }) {
+function Detail({ rule, findings, tracked, features, onSave, onLearn, onIgnore, onUndo, onBack, busy }) {
   const [query, setQuery] = useState("");
   const q = query.trim().toLowerCase();
   const filtered = q
@@ -368,7 +381,7 @@ function Detail({ rule, findings, features, onSave, onLearn, onIgnore, onUndo, o
             <s-badge tone={TONE[rule.severity]}>{rule.severity} severity</s-badge>
             <CategoryChip id={rule.category} color="subdued" />
           </s-stack>
-          <s-text color="subdued">{passesWhen(rule.ruleId, rule.label)} {help}</s-text>
+          <s-text color="subdued">{rule.passLabel ? `Passes when ${rule.passLabel}.` : passesWhen(rule.ruleId, rule.label)} {help}</s-text>
         </s-stack>
       </s-box>
       <s-query-container>
@@ -378,6 +391,9 @@ function Detail({ rule, findings, features, onSave, onLearn, onIgnore, onUndo, o
           <s-table-header-row>
             <s-table-header listSlot="primary">Product</s-table-header>
             {columns.sku ? <s-table-header listSlot="labeled">SKU</s-table-header> : null}
+            {tracked.map((t) => (
+              <s-table-header key={t.key} listSlot="labeled">{t.name}</s-table-header>
+            ))}
             <s-table-header listSlot="labeled">Current value</s-table-header>
             <s-table-header listSlot="labeled">{columns.fix ? "Fix" : "Actions"}</s-table-header>
           </s-table-header-row>
@@ -395,6 +411,7 @@ function Detail({ rule, findings, features, onSave, onLearn, onIgnore, onUndo, o
                 key={`${f.productId}-${f.variantId || ""}-${f.word || ""}-${i}`}
                 f={f}
                 columns={columns}
+                tracked={tracked}
                 onSave={onSave}
                 onLearn={onLearn}
                 onIgnore={onIgnore}
@@ -437,7 +454,7 @@ function AllClear({ onBack }) {
 // ---------- page ----------
 
 export default function IssuePage() {
-  const { rule, findings, plan, label } = useLoaderData();
+  const { rule, findings, plan, label, tracked } = useLoaderData();
   const fetcher = useFetcher();
   const navigate = useNavigate();
   const busy = fetcher.state !== "idle";
@@ -486,6 +503,7 @@ export default function IssuePage() {
         <Detail
           rule={rule}
           findings={findings}
+          tracked={tracked || []}
           onSave={saveEdit}
           onLearn={learnWord}
           onIgnore={ignoreFinding}

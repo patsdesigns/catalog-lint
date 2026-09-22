@@ -83,7 +83,7 @@ export const FEATURE_LABELS = {
   newProductScans: "Scan newly added products",
   autoRescan: "Automatic re-check when products change",
   weeklyDigest: "Weekly email digest",
-  customRules: "Custom metafield rules",
+  customRules: "Tracked metafields",
   vendorWhitelist: "Approved vendor list",
 };
 

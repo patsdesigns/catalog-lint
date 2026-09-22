@@ -225,7 +225,11 @@ const FIX_NAMES = {
 export function fixLabel(ruleId) {
   if (FIX_NAMES[ruleId]) return FIX_NAMES[ruleId];
   const rule = RULE_CATALOG.find((r) => r.id === ruleId);
-  return rule ? rule.label : ruleId === "edit" ? "Edit" : ruleId.replace(/_/g, " ");
+  if (rule) return rule.label;
+  // A tracked metafield check: "custom.mpn missing".
+  const dynamic = /^metafield_([a-z_]+):(.+)$/.exec(ruleId);
+  if (dynamic) return `${dynamic[2]} ${dynamic[1].replace(/_/g, " ")}`;
+  return ruleId === "edit" ? "Edit" : ruleId.replace(/_/g, " ");
 }
 
 // Fixes still in place (bulk fixes and saved edits alike): within the last `days`, or ever.

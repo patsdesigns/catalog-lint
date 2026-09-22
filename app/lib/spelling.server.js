@@ -30,35 +30,6 @@ function stripHtml(html) {
     .trim();
 }
 
-// Pull every human readable string out of a metafield value.
-function metafieldText(m) {
-  const t = m.type || "";
-  if (t === "single_line_text_field" || t === "multi_line_text_field") return m.value || "";
-  if (t.startsWith("list.") && t.includes("text")) {
-    try {
-      const arr = JSON.parse(m.value);
-      return Array.isArray(arr) ? arr.join(" ") : "";
-    } catch {
-      return "";
-    }
-  }
-  if (t === "rich_text_field") {
-    try {
-      const parts = [];
-      const walk = (n) => {
-        if (!n) return;
-        if (typeof n.value === "string") parts.push(n.value);
-        if (Array.isArray(n.children)) n.children.forEach(walk);
-      };
-      walk(JSON.parse(m.value));
-      return parts.join(" ");
-    } catch {
-      return "";
-    }
-  }
-  return "";
-}
-
 // Every field on a product that a human wrote, with a label for the finding.
 export function textFields(p) {
   const fields = [
@@ -72,10 +43,6 @@ export function textFields(p) {
   ];
   for (const o of p.options || []) {
     fields.push({ field: `Option ${o.name}`, key: null, text: `${o.name} ${(o.values || []).join(" ")}` });
-  }
-  for (const m of p.metafields || []) {
-    const text = metafieldText(m);
-    if (text) fields.push({ field: `Metafield ${m.key}`, key: null, text });
   }
   return fields;
 }

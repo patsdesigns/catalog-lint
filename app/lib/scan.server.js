@@ -18,7 +18,13 @@ const IDS_PER_QUERY = 10;
 // One product's fields, shared by the paginated, by-id and bulk queries. Regular queries page
 // their connections; a bulk query takes no pagination arguments and returns every node, each on
 // its own JSONL line tagged with __parentId and __typename.
-function productFields(paged) {
+// The tracked metafields, each by namespace and key under an alias, so a value comes back inline
+// with the product (no connection, no pagination), or null when the product has none.
+function trackedFields(tracked) {
+  return tracked.map((t, i) => `tf_${i}: metafield(namespace: ${JSON.stringify(t.namespace)}, key: ${JSON.stringify(t.key)}) { type value }`).join("\n    ");
+}
+
+function productFields(paged, tracked = []) {
   const arg = (n) => (paged ? `(first: ${n})` : "");
   const conn = (body) => (paged ? `{ nodes { ${body} } }` : `{ edges { node { __typename ${body} } } }`);
   return `
@@ -32,7 +38,7 @@ function productFields(paged) {
     resourcePublicationsCount { count }
     availablePublicationsCount { count }
     collections${arg(1)} ${conn("id")}
-    metafields${arg(20)} ${conn("namespace key type value")}
+    ${trackedFields(tracked)}
     media${arg(5)} ${conn("... on MediaImage { id alt image { width height } }")}
     variants${arg(10)} ${conn(`
       id title sku barcode price compareAtPrice inventoryPolicy inventoryQuantity updatedAt
@@ -41,23 +47,23 @@ function productFields(paged) {
   `;
 }
 
-const CATALOG_QUERY = `#graphql
+const catalogQuery = (tracked) => `#graphql
   query CatalogScan($cursor: String) {
     products(first: ${PAGE_SIZE}, after: $cursor) {
       pageInfo { hasNextPage endCursor }
-      nodes { ${productFields(true)} }
+      nodes { ${productFields(true, tracked)} }
     }
   }
 `;
 
-const BY_IDS_QUERY = `#graphql
+const byIdsQuery = (tracked) => `#graphql
   query ProductsByIds($ids: [ID!]!) {
-    nodes(ids: $ids) { ... on Product { ${productFields(true)} } }
+    nodes(ids: $ids) { ... on Product { ${productFields(true, tracked)} } }
   }
 `;
 
-// Five connections (products + four nested), two levels deep: the bulk query limits.
-export const BULK_QUERY = `{ products { edges { node { ${productFields(false)} } } } }`;
+// Four connections (products + three nested), two levels deep: within the bulk query limits.
+export const bulkQuery = (tracked) => `{ products { edges { node { ${productFields(false, tracked)} } } } }`;
 
 const COUNT_QUERY = `#graphql
   query ProductsCount($query: String) { productsCount(query: $query) { count } }
@@ -109,7 +115,7 @@ async function graphqlJson(graphql, query, variables) {
   return data;
 }
 
-function normalize(node) {
+export function normalize(node, tracked = []) {
   return {
     id: node.id,
     title: node.title,
@@ -145,10 +151,12 @@ function normalize(node) {
       values: (o.optionValues || []).map((v) => v.name),
       valueIds: (o.optionValues || []).map((v) => v.id),
     })),
-    metafields: (node.metafields?.nodes || []).map((m) => ({
-      key: `${m.namespace}.${m.key}`,
-      type: m.type,
-      value: m.value,
+    // The tracked metafields, in order, with an empty value where the product has none.
+    metafields: tracked.map((t, i) => ({
+      key: t.fullKey,
+      name: t.name,
+      type: node[`tf_${i}`]?.type || t.type,
+      value: node[`tf_${i}`]?.value ?? "",
     })),
     images: (node.media?.nodes || [])
       .filter((m) => m && m.id)
@@ -211,13 +219,14 @@ export async function fetchNewProductIds(graphql, since, cap = 2000) {
 
 // Every product, page by page, or only the first `limit` of them (the plan's product limit).
 // Only used for catalogs up to SYNC_LIMIT (see rescan.server.js).
-export async function fetchCatalog(graphql, limit = null) {
+export async function fetchCatalog(graphql, limit = null, tracked = []) {
   const products = [];
   let cursor = null;
+  const query = catalogQuery(tracked);
   for (;;) {
-    const data = await graphqlJson(graphql, CATALOG_QUERY, { cursor });
+    const data = await graphqlJson(graphql, query, { cursor });
     const conn = data.products;
-    products.push(...conn.nodes.map(normalize));
+    products.push(...conn.nodes.map((n) => normalize(n, tracked)));
     if (limit && products.length >= limit) return products.slice(0, limit);
     if (!conn.pageInfo.hasNextPage) break;
     cursor = conn.pageInfo.endCursor;
@@ -226,11 +235,12 @@ export async function fetchCatalog(graphql, limit = null) {
 }
 
 // The given products only, in small batches. Products that no longer exist are left out.
-export async function fetchProductsByIds(graphql, ids) {
+export async function fetchProductsByIds(graphql, ids, tracked = []) {
   const products = [];
+  const query = byIdsQuery(tracked);
   for (let i = 0; i < ids.length; i += IDS_PER_QUERY) {
-    const data = await graphqlJson(graphql, BY_IDS_QUERY, { ids: ids.slice(i, i + IDS_PER_QUERY) });
-    for (const node of data.nodes || []) if (node?.id) products.push(normalize(node));
+    const data = await graphqlJson(graphql, query, { ids: ids.slice(i, i + IDS_PER_QUERY) });
+    for (const node of data.nodes || []) if (node?.id) products.push(normalize(node, tracked));
   }
   return products;
 }
@@ -243,15 +253,16 @@ async function runningBulkQuery(graphql) {
 }
 
 // Starts Shopify's export of the whole catalog and returns the bulk operation id.
-export async function startBulkScan(graphql) {
-  const data = await graphqlJson(graphql, START_BULK, { query: BULK_QUERY });
+export async function startBulkScan(graphql, tracked = []) {
+  const query = bulkQuery(tracked);
+  const data = await graphqlJson(graphql, START_BULK, { query });
   const { bulkOperation, userErrors } = data.bulkOperationRunQuery;
   if (bulkOperation?.id) return bulkOperation.id;
   // Shopify runs one bulk query per app per shop. If ours is still going (say, the page was
   // closed mid-scan), pick it up rather than failing.
   const running = await runningBulkQuery(graphql);
   const squash = (s) => (s || "").replace(/\s+/g, "");
-  if (running && squash(running.query) === squash(BULK_QUERY)) return running.id;
+  if (running && squash(running.query) === squash(query)) return running.id;
   throw new Error(userErrors.map((e) => e.message).join("; ") || "Shopify did not start the catalog export");
 }
 
@@ -262,7 +273,7 @@ export async function bulkScanStatus(graphql, id) {
 
 // Streams the finished JSONL export and rebuilds one object per product. Child nodes (variants,
 // media, metafields, collections) arrive as their own lines pointing at the product via __parentId.
-export async function downloadBulkCatalog(url) {
+export async function downloadBulkCatalog(url, tracked = []) {
   const response = await fetch(url);
   if (!response.ok) throw new Error(`Could not download the catalog export (${response.status})`);
   const products = new Map();
@@ -298,7 +309,7 @@ export async function downloadBulkCatalog(url) {
   buffer += decoder.decode();
   handle(buffer);
   for (const child of orphans) attach(child);
-  return [...products.values()].map(normalize);
+  return [...products.values()].map((p) => normalize(p, tracked));
 }
 
 // ---------- running the rules ----------
@@ -308,7 +319,7 @@ async function scanContext(graphql, shop) {
     loadSpeller(),
     shop ? getWords(shop) : [],
     shop ? getIgnoreKeys(shop) : new Set(),
-    shop ? getSettings(shop) : { vendorWhitelist: [], metafieldRules: [] },
+    shop ? getSettings(shop) : { vendorWhitelist: [], trackedMetafields: [] },
     fetchPrimaryLocale(graphql),
   ]);
   return { speller, storeWords, ignored, settings, locale };
@@ -342,7 +353,8 @@ export async function scanProducts(products, graphql, shop, startedAt = Date.now
 export async function scanCatalog(graphql, shop, limit = null) {
   const started = Date.now();
   const count = await countProducts(graphql);
-  const products = await fetchCatalog(graphql, limit);
+  const tracked = shop ? (await getSettings(shop)).trackedMetafields || [] : [];
+  const products = await fetchCatalog(graphql, limit, tracked);
   return scanProducts(products, graphql, shop, started, count);
 }
 
@@ -351,8 +363,8 @@ export async function scanCatalog(graphql, shop, limit = null) {
 // the merchant just acted on (dropRuleId), which the action has resolved for them.
 export async function recheckProducts(graphql, shop, latest, ids, dropRuleId = null) {
   const started = Date.now();
-  const products = await fetchProductsByIds(graphql, ids);
   const { speller, storeWords, ignored, settings, locale } = await scanContext(graphql, shop);
+  const products = await fetchProductsByIds(graphql, ids, settings.trackedMetafields || []);
   const names = latest.names || [];
   const ctx = { speller, customWords: seedWords(products, storeWords), nameWords: new Set(names), settings, locale };
   const fresh = runProductRules(products, ctx).filter((f) => !ignored.has(ignoreKey(f)));
@@ -393,8 +405,8 @@ export async function scanNewProducts(graphql, shop, latest) {
   const known = new Set(latest.productIds || []);
   const ids = (await fetchNewProductIds(graphql, latest.readAt || latest.scannedAt)).filter((id) => !known.has(id));
   if (!ids.length) return null;
-  const products = await fetchProductsByIds(graphql, ids);
   const { speller, storeWords, ignored, settings, locale } = await scanContext(graphql, shop);
+  const products = await fetchProductsByIds(graphql, ids, settings.trackedMetafields || []);
   const names = latest.names || [];
   const ctx = { speller, customWords: seedWords(products, storeWords), nameWords: new Set(names), settings, locale };
   const fresh = runProductRules(products, ctx).filter((f) => !ignored.has(ignoreKey(f)));

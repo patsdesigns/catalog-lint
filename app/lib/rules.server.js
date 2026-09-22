@@ -203,6 +203,8 @@ function finding(rule, product, extra = {}) {
     f.variantCount = variants.length;
   }
   if (f.edit) f.edit = { ruleId: rule.id, productId: product.id, title: product.title, ...f.edit };
+  // Tracked metafield values ride along, for the columns on the issue pages.
+  if (product.metafields?.length) f.meta = Object.fromEntries(product.metafields.map((m) => [m.key, m.value ?? ""]));
   return f;
 }
 
@@ -674,38 +676,6 @@ export const PRODUCT_RULES = [
     },
   },
 
-  // Custom rules
-  {
-    id: "metafield_required", category: "metafields", label: "Required metafield missing", severity: "medium",
-    applies: (settings) => (settings.metafieldRules || []).some((r) => r.key),
-    check(p, ctx) {
-      const rules = (ctx?.settings?.metafieldRules || []).filter((r) => r.key);
-      const out = [];
-      for (const r of rules) {
-        if (r.productType && norm(r.productType) !== norm(p.productType)) continue;
-        const mf = p.metafields.find((m) => m.key === r.key);
-        if (!mf || !(mf.value || "").trim()) out.push(finding(this, p, { detail: r.key, edit: { kind: "metafield", key: r.key, type: mf?.type || null, current: "", suggested: "" } }));
-      }
-      return out;
-    },
-  },
-  {
-    id: "metafield_pattern", category: "metafields", label: "Metafield does not match pattern", severity: "medium",
-    applies: (settings) => (settings.metafieldRules || []).some((r) => r.key && r.pattern),
-    check(p, ctx) {
-      const rules = (ctx?.settings?.metafieldRules || []).filter((r) => r.key && r.pattern);
-      const out = [];
-      for (const r of rules) {
-        if (r.productType && norm(r.productType) !== norm(p.productType)) continue;
-        const mf = p.metafields.find((m) => m.key === r.key);
-        if (!mf || !(mf.value || "").trim()) continue;
-        let re;
-        try { re = new RegExp(r.pattern); } catch { continue; }
-        if (!re.test(mf.value)) out.push(finding(this, p, { detail: `${r.key} = "${mf.value.slice(0, 40)}"`, edit: { kind: "metafield", key: r.key, type: mf.type || null, current: mf.value, suggested: "" } }));
-      }
-      return out;
-    },
-  },
 ];
 
 // ---------------- catalog rules ----------------
@@ -1044,6 +1014,7 @@ PRODUCT_RULES.push(
       for (const m of p.metafields) {
         const type = m.type || "";
         if (type !== "json" && !type.startsWith("list.")) continue;
+        if (!String(m.value || "").trim()) continue;
         let parsed;
         try { parsed = JSON.parse(m.value); } catch { bad.push(`${m.key}: invalid JSON`); continue; }
         if (type.startsWith("list.") && (!Array.isArray(parsed) || parsed.length === 0)) bad.push(`${m.key}: empty list`);
@@ -1162,6 +1133,147 @@ export const RULE_CATALOG = ALL_RULES.map((r) => ({
   family: RULE_META[r.id]?.family || "other", tier: RULE_META[r.id]?.tier || "recommended",
 }));
 
+// ---------------- tracked metafields ----------------
+// Every tracked metafield (settings.trackedMetafields) gets checks of its own, in the Metafields
+// area, named after it: "MPN missing", "MPN duplicated", "MPN misspelled". Their ids carry the
+// metafield key after a colon, so a check can be turned off or ignored like any other.
+
+const TEXT_TYPES = new Set(["single_line_text_field", "multi_line_text_field"]);
+const PLACEHOLDER_VALUE_RE = /\b(tbd|n\/a|none|unknown|lorem)\b/i;
+const ONLY_PUNCTUATION_RE = /^[\s\p{P}\p{S}]+$/u;
+
+export function isDynamicRule(id) {
+  return /^metafield_[a-z_]+:.+$/.test(String(id || ""));
+}
+
+function trackedValue(p, t) {
+  return (p.metafields || []).find((m) => m.key === t.fullKey)?.value ?? "";
+}
+function appliesTo(p, t) {
+  return !t.productType || norm(t.productType) === norm(p.productType);
+}
+const metafieldEdit = (t, more) => ({ kind: "metafield", key: t.fullKey, type: t.type, current: "", suggested: "", ...more });
+
+// The checks for one tracked metafield: product checks and, when it must be unique, one catalog check.
+function rulesForTracked(t) {
+  const id = (kind) => `metafield_${kind}:${t.fullKey}`;
+  const product = [];
+  const catalog = [];
+  if (t.required) {
+    product.push({
+      id: id("missing"), category: "metafields", label: `${t.name} missing`, severity: "medium", passLabel: `every product has ${t.name}`,
+      check(p) {
+        return appliesTo(p, t) && !String(trackedValue(p, t)).trim() ? [finding(this, p, { detail: t.fullKey, edit: metafieldEdit(t) })] : [];
+      },
+    });
+  }
+  if (t.pattern) {
+    let re = null;
+    try { re = new RegExp(t.pattern); } catch { re = null; }
+    if (re) {
+      product.push({
+        id: id("pattern"), category: "metafields", label: `${t.name} does not match its pattern`, severity: "medium", passLabel: `${t.name} matches its pattern`,
+        check(p) {
+          const v = String(trackedValue(p, t));
+          return appliesTo(p, t) && v.trim() && !re.test(v) ? [finding(this, p, { detail: `${t.fullKey} = "${v.slice(0, 40)}"`, edit: metafieldEdit(t, { current: v }) })] : [];
+        },
+      });
+    }
+  }
+  product.push({
+    id: id("placeholder"), category: "metafields", label: `${t.name} is a placeholder`, severity: "medium", passLabel: `${t.name} has a real value`,
+    check(p) {
+      if (!appliesTo(p, t) || !TEXT_TYPES.has(t.type)) return [];
+      const v = String(trackedValue(p, t));
+      const bad = v.trim() && (PLACEHOLDER_VALUE_RE.test(v) || ONLY_PUNCTUATION_RE.test(v));
+      return bad ? [finding(this, p, { detail: `${t.fullKey} = "${v.slice(0, 40)}"`, edit: metafieldEdit(t, { current: v }) })] : [];
+    },
+  });
+  product.push({
+    id: id("spelling"), category: "metafields", label: `${t.name} misspelled`, severity: "medium", passLabel: `${t.name} has no misspellings`,
+    check(p, ctx) {
+      if (!ctx?.speller || !appliesTo(p, t) || !TEXT_TYPES.has(t.type)) return [];
+      const v = String(trackedValue(p, t));
+      if (!v.trim()) return [];
+      // The same trust rules as every other field: the dictionary, the store words, the catalog names.
+      return findMisspellings([{ field: t.name, key: t.fullKey, text: v }], ctx).slice(0, 4).map((m) =>
+        finding(this, p, {
+          word: m.word,
+          detail: m.suggestion ? `"${m.word}" in ${t.name} (maybe "${m.suggestion}")` : `"${m.word}" in ${t.name}`,
+          edit: { kind: "metafieldWord", key: t.fullKey, type: t.type, word: m.word, current: around(v, m.word), raw: m.word, suggested: m.suggestion || "", apply: Boolean(m.suggestion) },
+        }),
+      );
+    },
+  });
+  if (t.type === "single_line_text_field") {
+    product.push({
+      id: id("too_long"), category: "metafields", label: `${t.name} over 255 characters`, severity: "low", passLabel: `${t.name} is 255 characters or less`,
+      check(p) {
+        const v = String(trackedValue(p, t));
+        return appliesTo(p, t) && v.length > 255 ? [finding(this, p, { detail: `${v.length} characters`, edit: metafieldEdit(t, { current: `${v.length} characters`, raw: v, suggested: v }) })] : [];
+      },
+    });
+  }
+  product.push({
+    id: id("whitespace"), category: "metafields", label: `${t.name} has stray spaces`, severity: "low", passLabel: `${t.name} has no stray spaces`,
+    check(p) {
+      if (!appliesTo(p, t) || !TEXT_TYPES.has(t.type)) return [];
+      const v = String(trackedValue(p, t));
+      const cleaned = v.trim().replace(/[ \t]{2,}/g, " ");
+      // Quoted, so the extra spaces show.
+      return v.trim() && cleaned !== v ? [finding(this, p, { detail: t.fullKey, edit: metafieldEdit(t, { current: `"${v}"`, raw: v, suggested: cleaned, apply: true }) })] : [];
+    },
+  });
+  if (t.unique) {
+    catalog.push({
+      id: id("duplicate"), category: "metafields", label: `${t.name} duplicated`, severity: "medium", passLabel: `${t.name} is unique across products`,
+      check(products) {
+        const by = new Map();
+        for (const p of products) {
+          if (!appliesTo(p, t)) continue;
+          const v = String(trackedValue(p, t)).trim();
+          if (!v) continue;
+          const k = norm(v);
+          if (!by.has(k)) by.set(k, []);
+          by.get(k).push({ p, v });
+        }
+        const out = [];
+        for (const [, hits] of by) {
+          if (hits.length < 2) continue;
+          for (const { p, v } of hits) out.push(finding(this, p, { detail: `${t.fullKey} = "${v.slice(0, 40)}" used ${hits.length} times`, edit: metafieldEdit(t, { current: `${v} used ${hits.length} times`, raw: v }) }));
+        }
+        return out;
+      },
+    });
+  }
+  return { product, catalog };
+}
+
+// The dynamic checks for a settings object, computed once per call: { product, catalog, all }.
+export function trackedRules(settings) {
+  const product = [];
+  const catalog = [];
+  for (const t of settings?.trackedMetafields || []) {
+    const r = rulesForTracked(t);
+    product.push(...r.product);
+    catalog.push(...r.catalog);
+  }
+  return { product, catalog, all: [...product, ...catalog] };
+}
+
+// The static catalog plus the checks of the tracked metafields, as the Settings page lists them.
+export function ruleCatalog(settings) {
+  const dynamic = trackedRules(settings).all.map((r) => ({
+    id: r.id, label: r.label, category: r.category, severity: r.severity, family: "metafields", tier: "recommended", passLabel: r.passLabel,
+  }));
+  return [...RULE_CATALOG, ...dynamic];
+}
+
+// One rule by id, static or tracked, or null.
+export function findRule(id, settings) {
+  return ALL_RULES.find((r) => r.id === id) || (isDynamicRule(id) ? trackedRules(settings).all.find((r) => r.id === id) || null : null);
+}
+
 // The rules the merchant has not turned off in Settings (settings.disabledRules).
 function enabled(rules, ctx) {
   const off = new Set(ctx?.settings?.disabledRules || []);
@@ -1172,9 +1284,10 @@ export function runRules(products, ctx = {}) {
   const findings = [];
   // What the catalog as a whole suggests (catalogContext) rides along for the product rules.
   const run = { ...ctx, catalog: catalogContext(products) };
-  const productRules = enabled(PRODUCT_RULES, run);
+  const dynamic = trackedRules(run.settings);
+  const productRules = enabled([...PRODUCT_RULES, ...dynamic.product], run);
   for (const p of products) for (const rule of productRules) findings.push(...rule.check(p, run));
-  for (const rule of enabled(CATALOG_RULES, run)) findings.push(...rule.check(products, run));
+  for (const rule of enabled([...CATALOG_RULES, ...dynamic.catalog], run)) findings.push(...rule.check(products, run));
   return findings;
 }
 
@@ -1182,7 +1295,7 @@ export function runRules(products, ctx = {}) {
 export function runProductRules(products, ctx = {}) {
   const findings = [];
   const run = { ...ctx, catalog: ctx.catalog || catalogContext(products) };
-  const productRules = enabled(PRODUCT_RULES, run);
+  const productRules = enabled([...PRODUCT_RULES, ...trackedRules(run.settings).product], run);
   for (const p of products) for (const rule of productRules) findings.push(...rule.check(p, run));
   return findings;
 }
@@ -1202,12 +1315,14 @@ export function summarize(products, findings, settings = {}) {
 export function summarizeFindings(total, findings, settings = {}) {
   const byRule = {};
   const penalty = new Map();
+  // The static checks and the checks of the tracked metafields.
+  const catalog = [...ALL_RULES, ...trackedRules(settings).all];
   for (const f of findings) {
     if (!byRule[f.ruleId]) {
-      const rule = ALL_RULES.find((r) => r.id === f.ruleId);
+      const rule = catalog.find((r) => r.id === f.ruleId);
       byRule[f.ruleId] = {
         ruleId: f.ruleId, label: f.label, category: rule?.category || "description", severity: f.severity,
-        fixable: Boolean(rule?.fixable), fixLabel: rule?.fixLabel || null, count: 0,
+        fixable: Boolean(rule?.fixable), fixLabel: rule?.fixLabel || null, passLabel: rule?.passLabel || null, count: 0,
       };
     }
     byRule[f.ruleId].count += 1;
@@ -1222,8 +1337,8 @@ export function summarizeFindings(total, findings, settings = {}) {
   // Every rule, so the overview can show what was checked and not only what failed: failed, passed,
   // skipped (needs a Setting that is empty) or off (turned off in Settings).
   const off = new Set(settings.disabledRules || []);
-  const checks = ALL_RULES.map((rule) => ({
-    ruleId: rule.id, label: rule.label, category: rule.category, severity: rule.severity,
+  const checks = catalog.map((rule) => ({
+    ruleId: rule.id, label: rule.label, category: rule.category, severity: rule.severity, passLabel: rule.passLabel || null,
     count: byRule[rule.id]?.count || 0,
     status: byRule[rule.id] ? "failed" : off.has(rule.id) ? "off" : rule.applies && !rule.applies(settings) ? "skipped" : "passed",
   }));

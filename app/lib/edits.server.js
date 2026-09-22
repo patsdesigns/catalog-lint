@@ -107,6 +107,15 @@ export async function applyEdit(graphql, shop, edit, value) {
     const type = before?.type || edit.type || "single_line_text_field";
     errs = await setMetafield(graphql, edit.productId, edit.key, type, value);
     if (!errs.length) log({ field: "metafield", targetId: edit.key, productId: edit.productId, before, after: { type, value: String(value) } });
+  } else if (edit.kind === "metafieldWord") {
+    // One word replaced inside the metafield value.
+    const before = await readMetafield(graphql, edit.productId, edit.key);
+    if (!before) return { ok: false, error: "The metafield is empty now." };
+    const re = new RegExp(`\\b${escapeRegex(edit.word)}\\b`, "g");
+    const after = String(before.value).replace(re, value);
+    const type = before.type || edit.type || "single_line_text_field";
+    errs = await setMetafield(graphql, edit.productId, edit.key, type, after);
+    if (!errs.length) log({ field: "metafield", targetId: edit.key, productId: edit.productId, before, after: { type, value: after } });
   } else {
     return { ok: false, error: "This finding cannot be edited here" };
   }

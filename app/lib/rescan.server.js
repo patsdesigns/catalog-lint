@@ -16,7 +16,7 @@ import {
   recheckProducts,
 } from "./scan.server";
 import { saveScan, latestScan } from "./scans.server";
-import { summarizeFindings } from "./rules.server";
+import { summarizeFindings, trackedRules, isDynamicRule } from "./rules.server";
 import { ignoreKey } from "./ignores.server";
 import { getSettings } from "./settings.server";
 import { activeJob, createJob, updateJob, jobView } from "./jobs.server";
@@ -33,7 +33,7 @@ export async function startScan(graphql, shop, limit = null) {
     await saveScan(shop, await scanCatalog(graphql, shop, limit));
     return null;
   }
-  const operationId = await startBulkScan(graphql);
+  const operationId = await startBulkScan(graphql, (await getSettings(shop)).trackedMetafields || []);
   return jobView(await createJob(shop, operationId, count));
 }
 
@@ -55,7 +55,7 @@ export async function advanceJob(graphql, shop, limit = null) {
 
   if (op.status === "COMPLETED") {
     try {
-      const all = op.url ? await downloadBulkCatalog(op.url) : [];
+      const all = op.url ? await downloadBulkCatalog(op.url, (await getSettings(shop)).trackedMetafields || []) : [];
       const products = limit ? all.slice(0, limit) : all;
       const result = await scanProducts(products, graphql, shop, job.createdAt.getTime(), all.length);
       await saveScan(shop, result);
@@ -89,7 +89,9 @@ export async function refreshAfter(graphql, shop, change, limit = null) {
   if (change.kind === "settings") {
     const settings = await getSettings(shop);
     const off = new Set(settings.disabledRules || []);
-    await saveScan(shop, withFindings(latest, latest.findings.filter((f) => !off.has(f.ruleId)), settings));
+    // A tracked metafield check that no longer exists (untracked, or its setting turned off) goes too.
+    const known = new Set(trackedRules(settings).all.map((r) => r.id));
+    await saveScan(shop, withFindings(latest, latest.findings.filter((f) => !off.has(f.ruleId) && (!isDynamicRule(f.ruleId) || known.has(f.ruleId))), settings));
     return;
   }
 

@@ -77,8 +77,6 @@ export const PASS_LABELS = {
   tag_casing: "Tags are spelled consistently",
 
   // Metafields
-  metafield_required: "Required metafields are filled in",
-  metafield_pattern: "Metafield values match their patterns",
   metafield_malformed: "Metafield values are well formed",
 
   // Batch A additions
@@ -111,6 +109,4 @@ export const PASS_LABELS = {
 // What a settings-gated check needs before it can run.
 export const SETUP_LABELS = {
   vendor_not_allowed: "an approved vendor list",
-  metafield_required: "required metafields",
-  metafield_pattern: "metafield patterns",
 };

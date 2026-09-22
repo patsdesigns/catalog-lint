@@ -154,8 +154,6 @@ export const RULE_META = {
   channel_feedback: { family: "channels", tier: E },
 
   // Metafields
-  metafield_required: { family: "metafields", tier: E },
-  metafield_pattern: { family: "metafields", tier: E },
   metafield_malformed: { family: "metafields", tier: R },
 };
 
