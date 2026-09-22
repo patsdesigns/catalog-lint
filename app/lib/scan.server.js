@@ -319,7 +319,7 @@ async function scanContext(graphql, shop) {
     loadSpeller(),
     shop ? getWords(shop) : [],
     shop ? getIgnoreKeys(shop) : new Set(),
-    shop ? getSettings(shop) : { vendorWhitelist: [], trackedMetafields: [] },
+    shop ? getSettings(shop) : { trackedMetafields: [] },
     fetchPrimaryLocale(graphql),
   ]);
   return { speller, storeWords, ignored, settings, locale };

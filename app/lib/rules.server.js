@@ -1,6 +1,6 @@
 // Catalog lint rules
 // Each product rule returns findings for one product; catalog rules run once over all products.
-// ctx carries the speller, the store dictionary, and store settings (vendor whitelist, metafield rules).
+// ctx carries the speller, the store dictionary, and store settings (tracked metafields).
 
 import { findMisspellings, textFields } from "./spelling.server";
 import { RULE_META } from "./checkGroups";
@@ -88,36 +88,6 @@ function trimAt(text, max) {
 }
 function money(n) {
   return Number(n || 0).toFixed(2);
-}
-// Edit distance between two values, for the closest of a few candidates.
-function distance(a, b) {
-  const s = norm(a);
-  const t = norm(b);
-  const prev = Array.from({ length: t.length + 1 }, (_, j) => j);
-  for (let i = 1; i <= s.length; i++) {
-    let last = prev[0];
-    prev[0] = i;
-    for (let j = 1; j <= t.length; j++) {
-      const tmp = prev[j];
-      prev[j] = Math.min(prev[j] + 1, prev[j - 1] + 1, last + (s[i - 1] === t[j - 1] ? 0 : 1));
-      last = tmp;
-    }
-  }
-  return prev[t.length];
-}
-// The candidate closest to a value, when it is close enough to be the same thing misspelled.
-function closest(value, candidates) {
-  let best = "";
-  let bestDistance = Infinity;
-  for (const c of candidates) {
-    const d = distance(value, c);
-    if (d < bestDistance) {
-      best = c;
-      bestDistance = d;
-    }
-  }
-  const limit = Math.max(2, Math.floor(norm(value).length / 3));
-  return bestDistance <= limit ? best : "";
 }
 // The smallest amount at or above `amount` whose cents are `ending` ("99", "00", ...).
 function withEnding(amount, ending) {
@@ -642,20 +612,6 @@ export const PRODUCT_RULES = [
   {
     id: "no_tags", category: "organization", label: "No tags", severity: "low",
     check(p) { return p.tags.length === 0 ? [finding(this, p, { edit: productEdit("tags", "") })] : []; },
-  },
-  {
-    id: "vendor_not_allowed", category: "organization", label: "Vendor not on your approved list", severity: "low",
-    applies: (settings) => (settings.vendorWhitelist || []).length > 0,
-    check(p, ctx) {
-      const list = ctx?.settings?.vendorWhitelist || [];
-      if (!list.length) return [];
-      const v = (p.vendor || "").trim();
-      if (!v) return [];
-      const ok = list.some((w) => norm(w) === norm(v));
-      if (ok) return [];
-      const near = closest(v, list);
-      return [finding(this, p, { detail: v, edit: productEdit("vendor", v, near, { apply: Boolean(near) }) })];
-    },
   },
 
 ];

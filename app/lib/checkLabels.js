@@ -69,7 +69,6 @@ export const PASS_LABELS = {
   missing_vendor: "Every product has a vendor",
   missing_product_type: "Every product has a product type",
   no_tags: "Every product has tags",
-  vendor_not_allowed: "All vendors are on your approved list",
   vendor_casing: "Vendors are spelled consistently",
   tag_casing: "Tags are spelled consistently",
 
@@ -94,5 +93,4 @@ export const PASS_LABELS = {
 
 // What a settings-gated check needs before it can run.
 export const SETUP_LABELS = {
-  vendor_not_allowed: "an approved vendor list",
 };

@@ -4,7 +4,7 @@ TidyUp scans a Shopify product catalog for missing, inconsistent and broken prod
 
 ## What it does
 
-- **66 checks** across every section of the product page: title and description, spelling, SEO, images and alt text, SKUs and barcodes, stock, prices and margins, weight, variants, product category, vendor and type, tags and collections, status, sales channels and metafields.
+- **65 checks** across every section of the product page: title and description, spelling, SEO, images and alt text, SKUs and barcodes, stock, prices and margins, weight, variants, product category, vendor and type, tags and collections, status, sales channels and metafields.
 - **One page per check** listing the products it flagged, each with the current value and a correction field. Bulk fixes for the mechanical ones (vendor spelling, alt text, sale prices), all logged and undoable per product.
 - **Scans any catalog size**: small catalogs inline, large ones through a Shopify bulk operation in the background.
 - **Plans** through Shopify billing: Dust Off (free, 20 products), Quick Clean and Deep Clean (every 30 days, USD, any number of products).

@@ -57,9 +57,6 @@ export async function action({ request }) {
   if (intent === "saveSettings") {
     const current = await getSettings(session.shop);
     const next = { ...current };
-    if (form.has("vendorWhitelist") && allowed.vendorWhitelist) {
-      next.vendorWhitelist = String(form.get("vendorWhitelist")).split("\n").map((v) => v.trim()).filter(Boolean);
-    }
     if (form.has("preset")) next.preset = form.get("preset");
     // Flipping any single check means the merchant has their own list.
     if (form.has("disabledRules")) {
@@ -129,13 +126,9 @@ export default function Settings() {
   }
   const runningCount = checks.length - off.size;
 
-  const [whitelist, setWhitelist] = useState(settings.vendorWhitelist.join("\n"));
   const [digestEnabled, setDigestEnabled] = useState(digest.enabled);
   const [digestEmail, setDigestEmail] = useState(digest.email);
 
-  function saveWhitelist() {
-    submit({ intent: "saveSettings", vendorWhitelist: whitelist });
-  }
 
   return (
     <s-page heading="Settings">
@@ -213,28 +206,6 @@ export default function Settings() {
         </s-stack>
       </s-section>
 
-      {features.vendorWhitelist ? (
-      <s-section slot="aside" heading="Approved Vendors">
-        <s-stack gap="base">
-          <s-paragraph>
-            One vendor per line. Leave empty to skip this check. Products whose vendor is not on this list get flagged under Organization.
-          </s-paragraph>
-          <s-text-area
-            label="Vendors"
-            labelAccessibilityVisibility="exclusive"
-            rows={5}
-            placeholder={"Porsche\nBosch\nBilstein"}
-            value={whitelist}
-            onInput={(e) => setWhitelist(e.target.value)}
-          ></s-text-area>
-          <s-stack direction="inline" gap="small">
-            <s-button variant="primary" onClick={saveWhitelist} disabled={busy || undefined}>Save vendors</s-button>
-          </s-stack>
-        </s-stack>
-      </s-section>
-      ) : (
-        <UpgradeSection slot="aside" heading="Approved Vendors" feature="vendorWhitelist" what="Approved vendor lists are" />
-      )}
 
       {features.customRules ? (
       <s-section slot="aside" heading={`Tracked Metafields (${trackedCount})`}>

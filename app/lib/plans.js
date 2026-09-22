@@ -18,10 +18,9 @@ const NONE = {
   autoRescan: false,
   weeklyDigest: false,
   customRules: false,
-  vendorWhitelist: false,
 };
 const QUICK_FEATURES = { ...NONE, inlineEdits: true, export: true, dictionary: true, ignores: true, newProductScans: true, autoRescan: true, weeklyDigest: true };
-const DEEP_FEATURES = { ...QUICK_FEATURES, customRules: true, vendorWhitelist: true };
+const DEEP_FEATURES = { ...QUICK_FEATURES, customRules: true };
 const DEEP_EXTRAS = ["Priority support"];
 
 export const PLANS = [
@@ -84,7 +83,6 @@ export const FEATURE_LABELS = {
   autoRescan: "Automatic re-check when products change",
   weeklyDigest: "Weekly email digest",
   customRules: "Tracked metafields",
-  vendorWhitelist: "Approved vendor list",
 };
 
 // Features a plan includes but that are not built yet; the Plans page lists them last.
