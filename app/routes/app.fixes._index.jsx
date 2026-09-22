@@ -4,7 +4,8 @@ import { authenticate } from "../shopify.server";
 import { undoFix, recentFixes, fixedCount } from "../lib/fixes.server";
 import { refreshAfter } from "../lib/rescan.server";
 import { currentPlan } from "../lib/billing.server";
-import { timeAgo, truncate } from "../lib/format";
+import { formatWhen, timeAgo, truncate } from "../lib/format";
+import { shopTimeZone } from "../lib/shop.server";
 import { ruleLabel, Notices } from "../lib/ui";
 
 // Recent fixes: every bulk fix and saved edit still in place, newest first, each undoable here. A
@@ -13,9 +14,15 @@ import { ruleLabel, Notices } from "../lib/ui";
 const LIMIT = 50;
 
 export async function loader({ request }) {
-  const { session } = await authenticate.admin(request);
-  const [fixes, fixedWeek, fixedTotal] = await Promise.all([recentFixes(session.shop, LIMIT), fixedCount(session.shop, 7), fixedCount(session.shop)]);
-  return { fixes, fixedWeek, fixedTotal };
+  const { admin, session } = await authenticate.admin(request);
+  const shop = session.shop;
+  const [fixes, fixedWeek, fixedTotal, timeZone] = await Promise.all([
+    recentFixes(shop, LIMIT),
+    fixedCount(shop, 7),
+    fixedCount(shop),
+    shopTimeZone(admin.graphql, shop),
+  ]);
+  return { fixes, fixedWeek, fixedTotal, timeZone };
 }
 
 export async function action({ request }) {
@@ -35,7 +42,7 @@ export async function action({ request }) {
 const n = (v) => Number(v || 0).toLocaleString("en-US");
 
 export default function RecentFixesPage() {
-  const { fixes, fixedWeek, fixedTotal } = useLoaderData();
+  const { fixes, fixedWeek, fixedTotal, timeZone } = useLoaderData();
   const fetcher = useFetcher();
   const navigate = useNavigate();
   const busy = fetcher.state !== "idle";
@@ -67,14 +74,21 @@ export default function RecentFixesPage() {
         ) : (
           <s-table loading={busy || undefined}>
             <s-table-header-row>
+              <s-table-header listSlot="kicker">Date and time</s-table-header>
               <s-table-header listSlot="labeled" format="numeric">Changes</s-table-header>
               <s-table-header listSlot="primary">Fix</s-table-header>
-              <s-table-header listSlot="inline">When</s-table-header>
               <s-table-header listSlot="secondary">Action</s-table-header>
             </s-table-header-row>
             <s-table-body>
               {fixes.map((f) => (
                 <s-table-row key={f.batchId}>
+                  <s-table-cell>
+                    {/* In the store time zone, with how long ago underneath. */}
+                    <s-stack gap="small-500">
+                      <s-text fontVariantNumeric="tabular-nums">{formatWhen(f.at, timeZone)}</s-text>
+                      <s-text color="subdued">{timeAgo(f.at)}</s-text>
+                    </s-stack>
+                  </s-table-cell>
                   <s-table-cell>
                     <s-text fontVariantNumeric="tabular-nums">{f.count}</s-text>
                   </s-table-cell>
@@ -88,9 +102,6 @@ export default function RecentFixesPage() {
                         <s-link href={`/app/fixes/${f.batchId}`}>{f.productCount} products</s-link>
                       ) : null}
                     </s-stack>
-                  </s-table-cell>
-                  <s-table-cell>
-                    <s-text color="subdued">{timeAgo(f.at)}</s-text>
                   </s-table-cell>
                   <s-table-cell>
                     <s-button variant="secondary" onClick={() => undo(f.batchId)} disabled={busy || undefined} accessibilityLabel={`Undo ${f.label || ruleLabel(f.ruleId)}, ${f.count} changes`}>
