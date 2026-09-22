@@ -58,8 +58,6 @@ export const RULE_META = {
   description_is_title: { family: "description", tier: R },
   placeholder_text: { family: "description", tier: E },
   description_junk: { family: "description", tier: R },
-  pasted_formatting: { family: "description", tier: R },
-  description_img_no_alt: { family: "description", tier: R },
   dead_link: { family: "description", tier: R },
   language_mismatch: { family: "description", tier: R },
   duplicate_description: { family: "description", tier: C },
@@ -73,7 +71,6 @@ export const RULE_META = {
   seo_title_competing: { family: "seo", tier: R },
   meta_description_missing: { family: "seo", tier: E },
   meta_description_too_long: { family: "seo", tier: R },
-  meta_description_short: { family: "seo", tier: R },
   meta_copies_description: { family: "seo", tier: R },
   handle_junk: { family: "seo", tier: C },
 
@@ -81,8 +78,6 @@ export const RULE_META = {
   missing_image: { family: "images", tier: E },
   few_images: { family: "images", tier: R },
   small_image: { family: "images", tier: R },
-  huge_image: { family: "images", tier: R },
-  image_ratio_inconsistent: { family: "images", tier: C },
 
   // Alt text
   missing_alt_text: { family: "alt", tier: R },
@@ -101,13 +96,9 @@ export const RULE_META = {
   active_no_stock: { family: "stock", tier: E },
   negative_inventory: { family: "stock", tier: E },
   no_location: { family: "stock", tier: E },
-  inventory_not_tracked: { family: "stock", tier: R },
-  sells_when_out_of_stock: { family: "stock", tier: R },
-  archived_with_stock: { family: "stock", tier: R },
 
   // Prices
   zero_price: { family: "prices", tier: E },
-  placeholder_price: { family: "prices", tier: E },
   price_outlier: { family: "prices", tier: C },
 
   // Sales & margins
@@ -120,7 +111,6 @@ export const RULE_META = {
 
   // Weight
   missing_weight: { family: "weight", tier: E },
-  weight_implausible: { family: "weight", tier: R },
   weight_units_mixed: { family: "weight", tier: C },
 
   // Variants
@@ -133,12 +123,10 @@ export const RULE_META = {
   vendor_not_allowed: { family: "vendor_type", tier: R },
   missing_product_type: { family: "vendor_type", tier: E },
   product_type_casing: { family: "vendor_type", tier: C },
-  one_off_product_type: { family: "vendor_type", tier: C },
 
   // Tags & collections
   no_tags: { family: "tags_collections", tier: R },
   tag_casing: { family: "tags_collections", tier: C },
-  one_off_tag: { family: "tags_collections", tier: C },
   no_collection: { family: "tags_collections", tier: R },
 
   // Status
@@ -146,7 +134,6 @@ export const RULE_META = {
 
   // Product category
   category_missing: { family: "category", tier: E },
-  category_broad: { family: "category", tier: R },
 
   // Sales channels
   not_published: { family: "channels", tier: E },
@@ -154,7 +141,6 @@ export const RULE_META = {
   channel_feedback: { family: "channels", tier: E },
 
   // Metafields
-  metafield_malformed: { family: "metafields", tier: R },
 };
 
 export const PRESETS = [

@@ -36,7 +36,6 @@ export const PASS_LABELS = {
   missing_alt_text: "Every image has alt text",
   same_alt_text: "Alt text differs between a product's images",
   small_image: "Images are at least 800px",
-  image_ratio_inconsistent: "Image shapes are consistent",
 
   // Inventory
   missing_sku: "Every variant has a SKU",
@@ -72,36 +71,23 @@ export const PASS_LABELS = {
   no_tags: "Every product has tags",
   vendor_not_allowed: "All vendors are on your approved list",
   vendor_casing: "Vendors are spelled consistently",
-  one_off_product_type: "Product types are shared by more than one product",
-  one_off_tag: "Tags are used by more than one product",
   tag_casing: "Tags are spelled consistently",
 
   // Metafields
-  metafield_malformed: "Metafield values are well formed",
 
   // Batch A additions
-  pasted_formatting: "Descriptions are free of pasted formatting",
-  description_img_no_alt: "Images in descriptions have alt text",
   dead_link: "Links in descriptions go somewhere",
-  meta_description_short: "Meta descriptions are at least 50 characters",
   alt_is_filename: "No filenames used as alt text",
   alt_too_long: "Alt text is 125 characters or fewer",
-  huge_image: "Images are 5,000px or smaller",
   barcode_invalid: "Barcodes pass their check digit",
   duplicate_barcode: "Barcodes are unique",
-  inventory_not_tracked: "Inventory is tracked",
-  sells_when_out_of_stock: "Nothing sells while out of stock",
-  archived_with_stock: "No archived products with stock on hand",
   thin_margin: "Margins are at least 10%",
   deep_discount: "No discounts over 80%",
-  placeholder_price: "No placeholder prices",
-  weight_implausible: "Weights are plausible",
   weight_units_mixed: "Weight units are consistent",
   product_type_casing: "Product types are spelled consistently",
 
   // Product category and sales channels
   category_missing: "Every product has a product category",
-  category_broad: "Product categories are as specific as they can be",
   unpublished_everywhere: "Every active product is on at least one sales channel",
   channel_feedback: "No sales channel reports a problem",
 };
