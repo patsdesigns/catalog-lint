@@ -27,6 +27,10 @@ function productFields(paged) {
     variantsCount { count }
     seo { title description }
     options { name optionValues { name } }
+    category { id name fullName isLeaf level }
+    feedback { details { app { title } messages { message } state } }
+    resourcePublicationsCount { count }
+    availablePublicationsCount { count }
     collections${arg(1)} ${conn("id")}
     metafields${arg(20)} ${conn("namespace key type value")}
     media${arg(5)} ${conn("... on MediaImage { id alt image { width height } }")}
@@ -112,6 +116,17 @@ function normalize(node) {
     descriptionHtml: node.descriptionHtml,
     seoTitle: node.seo?.title || "",
     seoDescription: node.seo?.description || "",
+    // Shopify's standard product taxonomy category, if one is set.
+    category: node.category
+      ? { id: node.category.id, name: node.category.name, fullName: node.category.fullName, isLeaf: Boolean(node.category.isLeaf), level: node.category.level ?? 0 }
+      : null,
+    // Sales channels: how many the product is published to, how many of those are error-free, and
+    // any feedback a channel (Google, Meta, ...) says the merchant must act on.
+    publications: node.resourcePublicationsCount?.count ?? null,
+    publicationsOk: node.availablePublicationsCount?.count ?? null,
+    channelIssues: (node.feedback?.details || [])
+      .filter((d) => d.state === "REQUIRES_ACTION")
+      .map((d) => ({ app: d.app?.title || "A sales channel", messages: (d.messages || []).map((m) => m.message).filter(Boolean) })),
     options: (node.options || []).map((o) => ({
       name: o.name,
       values: (o.optionValues || []).map((v) => v.name),

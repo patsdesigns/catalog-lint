@@ -423,8 +423,10 @@ export const PRODUCT_RULES = [
     check(p) { return p.status === "ACTIVE" && p.collectionCount === 0 ? [finding(this, p)] : []; },
   },
   {
-    id: "not_published", category: "status", label: "Not visible on your store", severity: "medium",
-    check(p) { return p.status === "ACTIVE" && !p.publishedAt ? [finding(this, p)] : []; },
+    id: "not_published", category: "publishing", label: "Not visible on your store", severity: "medium",
+    // Published somewhere but not on the Online Store; a product on no channel at all is
+    // unpublished_everywhere instead.
+    check(p) { return p.status === "ACTIVE" && !p.publishedAt && (p.publications == null || p.publications > 0) ? [finding(this, p)] : []; },
   },
 
   {
@@ -887,6 +889,38 @@ CATALOG_RULES.push(
     },
   },
 );
+
+PRODUCT_RULES.push(
+  // Product category: Shopify's standard product taxonomy, which search, filters, tax and
+  // marketplaces read.
+  {
+    id: "category_missing", category: "organization", label: "No product category", severity: "medium",
+    check(p) { return p.category ? [] : [finding(this, p)]; },
+  },
+  {
+    id: "category_broad", category: "organization", label: "Product category could be more specific", severity: "low",
+    check(p) { return p.category && !p.category.isLeaf ? [finding(this, p, { detail: p.category.fullName })] : []; },
+  },
+
+  // Sales channels
+  {
+    id: "unpublished_everywhere", category: "publishing", label: "Not on any sales channel", severity: "medium",
+    check(p) { return p.status === "ACTIVE" && p.publications === 0 ? [finding(this, p)] : []; },
+  },
+  {
+    id: "channel_feedback", category: "publishing", label: "A sales channel reports a problem", severity: "high",
+    check(p) {
+      if (p.channelIssues?.length) {
+        return p.channelIssues.map((c) => finding(this, p, { detail: `${c.app}: ${c.messages[0] || "needs attention"}` }));
+      }
+      // Channels do not always expose their feedback text; a publication with errors still drops
+      // out of the error-free count.
+      const broken = p.publications != null && p.publicationsOk != null ? p.publications - p.publicationsOk : 0;
+      return broken > 0 ? [finding(this, p, { detail: `${broken} of ${p.publications} channels` })] : [];
+    },
+  },
+);
+
 
 export const ALL_RULES = [...PRODUCT_RULES, ...CATALOG_RULES];
 

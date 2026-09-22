@@ -21,9 +21,11 @@ export const FAMILIES = [
   { id: "sales", label: "Sales & margins" },
   { id: "weight", label: "Weight" },
   { id: "variants", label: "Variants" },
+  { id: "category", label: "Product category" },
   { id: "vendor_type", label: "Vendor & product type" },
   { id: "tags_collections", label: "Tags & collections" },
   { id: "status", label: "Status" },
+  { id: "channels", label: "Sales channels" },
   { id: "metafields", label: "Metafields" },
 ];
 
@@ -133,7 +135,15 @@ export const RULE_META = {
 
   // Status
   draft_stale: { family: "status", tier: R },
-  not_published: { family: "status", tier: E },
+
+  // Product category
+  category_missing: { family: "category", tier: E },
+  category_broad: { family: "category", tier: R },
+
+  // Sales channels
+  not_published: { family: "channels", tier: E },
+  unpublished_everywhere: { family: "channels", tier: E },
+  channel_feedback: { family: "channels", tier: E },
 
   // Metafields
   metafield_required: { family: "metafields", tier: E },

@@ -100,6 +100,12 @@ export const PASS_LABELS = {
   weight_implausible: "Weights are plausible",
   weight_units_mixed: "Weight units are consistent",
   product_type_casing: "Product types are spelled consistently",
+
+  // Product category and sales channels
+  category_missing: "Every product has a product category",
+  category_broad: "Product categories are as specific as they can be",
+  unpublished_everywhere: "Every active product is on at least one sales channel",
+  channel_feedback: "No sales channel reports a problem",
 };
 
 // What a settings-gated check needs before it can run.

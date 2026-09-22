@@ -10,6 +10,7 @@ export const CATEGORIES = [
   { id: "seo", label: "Search engine listing", color: "#1f8a70" },
   { id: "organization", label: "Product organization", color: "#7b5cd6" },
   { id: "status", label: "Status", color: "#4b5563" },
+  { id: "publishing", label: "Sales channels", color: "#2c6ecb" },
   { id: "metafields", label: "Metafields", color: "#5f6b7a" },
 ];
 
