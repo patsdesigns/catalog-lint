@@ -1085,9 +1085,9 @@ export default function Index() {
   }
 
   return (
-    <s-page heading="TidyUp" inlineSize="large">
+    <s-page heading="TidyUp: Product Data Cleanup" inlineSize="large">
       <s-button slot="primary-action" variant="primary" onClick={runScan} loading={busy || undefined} disabled={scanning || undefined}>
-        {scanning ? "Scanning…" : result ? "Scan again" : "Run scan"}
+        {scanning ? "Scanning…" : result ? "Scan Again" : "Run Full Scan"}
       </s-button>
 
       <Notices data={data} onUndo={runUndo} busy={busy} />
