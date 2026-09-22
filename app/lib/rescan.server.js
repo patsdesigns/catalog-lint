@@ -74,6 +74,8 @@ export async function advanceJob(graphql, shop) {
 //   { kind: "learn", word }                a word added to the dictionary
 //   { kind: "products", ids, ruleId }      products that were changed, and the rule acted on
 //   { kind: "settings" }                   checks were turned on or off
+//   { kind: "saved", key, batchId, value } an edit saved from an issue page: mark its finding
+//   { kind: "unsaved", key }               that edit was undone: clear the mark
 export async function refreshAfter(graphql, shop, change) {
   const latest = await latestScan(shop);
   if (!latest) return;
@@ -83,6 +85,21 @@ export async function refreshAfter(graphql, shop, change) {
     const settings = await getSettings(shop);
     const off = new Set(settings.disabledRules || []);
     await saveScan(shop, withFindings(latest, latest.findings.filter((f) => !off.has(f.ruleId)), settings));
+    return;
+  }
+
+  // A saved edit keeps its finding, marked, until the issue page is refreshed or the catalog is
+  // rescanned; undoing the edit clears the mark. Nothing is re-checked here.
+  if (change.kind === "saved" || change.kind === "unsaved") {
+    const settings = await getSettings(shop);
+    const findings = latest.findings.map((f) => {
+      if (ignoreKey(f) !== change.key) return f;
+      const next = { ...f };
+      delete next.saved;
+      if (change.kind === "saved") next.saved = { batchId: change.batchId, value: change.value, at: new Date().toISOString() };
+      return next;
+    });
+    await saveScan(shop, withFindings(latest, findings, settings));
     return;
   }
 

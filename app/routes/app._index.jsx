@@ -6,7 +6,7 @@ import { startScan, advanceJob, refreshAfter } from "../lib/rescan.server";
 import { applyFix, undoFix, recentFixes, fixedCount } from "../lib/fixes.server";
 import { latestScan, scanHistory } from "../lib/scans.server";
 import { addWord } from "../lib/dictionary.server";
-import { addIgnore } from "../lib/ignores.server";
+import { addIgnore, ignoreKey } from "../lib/ignores.server";
 import { applyEdit } from "../lib/edits.server";
 import { RULE_CATALOG } from "../lib/rules.server";
 import { CATEGORIES, categoryOf } from "../lib/categories";
@@ -44,6 +44,7 @@ export async function action({ request }) {
     let undo = null;
     let edit = null;
     let job = null;
+    let refresh = null;
     if (intent === "scan") {
       job = await startScan(admin.graphql, session.shop);
     } else {
@@ -57,7 +58,9 @@ export async function action({ request }) {
       }
       if (intent === "undo") {
         undo = await undoFix(admin.graphql, session.shop, form.get("batchId"));
-        change = { kind: "products", ids: undo.productIds };
+        // From an issue page the undo only clears the row's saved mark; from the home page it re-checks.
+        const finding = form.get("finding") ? JSON.parse(form.get("finding")) : null;
+        change = finding ? { kind: "unsaved", key: ignoreKey(finding) } : { kind: "products", ids: undo.productIds };
       }
       if (intent === "learn") {
         const word = form.get("word");
@@ -72,12 +75,24 @@ export async function action({ request }) {
       if (intent === "edit") {
         const descriptor = JSON.parse(form.get("edit"));
         edit = await applyEdit(admin.graphql, session.shop, descriptor, form.get("value"));
-        change = { kind: "products", ids: [descriptor.productId], ruleId: descriptor.ruleId };
+        // The row stays, marked saved, so the change can be undone in place; Refresh re-checks it.
+        const finding = form.get("finding") ? JSON.parse(form.get("finding")) : null;
+        change = edit.ok && finding ? { kind: "saved", key: ignoreKey(finding), batchId: edit.batchId, value: form.get("value") } : null;
+      }
+      if (intent === "refresh") {
+        // Re-check every product this issue lists (a full rescan on a small catalog).
+        const ruleId = form.get("ruleId");
+        const latest = await latestScan(session.shop);
+        const before = (latest?.findings || []).filter((f) => f.ruleId === ruleId);
+        const ids = [...new Set(before.map((f) => f.productId))];
+        if (ids.length) await refreshAfter(admin.graphql, session.shop, { kind: "products", ids });
+        const after = ((await latestScan(session.shop))?.findings || []).filter((f) => f.ruleId === ruleId).length;
+        refresh = { ruleId, products: ids.length, before: before.length, after };
       }
       if (change) await refreshAfter(admin.graphql, session.shop, change);
     }
     const state = await loadState(session.shop);
-    return { ok: true, ...state, fix, undo, edit, job };
+    return { ok: true, ...state, fix, undo, edit, refresh, job };
   } catch (err) {
     return { ok: false, error: err.message || String(err) };
   }
@@ -196,7 +211,7 @@ function Notices({ data, onUndo, busy }) {
       </s-banner>
     );
   }
-  const { fix, undo, edit } = data;
+  const { fix, undo, edit, refresh } = data;
   return (
     <>
       {fix ? (
@@ -219,6 +234,17 @@ function Notices({ data, onUndo, busy }) {
       {undo ? (
         <s-banner tone={undo.errors.length ? "warning" : "success"} heading={`${undo.undone} changes reverted`}>
           {undo.errors.length ? <s-paragraph>{undo.errors.slice(0, 2).join("; ")}</s-paragraph> : null}
+        </s-banner>
+      ) : null}
+      {refresh ? (
+        <s-banner tone="success" heading={refresh.products ? `Re-checked ${refresh.products} ${refresh.products === 1 ? "product" : "products"}` : "Nothing to re-check"}>
+          <s-paragraph>
+            {refresh.before > refresh.after
+              ? `${refresh.before - refresh.after} ${refresh.before - refresh.after === 1 ? "finding" : "findings"} resolved, ${refresh.after} still open.`
+              : refresh.after
+                ? `${refresh.after} still open.`
+                : "All clear."}
+          </s-paragraph>
         </s-banner>
       ) : null}
       {edit && !edit.ok ? (
@@ -849,7 +875,7 @@ function SkuCell({ f }) {
   return null;
 }
 
-function FindingRow({ f, columns, onSave, onLearn, onIgnore, busy }) {
+function FindingRow({ f, columns, onSave, onLearn, onIgnore, onUndo, busy }) {
   const edit = f.edit;
   const [value, setValue] = useState(edit?.suggested ?? "");
   const canSave = edit && value.trim() !== "" && value !== edit.current;
@@ -888,6 +914,19 @@ function FindingRow({ f, columns, onSave, onLearn, onIgnore, busy }) {
         <s-grid gridTemplateColumns={CURRENT_TRACK}>{currentCell}</s-grid>
       </s-table-cell>
       <s-table-cell>
+        {f.saved ? (
+          // Saved from this page: the row stays so the change can be undone here; Refresh re-checks it.
+          <s-stack gap="small-500">
+            <s-stack direction="inline" gap="small-200" alignItems="center">
+              <s-icon type="check-circle" tone="success" />
+              <s-text>Saved</s-text>
+              <s-button variant="tertiary" onClick={() => onUndo(f.saved.batchId, f)} disabled={busy || undefined} accessibilityLabel={`Undo the saved change to ${f.productTitle}`}>
+                Undo
+              </s-button>
+            </s-stack>
+            {f.saved.value ? <s-text color="subdued">{truncate(f.saved.value, 60)}</s-text> : null}
+          </s-stack>
+        ) : (
         <s-grid gridTemplateColumns={edit ? fixTracks(columns.fixTrack, actionCount) : actionTracks(actionCount)} gap="small-200" alignItems="center" justifyContent="start">
           {edit ? (
             edit.multiline ? (
@@ -914,7 +953,7 @@ function FindingRow({ f, columns, onSave, onLearn, onIgnore, busy }) {
             // page-level primary action stays the one primary button on the page.
             <s-button
               variant="secondary"
-              onClick={() => onSave(edit, value)}
+              onClick={() => onSave(edit, value, f)}
               disabled={!canSave || busy || undefined}
               accessibilityLabel={`${edit.kind === "word" ? "Replace the word for" : "Save corrected value for"} ${f.productTitle}`}
             >
@@ -942,12 +981,13 @@ function FindingRow({ f, columns, onSave, onLearn, onIgnore, busy }) {
             Ignore
           </s-button>
         </s-grid>
+        )}
       </s-table-cell>
     </s-table-row>
   );
 }
 
-function Detail({ rule, findings, onSave, onLearn, onIgnore, onBack, busy }) {
+function Detail({ rule, findings, onSave, onLearn, onIgnore, onUndo, onBack, busy }) {
   const [query, setQuery] = useState("");
   const q = query.trim().toLowerCase();
   const filtered = q
@@ -957,7 +997,7 @@ function Detail({ rule, findings, onSave, onLearn, onIgnore, onBack, busy }) {
   const hidden = filtered.length - rows.length;
   const columns = detailColumns(findings);
   const help = columns.fix
-    ? "Check the current value, type the correction and save, or ignore what is intentional."
+    ? "Check the current value, type the correction and save, or ignore what is intentional. Saved changes stay listed until you refresh."
     : "Open each product in Shopify to fix it, or ignore what is intentional.";
 
   return (
@@ -1001,6 +1041,7 @@ function Detail({ rule, findings, onSave, onLearn, onIgnore, onBack, busy }) {
                 onSave={onSave}
                 onLearn={onLearn}
                 onIgnore={onIgnore}
+                onUndo={onUndo}
                 busy={busy}
               />
             ))}
@@ -1051,10 +1092,12 @@ export default function Index() {
   const back = () => setSelected(null);
   const runScan = () => { setSelected(null); submit({ intent: "scan" }); };
   const runFix = (ruleId) => submit({ intent: "fix", ruleId });
-  const runUndo = (batchId) => submit({ intent: "undo", batchId });
+  const runUndo = (batchId, finding) => submit(finding ? { intent: "undo", batchId, finding: JSON.stringify(finding) } : { intent: "undo", batchId });
   const learnWord = (word) => submit({ intent: "learn", word });
   const ignoreFinding = (f) => submit({ intent: "ignore", finding: JSON.stringify(f) });
-  const saveEdit = (edit, value) => submit({ intent: "edit", edit: JSON.stringify(edit), value });
+  const saveEdit = (edit, value, finding) => submit({ intent: "edit", edit: JSON.stringify(edit), value, finding: JSON.stringify(finding) });
+  const runRefresh = (ruleId) => submit({ intent: "refresh", ruleId });
+  const refreshing = busy && fetcher.formData?.get("intent") === "refresh";
 
   const rule = result && selected ? result.rules.find((r) => r.ruleId === selected) : null;
 
@@ -1065,6 +1108,9 @@ export default function Index() {
         {/* The breadcrumb is the standard way back; the button makes it obvious. */}
         <s-link slot="breadcrumb-actions" onClick={back}>Issues</s-link>
         <s-button slot="secondary-actions" onClick={back}>Back to issues</s-button>
+        <s-button slot="secondary-actions" onClick={() => runRefresh(rule.ruleId)} loading={refreshing || undefined} disabled={busy || undefined}>
+          Refresh
+        </s-button>
         {rule.fixable ? (
           <s-button slot="primary-action" variant="primary" onClick={() => runFix(rule.ruleId)} disabled={busy || undefined}>
             {rule.fixLabel}
@@ -1078,6 +1124,7 @@ export default function Index() {
           onLearn={learnWord}
           onIgnore={ignoreFinding}
           onBack={back}
+          onUndo={runUndo}
           busy={busy}
         />
       </s-page>
