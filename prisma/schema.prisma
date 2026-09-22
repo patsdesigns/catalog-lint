@@ -106,3 +106,16 @@ model ScanJob {
 
   @@index([shop, status])
 }
+
+model SupportMessage {
+  id        Int      @id @default(autoincrement())
+  shop      String
+  name      String
+  email     String
+  category  String
+  subject   String
+  message   String
+  createdAt DateTime @default(now())
+
+  @@index([shop, createdAt])
+}
