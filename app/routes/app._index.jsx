@@ -17,7 +17,7 @@ import { CATEGORIES, categoryOf } from "../lib/categories";
 import { PASS_LABELS, SETUP_LABELS } from "../lib/checkLabels";
 import { shopInfo } from "../lib/shop.server";
 import { timeAgo } from "../lib/format";
-import { TONE, Dot, Notices } from "../lib/ui";
+import { TONE, Notices } from "../lib/ui";
 
 // ---------- server ----------
 
@@ -201,13 +201,12 @@ function ScanProgress({ job, locale }) {
   );
 }
 
-// A card header: colored dot, heading, optional badges on the left; anything on the right.
-function CardHeader({ color, heading, badges, aside }) {
+// A card header: heading and optional badges on the left; anything on the right.
+function CardHeader({ heading, badges, aside }) {
   return (
     <s-box padding="base" paddingBlockEnd="small">
       <s-stack direction="inline" gap="base" alignItems="center" justifyContent="space-between">
         <s-stack direction="inline" gap="small" alignItems="center">
-          {color ? <Dot color={color} /> : null}
           <s-heading>{heading}</s-heading>
           {badges}
         </s-stack>
@@ -217,35 +216,10 @@ function CardHeader({ color, heading, badges, aside }) {
   );
 }
 
-// "#5c6ac4" at an opacity, for the wash of color under each stripe.
-function tint(hex, alpha) {
-  const n = parseInt(hex.slice(1), 16);
-  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
-}
-
-// The top of a category card: a 3px stripe in the section color and a wash of the same color
-// fading out beneath it, behind the heading only. Polaris has no prop for an arbitrary accent
-// color, so both are a plain div. The radius matches the card so the stripe follows the corners.
-function AccentTop({ color, children }) {
-  return (
-    <div
-      style={{
-        borderTop: `3px solid ${color}`,
-        borderRadius: "12px 12px 0 0",
-        background: `linear-gradient(to bottom, ${tint(color, 0.14)}, ${tint(color, 0)})`,
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
 // ---------- summary ----------
 
-// A compact summary tile: the label over a display-size number (or a preformatted text such as an
-// amount) with an optional badge, and its supporting lines beside them. Polaris has no
-// display-size text, so the number is a styled span.
-const STAT_STYLE = { fontSize: "32px", lineHeight: 1, fontWeight: 650, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" };
+// A summary tile, as the Polaris metrics card composition lays it out: the label as a heading over
+// the number with an optional badge, and its supporting lines beside them.
 // The summary column fills its card (a plain div: the card box has a definite height once the header
 // grid stretches it), so the footer sits at the bottom whatever height Start here needs.
 const FILL_COLUMN = { height: "100%", display: "flex", flexDirection: "column", justifyContent: "space-between", gap: "16px" };
@@ -253,9 +227,9 @@ function Stat({ label, value, text, badge, locale, children }) {
   return (
     <s-grid gridTemplateColumns={STAT_COLUMNS} gap="base" alignItems="start">
       <s-stack gap="small-200">
-        <s-text color="subdued">{label}</s-text>
+        <s-heading>{label}</s-heading>
         <s-stack direction="inline" gap="small" alignItems="center">
-          <span style={STAT_STYLE}>{text ?? (value || 0).toLocaleString(locale)}</span>
+          <s-text type="strong" fontVariantNumeric="tabular-nums">{text ?? (value || 0).toLocaleString(locale)}</s-text>
           {badge}
         </s-stack>
       </s-stack>
@@ -264,43 +238,15 @@ function Stat({ label, value, text, badge, locale, children }) {
   );
 }
 
-// Open problems per saved result as bars. The tallest bar is the most any of them found, so the
-// direction shows even when the counts are close: 4px for none, 40px for the most.
+// Open problems per full scan, oldest first, as a line of numbers: Polaris has no chart
+// primitive, and a drawn one would be custom styling.
 function Trend({ history, locale }) {
   if (!history || history.length < 2) return <s-text color="subdued">Scan again to start a trend.</s-text>;
-  const most = history.reduce((m, h) => Math.max(m, h.open || 0), 0);
-  const barHeight = (open) => 4 + (most ? Math.round(((open || 0) / most) * 36) : 0);
-  // Bar width 12px + 4px gap, sized to the results on record, so no bare baseline trails the bars.
-  const trackWidth = history.length * 16 - 4;
-  // ISO date, not toLocaleString(): the server and the browser must render the same markup.
-  const dateOf = (iso) => (iso ? String(iso).slice(0, 10) : "");
-  const describe = (h) => `${(h.open || 0).toLocaleString(locale)}${h.at ? ` on ${dateOf(h.at)}` : ""}`;
+  const counts = history.map((h) => (h.open || 0).toLocaleString(locale));
   return (
-    <s-stack direction="inline" gap="small" alignItems="end">
-      {/* Polaris has no sparkline/bar primitive: the bars are plain boxes on a divider baseline. */}
-      <s-stack gap="small-500">
-        <div aria-hidden="true" style={{ display: "flex", alignItems: "flex-end", gap: "4px", height: "40px", width: `${trackWidth}px` }}>
-          {history.map((h, i) => (
-            // The bars take the text color (no color of their own); the latest one is solid.
-            <div
-              key={h.at || i}
-              title={describe(h)}
-              style={{
-                width: "12px",
-                height: `${barHeight(h.open)}px`,
-                borderRadius: "2px 2px 0 0",
-                background: "currentColor",
-                opacity: i === history.length - 1 ? 1 : 0.4,
-              }}
-            />
-          ))}
-        </div>
-        <s-divider></s-divider>
-      </s-stack>
-      <s-text color="subdued">Last {history.length} scans</s-text>
-      {/* The same count-and-date detail the bar tooltips carry, for readers who cannot hover. */}
-      <s-text accessibilityVisibility="exclusive">Problems per scan, oldest first: {history.map(describe).join(", ")}</s-text>
-    </s-stack>
+    <s-text color="subdued" fontVariantNumeric="tabular-nums">
+      Last {history.length} scans: {counts.join(" · ")}
+    </s-text>
   );
 }
 
@@ -650,7 +596,7 @@ function CategoryFilter({ result, locked, filter, onChange }) {
   );
 }
 
-// One card per product-page section, color coded with the section's color (app/lib/categories.js).
+// One card per product-page section (app/lib/categories.js).
 // Every card's table uses the shared header skeleton and the same card grid, so Findings / Issue /
 // Severity / Action sit at the same x from card to card. The visible heading names the section (no
 // accessibilityLabel, which would add a second hidden heading to the outline). `checks` are this
@@ -662,14 +608,11 @@ function CategoryCard({ cat, rules, checks, showChecks, showPassed, locked, onSe
     const fullPlan = allAreasPlan().name;
     return (
       <s-section padding="none">
-        <AccentTop color={cat.color}>
-          <CardHeader
-            color={cat.color}
-            heading={cat.label}
-            badges={<s-badge icon="lock">{fullPlan}</s-badge>}
-            aside={<s-text color="subdued" fontVariantNumeric="tabular-nums">{rules.length ? `${total} findings` : "No findings"}</s-text>}
-          />
-        </AccentTop>
+        <CardHeader
+          heading={cat.label}
+          badges={<s-badge icon="lock">{fullPlan}</s-badge>}
+          aside={<s-text color="subdued" fontVariantNumeric="tabular-nums">{rules.length ? `${total} findings` : "No findings"}</s-text>}
+        />
         <s-box padding="base" paddingBlockStart="none">
           <s-stack direction="inline" gap="base" alignItems="center" justifyContent="space-between">
             <s-text color="subdued">These findings are part of {fullPlan}</s-text>
@@ -702,14 +645,11 @@ function CategoryCard({ cat, rules, checks, showChecks, showPassed, locked, onSe
     );
   return (
     <s-section padding="none">
-      <AccentTop color={cat.color}>
-        <CardHeader
-          color={cat.color}
-          heading={cat.label}
-          badges={rules.length ? <SeverityBadges rules={rules} /> : null}
-          aside={<s-text color="subdued" fontVariantNumeric="tabular-nums">{rules.length ? `${total} findings` : "No findings"}</s-text>}
-        />
-      </AccentTop>
+      <CardHeader
+        heading={cat.label}
+        badges={rules.length ? <SeverityBadges rules={rules} /> : null}
+        aside={<s-text color="subdued" fontVariantNumeric="tabular-nums">{rules.length ? `${total} findings` : "No findings"}</s-text>}
+      />
       <CardBody table={table} panel={showChecks ? <PassedChecks passed={passed} skipped={skipped} off={off} failing={rules.length} expanded={showPassed} /> : null} />
     </s-section>
   );

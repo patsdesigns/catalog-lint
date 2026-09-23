@@ -16,18 +16,6 @@ export function passesWhen(ruleId, fallback) {
   return `Passes when ${/^[A-Z]{2}/.test(label) ? label : label.charAt(0).toLowerCase() + label.slice(1)}.`;
 }
 
-// Polaris has no primitive that takes an arbitrary hex color, and the category colors mirror the
-// Shopify product page (app/lib/categories.js), so the dot is the one place that uses an inline
-// style for color. The label next to it stays in the default text color for AA contrast.
-export function Dot({ color, size = 10 }) {
-  return (
-    <span
-      aria-hidden="true"
-      style={{ display: "inline-block", width: size, height: size, borderRadius: "50%", background: color, flexShrink: 0 }}
-    />
-  );
-}
-
 // A settings sub-page while Shopify has not confirmed the plan: neither the feature nor an
 // upgrade notice can be shown truthfully.
 export function PlanUnknown({ heading }) {
@@ -42,13 +30,7 @@ export function PlanUnknown({ heading }) {
 }
 
 export function CategoryChip({ id, color = "base" }) {
-  const cat = categoryOf(id);
-  return (
-    <s-grid gridTemplateColumns="auto auto" gap="small-200" alignItems="center">
-      <Dot color={cat.color} size={8} />
-      <s-text color={color}>{cat.label}</s-text>
-    </s-grid>
-  );
+  return <s-text color={color}>{categoryOf(id).label}</s-text>;
 }
 
 // Banners for the outcome of the last action: a bulk fix (with Undo), an undo, a refresh, a failed
