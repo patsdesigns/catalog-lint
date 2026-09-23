@@ -78,9 +78,9 @@ export default function IgnoredPage() {
   if (!plan.features.ignores) {
     const needed = planFor("ignores");
     return (
-      <s-page heading="Ignored Findings">
+      <s-page heading="Ignored findings">
         <s-link slot="breadcrumb-actions" href="/app/settings">Settings</s-link>
-        <s-section heading="Ignored Findings">
+        <s-section heading="Not included in your plan">
           <s-paragraph>
             Ignoring findings is part of the {needed.name} plan and up. <s-link href="/app/plans">Upgrade to {needed.name}</s-link>
           </s-paragraph>
@@ -95,7 +95,7 @@ export default function IgnoredPage() {
   const restored = outcome?.ok ? outcome.restored : null;
 
   return (
-    <s-page heading="Ignored Findings" inlineSize="large">
+    <s-page heading="Ignored findings" inlineSize="large">
       <s-link slot="breadcrumb-actions" href="/app/settings">Settings</s-link>
       {outcome && !outcome.ok ? (
         <s-banner tone="critical" heading="Not included in your plan">

@@ -195,6 +195,12 @@ export default function Settings() {
           <s-stack gap="small">
             <s-stack direction="inline" gap="base" alignItems="center" justifyContent="space-between">
               <s-text type="strong">Checks by family</s-text>
+              {/* Every switch saves at once; this says so. */}
+              {busy && fetcher.formData?.has("disabledRules") ? (
+                <s-text color="subdued">Saving…</s-text>
+              ) : fetcher.data?.ok && fetcher.data.saved === "checks" ? (
+                <s-text color="subdued">Saved.</s-text>
+              ) : null}
             </s-stack>
             <s-search-field
               label="Filter checks"
@@ -255,11 +261,11 @@ export default function Settings() {
       </s-section>
 
 
-      <s-section slot="aside" heading="Approved Vendors">
+      <s-section slot="aside" heading="Approved vendors">
         <s-stack gap="base">
           <s-paragraph>
             One vendor per line. Leave empty to skip this check. Products whose vendor is not on this list get flagged under
-            Product Organization.
+            Product organization.
           </s-paragraph>
           <s-text-area
             label="Approved vendors"
@@ -269,13 +275,14 @@ export default function Settings() {
             onInput={(e) => setWhitelist(e.target.value)}
           ></s-text-area>
           <s-stack direction="inline" gap="small">
-            <s-button variant="primary" onClick={saveWhitelist} disabled={busy || undefined}>Save vendors</s-button>
+            <s-button variant="primary" onClick={saveWhitelist} disabled={busy || undefined} loading={(busy && fetcher.formData?.has("vendorWhitelist")) || undefined}>Save vendors</s-button>
+            {fetcher.data?.ok && fetcher.data.saved === "vendors" && !busy ? <s-text color="subdued">Saved.</s-text> : null}
           </s-stack>
         </s-stack>
       </s-section>
 
       {features.customRules ? (
-      <s-section slot="aside" heading={`Tracked Metafields (${trackedCount})`}>
+      <s-section slot="aside" heading={`Tracked metafields (${trackedCount})`}>
         <s-stack gap="small">
           <s-paragraph>
             Product metafields read with every product, flagged when a required one is empty or a value does not match
@@ -287,7 +294,7 @@ export default function Settings() {
         </s-stack>
       </s-section>
       ) : (
-        <UpgradeSection slot="aside" heading="Tracked Metafields" feature="customRules" what="Tracked metafields are" />
+        <UpgradeSection slot="aside" heading="Tracked metafields" feature="customRules" what="Tracked metafields are" />
       )}
 
       {features.dictionary ? (
@@ -307,7 +314,7 @@ export default function Settings() {
       )}
 
       {features.ignores ? (
-      <s-section slot="aside" heading={`Ignored Findings (${ignoreCount})`}>
+      <s-section slot="aside" heading={`Ignored findings (${ignoreCount})`}>
         <s-stack gap="small">
           <s-paragraph>
             Single findings hidden with Ignore on an issue page. They stay hidden until you restore them. The list lives
@@ -319,22 +326,22 @@ export default function Settings() {
         </s-stack>
       </s-section>
       ) : (
-        <UpgradeSection slot="aside" heading="Ignored Findings" feature="ignores" what="Ignoring findings is" />
+        <UpgradeSection slot="aside" heading="Ignored findings" feature="ignores" what="Ignoring findings is" />
       )}
 
       {features.weeklyDigest ? (
-      <s-section slot="aside" heading="Weekly Email">
+      <s-section slot="aside" heading="Weekly email">
         <s-stack gap="base">
           <s-paragraph>
             A summary every week: potential problems, the change since last week and the five issues to start with.
           </s-paragraph>
           <s-switch label="Send the weekly email" checked={digestEnabled || undefined} onInput={(e) => setDigestEnabled(e.target.checked)}></s-switch>
-          <s-text-field label="Email address" type="email" placeholder="you@example.com" value={digestEmail} onInput={(e) => setDigestEmail(e.target.value)}></s-text-field>
+          <s-email-field label="Email address" placeholder="you@example.com" value={digestEmail} onInput={(e) => setDigestEmail(e.target.value)}></s-email-field>
           <s-stack direction="inline" gap="small">
-            <s-button variant="primary" onClick={() => submit({ intent: "saveDigest", enabled: String(digestEnabled), email: digestEmail })} disabled={busy || undefined}>
+            <s-button variant="primary" onClick={() => submit({ intent: "saveDigest", enabled: String(digestEnabled), email: digestEmail })} disabled={busy || undefined} loading={(busy && fetcher.formData?.get("intent") === "saveDigest") || undefined}>
               Save
             </s-button>
-            <s-button onClick={() => submit({ intent: "sendTestDigest", email: digestEmail })} disabled={busy || !digestEmail.trim() || undefined}>
+            <s-button onClick={() => submit({ intent: "sendTestDigest", email: digestEmail })} disabled={busy || !digestEmail.trim() || undefined} loading={(busy && fetcher.formData?.get("intent") === "sendTestDigest") || undefined}>
               Send test email
             </s-button>
           </s-stack>
@@ -348,7 +355,7 @@ export default function Settings() {
         </s-stack>
       </s-section>
       ) : (
-        <UpgradeSection slot="aside" heading="Weekly Email" feature="weeklyDigest" what="The weekly email is" />
+        <UpgradeSection slot="aside" heading="Weekly email" feature="weeklyDigest" what="The weekly email is" />
       )}
 
     </s-page>

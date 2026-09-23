@@ -8,7 +8,7 @@ import { describeError } from "../lib/graphql.server";
 // Contact form. Messages are kept per shop in SupportMessage and, when SUPPORT_WEBHOOK_URL is set,
 // posted there as well (a Slack incoming webhook, Zapier, Make or any endpoint that takes JSON).
 
-const CATEGORIES = ["General Question", "Bug Report", "Feature Request", "Billing", "Something Else"];
+const CATEGORIES = ["General question", "Bug report", "Feature request", "Billing", "Something else"];
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const EMPTY = { name: "", email: "", category: CATEGORIES[0], subject: "", message: "" };
 
@@ -98,21 +98,21 @@ export default function SupportPage() {
           <s-paragraph>{outcome.error}</s-paragraph>
         </s-banner>
       ) : null}
-      <s-section heading="Contact Support">
+      <s-section heading="Contact support">
         <s-stack gap="base">
           <s-paragraph>Have a question or need help? Fill out the form below and we will get back to you as soon as possible.</s-paragraph>
-          <s-text-field label="Your Name" placeholder="Your name" required value={form.name} onInput={set("name")}></s-text-field>
-          <s-text-field label="Your Email" type="email" placeholder="your@email.com" required value={form.email} onInput={set("email")}></s-text-field>
+          <s-text-field label="Your name" placeholder="Your name" required value={form.name} onInput={set("name")}></s-text-field>
+          <s-email-field label="Your email" placeholder="you@example.com" required value={form.email} onInput={set("email")}></s-email-field>
           <s-select label="Category" value={form.category} onInput={set("category")} onChange={set("category")}>
             {CATEGORIES.map((c) => (
               <s-option key={c} value={c}>{c}</s-option>
             ))}
           </s-select>
           <s-text-field label="Subject" placeholder="Brief description of your inquiry" required value={form.subject} onInput={set("subject")}></s-text-field>
-          <s-text-area label="Message" placeholder="Please describe your question or issue in detail..." rows={10} required value={form.message} onInput={set("message")}></s-text-area>
+          <s-text-area label="Message" placeholder="Describe your question or issue" rows={10} required value={form.message} onInput={set("message")}></s-text-area>
           <s-stack direction="inline" justifyContent="end">
             <s-button variant="primary" onClick={send} disabled={!valid || busy || undefined} loading={busy || undefined}>
-              Send Message
+              Send message
             </s-button>
           </s-stack>
         </s-stack>

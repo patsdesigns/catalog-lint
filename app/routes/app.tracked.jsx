@@ -61,9 +61,10 @@ export async function action({ request }) {
 }
 
 const TWO_COLUMNS = "@container (inline-size <= 760px) 1fr, 1fr 1fr";
+const ADD_COLUMNS = "@container (inline-size <= 560px) 1fr, 1fr auto";
 
 // One tracked metafield: its settings, saved together, and Remove.
-function TrackedRow({ t, busy, onSave, onRemove }) {
+function TrackedRow({ t, busy, saving, removing, onSave, onRemove }) {
   const [form, setForm] = useState({ required: t.required, pattern: t.pattern, productType: t.productType });
   const changed = form.required !== t.required || form.pattern !== t.pattern || form.productType !== t.productType;
   const set = (patch) => setForm({ ...form, ...patch });
@@ -90,10 +91,10 @@ function TrackedRow({ t, busy, onSave, onRemove }) {
           onInput={(e) => set({ productType: e.target.value })}
         ></s-text-field>
         <s-stack direction="inline" gap="small">
-          <s-button variant="primary" onClick={() => onSave(t.id, form)} disabled={!changed || busy || undefined}>
+          <s-button variant="primary" onClick={() => onSave(t.id, form)} disabled={!changed || busy || undefined} loading={saving || undefined}>
             Save
           </s-button>
-          <s-button variant="tertiary" onClick={() => onRemove(t.id)} disabled={busy || undefined} accessibilityLabel={`Stop tracking ${t.name}`}>
+          <s-button variant="tertiary" onClick={() => onRemove(t.id)} disabled={busy || undefined} loading={removing || undefined} accessibilityLabel={`Stop tracking ${t.name}`}>
             Remove
           </s-button>
         </s-stack>
@@ -107,6 +108,9 @@ export default function TrackedPage() {
   const fetcher = useFetcher();
   const busy = fetcher.state !== "idle";
   const outcome = fetcher.data;
+  // What is being saved right now, so the pressed button shows it.
+  const active = busy ? fetcher.formData?.get("intent") : null;
+  const activeId = busy ? fetcher.formData?.get("id") : null;
   const submit = (payload) => fetcher.submit(payload, { method: "post" });
   const available = definitions.filter((d) => !tracked.some((t) => t.namespace === d.namespace && t.key === d.key));
   const [pick, setPick] = useState("");
@@ -121,9 +125,9 @@ export default function TrackedPage() {
   if (!plan.features.customRules) {
     const needed = planFor("customRules");
     return (
-      <s-page heading="Tracked Metafields">
+      <s-page heading="Tracked metafields">
         <s-link slot="breadcrumb-actions" href="/app/settings">Settings</s-link>
-        <s-section heading="Tracked Metafields">
+        <s-section heading="Not included in your plan">
           <s-paragraph>
             Tracked metafields are part of the {needed.name} plan and up. <s-link href="/app/plans">Upgrade to {needed.name}</s-link>
           </s-paragraph>
@@ -133,7 +137,7 @@ export default function TrackedPage() {
   }
 
   return (
-    <s-page heading="Tracked Metafields" inlineSize="large">
+    <s-page heading="Tracked metafields" inlineSize="large">
       <s-link slot="breadcrumb-actions" href="/app/settings">Settings</s-link>
       {outcome && !outcome.ok ? (
         <s-banner tone="critical" heading="Something went wrong">
@@ -143,6 +147,16 @@ export default function TrackedPage() {
       {outcome?.ok && outcome.done === "track" ? (
         <s-banner tone="success" heading={`Now tracking ${outcome.name}`}>
           <s-paragraph>Its values are read on the next scan; the Metafields checks cover it from then on.</s-paragraph>
+        </s-banner>
+      ) : null}
+      {outcome?.ok && outcome.done === "update" ? (
+        <s-banner tone="success" heading="Saved">
+          <s-paragraph>The setting applies from the next scan; findings it no longer covers are gone now.</s-paragraph>
+        </s-banner>
+      ) : null}
+      {outcome?.ok && outcome.done === "untrack" ? (
+        <s-banner tone="success" heading="No longer tracked">
+          <s-paragraph>Its findings are gone and its column leaves the issue pages on the next scan.</s-paragraph>
         </s-banner>
       ) : null}
       {definitionsError ? (
@@ -160,28 +174,31 @@ export default function TrackedPage() {
           {tracked.length >= max ? (
             <s-text color="subdued">The limit of {max} tracked metafields is reached. Remove one to add another.</s-text>
           ) : available.length ? (
-            <s-stack direction="inline" gap="small" alignItems="end">
-              <s-select
-                label="Product metafield"
-                value={chosen ? chosen.id : ""}
-                onInput={(e) => setPick(e.target.value)}
-                onChange={(e) => setPick(e.target.value)}
-              >
-                {available.map((d) => (
-                  <s-option key={d.id} value={d.id}>
-                    {d.name} · {d.namespace}.{d.key} · {d.type}
-                  </s-option>
-                ))}
-              </s-select>
-              <s-button variant="primary" onClick={add} disabled={busy || !chosen || undefined}>
-                Add
-              </s-button>
-            </s-stack>
+            // The select beside the button, under it when the section is narrow (a phone).
+            <s-query-container>
+              <s-grid gridTemplateColumns={ADD_COLUMNS} gap="small" alignItems="end">
+                <s-select
+                  label="Product metafield"
+                  value={chosen ? chosen.id : ""}
+                  onInput={(e) => setPick(e.target.value)}
+                  onChange={(e) => setPick(e.target.value)}
+                >
+                  {available.map((d) => (
+                    <s-option key={d.id} value={d.id}>
+                      {d.name} · {d.namespace}.{d.key} · {d.type}
+                    </s-option>
+                  ))}
+                </s-select>
+                <s-button variant="primary" onClick={add} disabled={busy || !chosen || undefined} loading={active === "track" || undefined}>
+                  Add
+                </s-button>
+              </s-grid>
+            </s-query-container>
           ) : (
             <s-text color="subdued">
               {definitions.length
                 ? "Every product metafield definition is tracked."
-                : "No product metafield definitions yet. Create one in Shopify under Settings, Custom data, Products."}
+                : "No product metafield definitions yet. Create one in Shopify under Settings > Custom data > Products."}
             </s-text>
           )}
         </s-stack>
@@ -197,6 +214,8 @@ export default function TrackedPage() {
                   key={t.id}
                   t={t}
                   busy={busy}
+                  saving={active === "update" && activeId === String(t.id)}
+                  removing={active === "untrack" && activeId === String(t.id)}
                   onSave={(id, form) => submit({ intent: "update", id: String(id), required: String(form.required), pattern: form.pattern, productType: form.productType })}
                   onRemove={(id) => submit({ intent: "untrack", id: String(id) })}
                 />

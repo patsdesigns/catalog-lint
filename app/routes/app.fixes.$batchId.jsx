@@ -90,7 +90,6 @@ export default function FixBatchPage() {
     return (
       <s-page heading="Recent fix" inlineSize="large">
         <s-link slot="breadcrumb-actions" href="/app">Issues</s-link>
-        <s-button slot="secondary-actions" href="/app">Back to issues</s-button>
         {notices}
         <s-section>
           <s-stack alignItems="center" gap="small" paddingBlock="large">
@@ -112,8 +111,7 @@ export default function FixBatchPage() {
   return (
     <s-page heading={batch.label} inlineSize="large">
       <s-link slot="breadcrumb-actions" href="/app">Issues</s-link>
-      <s-button slot="secondary-actions" href="/app">Back to issues</s-button>
-      <s-button slot="secondary-actions" onClick={() => undo(null)} disabled={busy || undefined}>Undo all</s-button>
+      <s-button slot="secondary-actions" onClick={() => undo(null)} disabled={busy || undefined} loading={(busy && !fetcher.formData?.get("productId")) || undefined}>Undo all</s-button>
       {notices}
       <s-section padding="none">
         <s-box padding="base">
@@ -166,7 +164,7 @@ export default function FixBatchPage() {
         ) : null}
         <s-box padding="base">
           <s-stack direction="inline" gap="base" alignItems="center" justifyContent="space-between">
-            <s-button variant="tertiary" icon="arrow-left" href="/app">Back to issues</s-button>
+            <s-link href="/app">Back to issues</s-link>
             {hidden > 0 ? <s-text color="subdued">Showing {n(rows.length)} of {n(filtered.length)}. Use search to narrow down.</s-text> : null}
           </s-stack>
         </s-box>

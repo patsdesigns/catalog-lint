@@ -1,21 +1,12 @@
 // Presentational pieces shared by the home and issue pages. Client-safe: no server imports.
 import { categoryOf } from "./categories";
-import { PASS_LABELS } from "./checkLabels";
+import { PASS_LABELS, FIX_NAMES } from "./checkLabels";
 
 export const TONE = { high: "critical", medium: "warning", low: "neutral" };
 
-// Short names for the bulk fixes, used in notices and the Recent Fixes card.
-const RULE_LABELS = {
-  vendor_casing: "Vendor spelling",
-  missing_weight: "Shipping weight",
-  missing_alt_text: "Image alt text",
-  compare_at_not_higher: "Sale price",
-  zero_price: "Price",
-  missing_sku: "SKU",
-  duplicate_sku: "Duplicate SKU",
-};
+// Short names for the bulk fixes (checkLabels.js), used in notices and the Recent fixes card.
 export function ruleLabel(id) {
-  return RULE_LABELS[id] || id.replace(/_/g, " ");
+  return FIX_NAMES[id] || id.replace(/_/g, " ");
 }
 
 // Passing-state sentence for a rule: "Passes when every product has a description."
@@ -128,7 +119,7 @@ export function Notices({ data, onUndo, onRestore, busy }) {
           ) : null}
           {scanNew.held ? (
             <s-paragraph>
-              {scanNew.held} more {scanNew.held === 1 ? "is" : "are"} waiting: the product limit of your plan is reached.
+              {scanNew.held} more {scanNew.held === 1 ? "is" : "are"} waiting: the product limit of your plan has been reached.
             </s-paragraph>
           ) : null}
         </s-banner>

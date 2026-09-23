@@ -92,7 +92,7 @@ const THREE_COLUMNS = "@container (inline-size > 900px) 1fr 1fr 1fr, (inline-siz
 const FOUR_COLUMNS = "@container (inline-size > 1000px) 1fr 1fr 1fr 1fr, (inline-size > 560px) and (inline-size <= 1000px) 1fr 1fr, 1fr";
 const FEATURE_ORDER = Object.keys(FEATURE_LABELS);
 
-function PlanCard({ plan, current, note, claimed, footnote, busy, locale, onChoose }) {
+function PlanCard({ plan, current, note, claimed, footnote, busy, choosing, locale, onChoose }) {
   const included = FEATURE_ORDER.filter((key) => plan.features[key] && !COMING_SOON.has(key));
   const later = FEATURE_ORDER.filter((key) => plan.features[key] && COMING_SOON.has(key));
   return (
@@ -103,14 +103,14 @@ function PlanCard({ plan, current, note, claimed, footnote, busy, locale, onChoo
             <s-heading>{plan.name}</s-heading>
             {current ? <s-badge tone="success">Current plan</s-badge> : plan.earlyBird ? <s-badge tone="info">Limited offer</s-badge> : null}
           </s-stack>
-          <s-text type="strong">{plan.price ? `$${plan.price} / month` : "Free"}</s-text>
+          <s-text type="strong">{plan.price ? `$${plan.price} every 30 days` : "Free"}</s-text>
           <s-text color="subdued">{plan.productLimit ? `Up to ${plan.productLimit.toLocaleString(locale)} products` : "Unlimited products"}</s-text>
           <s-text color="subdued">{plan.areas.length === ALL_AREAS.length ? `All ${ALL_AREAS.length} check areas` : `${plan.areas.length} of ${ALL_AREAS.length} check areas`}</s-text>
           {note ? <s-text>{note}</s-text> : null}
           {claimed ? <s-text color="subdued">{claimed}</s-text> : null}
         </s-stack>
         <s-unordered-list>
-          <s-list-item>Full scan, fix-all buttons and undo</s-list-item>
+          <s-list-item>Full scans, Fix all and undo</s-list-item>
           {included.map((key) => (
             <s-list-item key={key}>{FEATURE_LABELS[key]}</s-list-item>
           ))}
@@ -124,6 +124,7 @@ function PlanCard({ plan, current, note, claimed, footnote, busy, locale, onChoo
         <s-button
           variant={current ? "secondary" : "primary"}
           disabled={current || busy || undefined}
+          loading={choosing === plan.id || undefined}
           onClick={() => onChoose(plan.id)}
           accessibilityLabel={current ? `${plan.name} is your current plan` : `Choose ${plan.name}`}
         >
@@ -143,7 +144,9 @@ export default function PlansPage() {
   const choose = (id) => fetcher.submit({ plan: id }, { method: "post" });
   // The offer sits right after the free plan; the subscription condition is a footnote in its card.
   const cards = earlyBird.show ? [plans[0], earlyBird.plan, ...plans.slice(1)] : plans;
-  const offer = `First ${earlyBird.seats} stores get Deep Clean for $${earlyBird.plan.price} a month*`;
+  const offer = `First ${earlyBird.seats} stores get Deep Clean for $${earlyBird.plan.price} every 30 days*`;
+  // The plan whose button was pressed, so it shows the wait for the approval screen.
+  const choosing = busy ? fetcher.formData?.get("plan") : null;
   const claimed = `${earlyBird.claimed} of ${earlyBird.seats} claimed`;
 
   return (
@@ -181,6 +184,7 @@ export default function PlansPage() {
                   claimed={plan.earlyBird ? claimed : null}
                   footnote={plan.earlyBird ? "* Keep it as long as you stay subscribed." : null}
                   busy={busy}
+                  choosing={choosing}
                   locale={locale}
                   onChoose={choose}
                 />

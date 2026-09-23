@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { redirect, useFetcher, useLoaderData, useNavigate } from "react-router";
+import { redirect, useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { refreshAfter } from "../lib/rescan.server";
@@ -170,9 +170,11 @@ const MAX_ROWS = 100;
 // width, so the correction field sits in a one-track grid whose track has a real width: wide enough
 // for ~30 characters of text, narrower only for numeric values (a price or a weight). (Sizing props
 // such as minInlineSize do not accept the @container syntax at runtime; grid tracks do.)
+// Below 600px the field takes the whole cell and the buttons go under it (see fixTracks), so a
+// phone-width list item does not overflow.
 const CORRECTED_TRACKS = {
-  text: "@container (inline-size > 1100px) 320px, (inline-size > 900px) and (inline-size <= 1100px) 260px, 160px",
-  numeric: "@container (inline-size > 900px) 120px, 96px",
+  text: "@container (inline-size > 1100px) 320px, (inline-size > 900px) and (inline-size <= 1100px) 260px, (inline-size > 600px) and (inline-size <= 900px) 160px, 1fr",
+  numeric: "@container (inline-size > 900px) 120px, (inline-size > 600px) and (inline-size <= 900px) 96px, 1fr",
 };
 const NUMERIC_FIELDS = new Set(["price", "compareAt"]);
 function isNumericEdit(e) {
@@ -185,11 +187,13 @@ const CURRENT_TRACK = "@container (inline-size > 1100px) 200px, (inline-size > 9
 function actionTracks(count) {
   return Array(count).fill("auto").join(" ");
 }
-// The Fix cell grid: the input track followed by one auto track per button, at every width. The
-// input track is a responsive list, so the button tracks go on each of its alternatives.
+// The Fix cell grid: the input track followed by one auto track per button. The input track is a
+// responsive list, so the button tracks go on each of its alternatives except the last (the
+// narrowest), where the cell is a single column and the buttons stack under the field.
 function fixTracks(track, actionCount) {
   const actions = actionTracks(actionCount);
-  return track.split(",").map((part) => `${part.trim()} ${actions}`).join(", ");
+  const parts = track.split(",").map((part) => part.trim());
+  return parts.map((part, i) => (i === parts.length - 1 ? part : `${part} ${actions}`)).join(", ");
 }
 
 // Column plan for one rule. The SKU column exists once findings record SKUs (scans saved before
@@ -386,7 +390,7 @@ function FindingRow({ f, columns, tracked, features, onSave, onLearn, onIgnore, 
                 icon="external"
                 accessibilityLabel={`View product: ${f.productTitle}, opens in Shopify admin in a new tab`}
               >
-                View Product
+                View product
               </s-button>
             ) : null}
             {f.word && features.dictionary ? (
@@ -406,7 +410,7 @@ function FindingRow({ f, columns, tracked, features, onSave, onLearn, onIgnore, 
   );
 }
 
-function Detail({ rule, findings, tracked, features, locale, onSave, onLearn, onIgnore, onUndo, onBack, busy }) {
+function Detail({ rule, findings, tracked, features, locale, onSave, onLearn, onIgnore, onUndo, busy }) {
   const [query, setQuery] = useState("");
   const q = query.trim().toLowerCase();
   const filtered = q
@@ -416,7 +420,7 @@ function Detail({ rule, findings, tracked, features, locale, onSave, onLearn, on
   const hidden = filtered.length - rows.length;
   const columns = detailColumns(findings, features);
   const help = !features.inlineEdits
-    ? `View each product to fix it in Shopify. Inline edits are part of the ${planFor("inlineEdits").name} plan.`
+    ? `View each product to fix it in Shopify. Inline edits are part of the ${planFor("inlineEdits").name} plan and up.`
     : columns.fix
       ? "Check the current value, then Quick apply the suggestion, type a correction and save, or ignore what is intentional. Changes stay listed until you refresh."
       : "View each product to fix it in Shopify, or ignore what is intentional.";
@@ -457,9 +461,9 @@ function Detail({ rule, findings, tracked, features, locale, onSave, onLearn, on
             onInput={(e) => setQuery(e.target.value)}
           ></s-search-field>
           <s-table-body>
-            {rows.map((f, i) => (
+            {rows.map((f) => (
               <FindingRow
-                key={`${f.productId}-${f.variantId || ""}-${f.word || ""}-${i}`}
+                key={`${f.productId}-${f.variantId || ""}-${f.word || ""}-${f.field || ""}`}
                 f={f}
                 columns={columns}
                 tracked={tracked}
@@ -477,10 +481,10 @@ function Detail({ rule, findings, tracked, features, locale, onSave, onLearn, on
       {rows.length === 0 ? (
         <s-box padding="base"><s-text color="subdued">No products match your search.</s-text></s-box>
       ) : null}
-      {/* A second way back under the list, for readers who scrolled past the header. */}
+      {/* A second way back under the list, for readers who scrolled past the breadcrumb. */}
       <s-box padding="base">
         <s-stack direction="inline" gap="base" alignItems="center" justifyContent="space-between">
-          <s-button variant="tertiary" icon="arrow-left" onClick={onBack}>Back to issues</s-button>
+          <s-link href="/app">Back to issues</s-link>
           {hidden > 0 ? (
             <s-text color="subdued">Showing {rows.length} of {filtered.length}. Use search to narrow down.</s-text>
           ) : rule.count > findings.length ? (
@@ -494,14 +498,14 @@ function Detail({ rule, findings, tracked, features, locale, onSave, onLearn, on
 }
 
 // Nothing open for this check: every product passes it, or its findings were ignored or fixed.
-function AllClear({ onBack }) {
+function AllClear() {
   return (
     <s-section>
       <s-stack alignItems="center" gap="small" paddingBlock="large">
         <s-icon type="check-circle" tone="success" />
         <s-heading>Nothing open for this check</s-heading>
         <s-text color="subdued">Every product passes it, or its findings were fixed or ignored.</s-text>
-        <s-button variant="tertiary" icon="arrow-left" onClick={onBack}>Back to issues</s-button>
+        <s-link href="/app">Back to issues</s-link>
       </s-stack>
     </s-section>
   );
@@ -515,7 +519,6 @@ const keyOf = (f) => ({ ruleId: f.ruleId, productId: f.productId, variantId: f.v
 export default function IssuePage() {
   const { rule, findings, plan, planUnknown, label, tracked, locale } = useLoaderData();
   const fetcher = useFetcher();
-  const navigate = useNavigate();
   const busy = fetcher.state !== "idle";
   const data = fetcher.data;
 
@@ -529,7 +532,6 @@ export default function IssuePage() {
     pending.current = true;
     fetcher.submit(payload, { method: "post" });
   };
-  const back = () => navigate("/app");
   const runFix = () => submit({ intent: "fix" });
   const runUndo = (batchId, finding) => submit(finding ? { intent: "undo", batchId, finding: JSON.stringify(keyOf(finding)) } : { intent: "undo", batchId });
   const learnWord = (word) => submit({ intent: "learn", word });
@@ -541,12 +543,12 @@ export default function IssuePage() {
   const runRefresh = () => submit({ intent: "refresh" });
   const ignoreCheck = () => submit({ intent: "disableRule" });
   const refreshing = busy && fetcher.formData?.get("intent") === "refresh";
+  const fixing = busy && fetcher.formData?.get("intent") === "fix";
 
   return (
     <s-page heading={label} inlineSize="large">
       {/* The breadcrumb is the standard way back; the button makes it obvious. */}
       <s-link slot="breadcrumb-actions" href="/app">Issues</s-link>
-      <s-button slot="secondary-actions" onClick={back}>Back to issues</s-button>
       {rule ? (
         <s-button slot="secondary-actions" onClick={runRefresh} loading={refreshing || undefined} disabled={busy || undefined}>
           Refresh
@@ -558,7 +560,7 @@ export default function IssuePage() {
         </s-button>
       ) : null}
       {rule?.fixable ? (
-        <s-button slot="primary-action" variant="primary" onClick={runFix} disabled={busy || undefined}>
+        <s-button slot="primary-action" variant="primary" onClick={runFix} loading={fixing || undefined} disabled={busy || undefined}>
           {rule.fixLabel}
         </s-button>
       ) : null}
@@ -584,13 +586,12 @@ export default function IssuePage() {
           onSave={saveEdit}
           onLearn={learnWord}
           onIgnore={ignoreFinding}
-          onBack={back}
           onUndo={runUndo}
           features={plan.features}
           busy={busy}
         />
       ) : (
-        <AllClear onBack={back} />
+        <AllClear />
       )}
     </s-page>
   );

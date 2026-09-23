@@ -145,12 +145,14 @@ const START_HERE_ROWS = 5;
 // matter what the rows contain. The primary track has a range rather than one size, so the text
 // column is the one that takes the slack. The action tracks fit the Review and edit and the
 // Ignore this check buttons.
+// Below 900px of container width the fixed tracks give way, so the table fits a narrow card
+// (and a phone) instead of scrolling sideways.
 const OVERVIEW_TRACKS = {
-  primary: "minmax(240px, 640px)",
+  primary: "@container (inline-size > 900px) minmax(240px, 640px), minmax(160px, 1fr)",
   inline: "72px",
   numeric: "56px",
-  action: "160px",
-  ignore: "148px",
+  action: "@container (inline-size > 900px) 160px, auto",
+  ignore: "@container (inline-size > 900px) 148px, auto",
 };
 // Each card splits into its table (about three quarters) and a side panel. Below ~1000px of card
 // width the panel moves under the table. (Unquoted minmax() breaks Polaris's responsive parser,
@@ -171,9 +173,6 @@ function splitLabel(label) {
   const m = /^(.*\S)\s+(\([^()]*\))$/.exec(label);
   return m ? { main: m[1], aside: m[2] } : { main: label, aside: "" };
 }
-const BAR_COLOR = "#616161"; // the trend bars
-// Light tints for the side panels. Polaris has no tinted-background prop, so they are inline styles.
-const PASSED_BACKGROUND = "rgba(41, 132, 90, 0.08)";
 
 // ---------- shared pieces ----------
 
@@ -282,14 +281,15 @@ function Trend({ history, locale }) {
       <s-stack gap="small-500">
         <div aria-hidden="true" style={{ display: "flex", alignItems: "flex-end", gap: "4px", height: "40px", width: `${trackWidth}px` }}>
           {history.map((h, i) => (
+            // The bars take the text color (no color of their own); the latest one is solid.
             <div
-              key={i}
+              key={h.at || i}
               title={describe(h)}
               style={{
                 width: "12px",
                 height: `${barHeight(h.open)}px`,
                 borderRadius: "2px 2px 0 0",
-                background: BAR_COLOR,
+                background: "currentColor",
                 opacity: i === history.length - 1 ? 1 : 0.4,
               }}
             />
@@ -344,7 +344,7 @@ function Summary({ result, history, fixedWeek, fixedTotal, checksOn, checksTotal
               <s-stack direction="inline" gap="small-200" alignItems="center">
                 <s-icon type="check-circle" tone="success" />
                 <s-text color="subdued">
-                  {streak > 0 ? `No high severity problems for ${streak} ${streak === 1 ? "day" : "days"}` : "No high severity problems"}
+                  {streak > 0 ? `No high-severity problems for ${streak} ${streak === 1 ? "day" : "days"}` : "No high-severity problems"}
                 </s-text>
               </s-stack>
             ) : null}
@@ -408,13 +408,16 @@ function IssueRow({ rule, onSelect, onIgnore, busy, showCategory }) {
   const { main, aside } = splitLabel(rule.label);
   const sub = aside || (showCategory ? categoryOf(rule.category).label : "");
   // The aside is context, but it is still part of the rule name for assistive tech.
+  // A real link (with a URL) rather than a click handler, so it opens in a new tab like any link.
   const link = (
-    <s-link id={`rule-${rule.ruleId}`} onClick={() => onSelect(rule.ruleId)} accessibilityLabel={aside ? rule.label : undefined}>
+    <s-link href={`/app/issues/${rule.ruleId}`} accessibilityLabel={aside ? rule.label : undefined}>
       {main}
     </s-link>
   );
   return (
-    <s-table-row clickDelegate={`rule-${rule.ruleId}`}>
+    // No click delegate: the row holds two buttons of its own, and a click on Ignore must not also
+    // open the issue page.
+    <s-table-row>
       <s-table-cell>
         <s-text fontVariantNumeric="tabular-nums">{rule.count}</s-text>
       </s-table-cell>
@@ -463,7 +466,7 @@ function SeverityBadges({ rules }) {
   return (
     <s-stack direction="inline" gap="small-300" alignItems="center">
       {["high", "medium", "low"].filter((s) => counts[s] > 0).map((s) => (
-        <s-badge key={s} tone={TONE[s]} size="small">
+        <s-badge key={s} tone={TONE[s]}>
           {counts[s]} {s}
         </s-badge>
       ))}
@@ -477,10 +480,9 @@ function SeverityBadges({ rules }) {
 function PassedChecks({ passed, skipped, off, failing, expanded }) {
   const total = passed.length + failing;
   return (
-    // Polaris has no tinted-background prop, so the tint is an inline style; the card grid stretches
-    // the panel to the full height of the card body.
-    <div style={{ background: PASSED_BACKGROUND }}>
-      <s-box padding="base">
+    // The card grid stretches the panel to the full height of the card body.
+    <div>
+      <s-box padding="base" background="subdued">
         <s-stack gap="small-200">
           <s-stack direction="inline" gap="small-200" alignItems="center">
             <s-icon type="check-circle" tone="success" />
@@ -535,7 +537,7 @@ function CardBody({ table, panel }) {
 
 // The failing checks with the most weight across every section, so a merchant knows where to
 // begin: findings count times severity. Beside the summary in the header.
-function StartHere({ result, locked, onSelect, onFixAll, busy, locale }) {
+function StartHere({ result, locked, onFixAll, busy, fixing, locale }) {
   const n = (v) => (v || 0).toLocaleString(locale);
   const ranked = result.rules
     .filter((r) => !locked.includes(r.category))
@@ -544,7 +546,7 @@ function StartHere({ result, locked, onSelect, onFixAll, busy, locale }) {
   return (
     <s-section heading="Start here">
       <s-stack gap="base">
-        <s-text color="subdued">Ranked by findings, weighted by severity</s-text>
+        <s-text color="subdued">Ranked by findings, weighted by severity.</s-text>
         {ranked.length === 0 ? (
           <s-text color="subdued">Every open issue is in a {allAreasPlan().name} area.</s-text>
         ) : (
@@ -557,7 +559,7 @@ function StartHere({ result, locked, onSelect, onFixAll, busy, locale }) {
                     {i + 1}
                   </s-text>
                   <s-stack gap="small-500">
-                    <s-link onClick={() => onSelect(rule.ruleId)}>{rule.label}</s-link>
+                    <s-link href={`/app/issues/${rule.ruleId}`}>{rule.label}</s-link>
                     <s-text color="subdued">{categoryOf(rule.category).label}</s-text>
                   </s-stack>
                   <s-text color="subdued" fontVariantNumeric="tabular-nums">
@@ -570,12 +572,13 @@ function StartHere({ result, locked, onSelect, onFixAll, busy, locale }) {
                         variant="secondary"
                         onClick={() => onFixAll(rule.ruleId)}
                         disabled={busy || undefined}
+                        loading={fixing === rule.ruleId || undefined}
                         accessibilityLabel={`Fix all: ${rule.fixLabel || rule.label}`}
                       >
                         Fix all
                       </s-button>
                     ) : (
-                      <s-link onClick={() => onSelect(rule.ruleId)} accessibilityLabel={`Review ${rule.label}`}>
+                      <s-link href={`/app/issues/${rule.ruleId}`} accessibilityLabel={`Review ${rule.label}`}>
                         Review
                       </s-link>
                     )}
@@ -629,7 +632,7 @@ function CategoryFilter({ result, locked, filter, onChange }) {
   return (
     <s-stack direction="inline" gap="small-200" alignItems="center">
       <s-clickable-chip color={filter ? "base" : "strong"} onClick={() => onChange(null)} accessibilityLabel={`Show all areas, ${total} findings`}>
-        All Areas · {total}
+        All areas · {total}
       </s-clickable-chip>
       {cards.map(({ cat, count }) => (
         <s-clickable-chip
@@ -663,7 +666,7 @@ function CategoryCard({ cat, rules, checks, showChecks, showPassed, locked, onSe
           <CardHeader
             color={cat.color}
             heading={cat.label}
-            badges={<s-badge size="small" icon="lock">{fullPlan}</s-badge>}
+            badges={<s-badge icon="lock">{fullPlan}</s-badge>}
             aside={<s-text color="subdued" fontVariantNumeric="tabular-nums">{rules.length ? `${total} findings` : "No findings"}</s-text>}
           />
         </AccentTop>
@@ -715,7 +718,7 @@ function CategoryCard({ cat, rules, checks, showChecks, showPassed, locked, onSe
 // Remembered per browser: whether the cards list every passed check or just the count.
 const SHOW_PASSED_KEY = "catalog-lint:show-passed";
 
-function Overview({ result, history, fixedWeek, fixedTotal, plan, newProducts, streak, locked, locale, onSelect, onIgnore, onFixAll, busy }) {
+function Overview({ result, history, fixedWeek, fixedTotal, plan, newProducts, streak, locked, locale, onSelect, onIgnore, onFixAll, busy, fixing }) {
   const [filter, setFilter] = useState(null);
   const [showPassed, setShowPassed] = useState(false);
   const checks = result.checks || [];
@@ -745,7 +748,7 @@ function Overview({ result, history, fixedWeek, fixedTotal, plan, newProducts, s
       <s-query-container>
         <s-grid gridTemplateColumns={HEADER_COLUMNS} gap="base">
           <Summary result={result} history={history} fixedWeek={fixedWeek} fixedTotal={fixedTotal} checksOn={checksOn} checksTotal={checks.length} newProducts={newProducts} streak={streak} locked={locked} locale={locale} />
-          {result.rules.length === 0 ? <CleanSection total={result.total} /> : <StartHere result={result} locked={locked} onSelect={onSelect} onFixAll={onFixAll} busy={busy} locale={locale} />}
+          {result.rules.length === 0 ? <CleanSection total={result.total} /> : <StartHere result={result} locked={locked} onFixAll={onFixAll} busy={busy} fixing={fixing} locale={locale} />}
         </s-grid>
       </s-query-container>
       </s-box>
@@ -819,7 +822,7 @@ function Welcome({ checkCount, onScan, busy, scanning }) {
               </s-paragraph>
             </div>
             <s-button variant="primary" onClick={onScan} loading={busy || undefined} disabled={scanning || undefined}>
-              {scanning ? "Scanning…" : "Run Full Scan"}
+              {scanning ? "Scanning…" : "Run full scan"}
             </s-button>
           </s-stack>
           <s-divider></s-divider>
@@ -880,13 +883,15 @@ export default function Index() {
   const runFixAll = (ruleId) => submit({ intent: "fixAll", ruleId });
   const runScanNew = () => submit({ intent: "scanNew" });
   const scanningNew = busy && fetcher.formData?.get("intent") === "scanNew";
+  // The Start here row whose Fix all is running, so its button shows it.
+  const fixing = busy && fetcher.formData?.get("intent") === "fixAll" ? fetcher.formData.get("ruleId") : null;
   // Each check has a page of its own (app.issues.$ruleId.jsx) with the products it flagged.
   const openIssue = (ruleId) => navigate(`/app/issues/${ruleId}`);
 
   return (
     <s-page heading="TidyUp: Product Data Cleanup" inlineSize="large">
       <s-button slot="primary-action" variant="primary" onClick={runScan} loading={busy || undefined} disabled={scanning || undefined}>
-        {scanning ? "Scanning…" : result ? "Scan Again" : "Run Full Scan"}
+        {scanning ? "Scanning…" : result ? "Scan again" : "Run full scan"}
       </s-button>
       {result && (plan.features.newProductScans || pending > 0) ? (
         // Paid plans: the products added since the last read (webhooks handle changes as they happen).
@@ -900,9 +905,9 @@ export default function Index() {
         >
           {plan.features.newProductScans
             ? newProducts
-              ? `Scan New Products (${newProducts})`
-              : "Scan New Products"
-            : `Scan Changed Products (${pending})`}
+              ? `Scan new products (${newProducts})`
+              : "Scan new products"
+            : `Scan changed products (${pending})`}
         </s-button>
       ) : null}
 
@@ -939,6 +944,7 @@ export default function Index() {
           onIgnore={runIgnore}
           onFixAll={runFixAll}
           busy={busy}
+          fixing={fixing}
         />
       )}
     </s-page>

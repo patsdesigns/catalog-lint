@@ -46,6 +46,8 @@ export async function action({ request }) {
 }
 
 const MAX_ROWS = 200;
+// The field beside the button, under it when the section is narrow (a phone).
+const ADD_COLUMNS = "@container (inline-size <= 480px) 1fr, 1fr auto";
 
 export default function DictionaryPage() {
   const { words, plan, planUnknown } = useLoaderData();
@@ -69,7 +71,7 @@ export default function DictionaryPage() {
     return (
       <s-page heading="Dictionary">
         <s-link slot="breadcrumb-actions" href="/app/settings">Settings</s-link>
-        <s-section heading="Dictionary">
+        <s-section heading="Not included in your plan">
           <s-paragraph>
             The spelling dictionary is part of the {needed.name} plan and up. <s-link href="/app/plans">Upgrade to {needed.name}</s-link>
           </s-paragraph>
@@ -95,20 +97,27 @@ export default function DictionaryPage() {
             Words here are never flagged as misspellings. Brand names, part codes and jargon belong here. Trust word on
             a spelling finding adds to this list too.
           </s-paragraph>
-          <s-stack direction="inline" gap="small" alignItems="end">
-            <s-text-field
-              label="Add a word"
-              placeholder="e.g. turbo, ceramic, hoodie"
-              value={word}
-              onInput={(e) => setWord(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") add();
-              }}
-            ></s-text-field>
-            <s-button variant="primary" onClick={add} disabled={busy || !word.trim() || undefined}>
-              Add
-            </s-button>
-          </s-stack>
+          {/* A form, so Enter in the field adds the word. */}
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              add();
+            }}
+          >
+            <s-query-container>
+              <s-grid gridTemplateColumns={ADD_COLUMNS} gap="small" alignItems="end">
+                <s-text-field
+                  label="Add a word"
+                  placeholder="For example turbo, ceramic, hoodie"
+                  value={word}
+                  onInput={(e) => setWord(e.target.value)}
+                ></s-text-field>
+                <s-button variant="primary" type="submit" disabled={busy || !word.trim() || undefined} loading={(busy && fetcher.formData?.get("intent") === "addWord") || undefined}>
+                  Add
+                </s-button>
+              </s-grid>
+            </s-query-container>
+          </form>
           {words.length > 20 ? (
             <s-search-field
               label="Search"

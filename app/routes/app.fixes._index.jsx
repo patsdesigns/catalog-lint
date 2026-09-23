@@ -1,4 +1,5 @@
-import { useFetcher, useLoaderData, useNavigate } from "react-router";
+import { useEffect, useRef } from "react";
+import { useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { undoFix, recentFixes, fixedCount } from "../lib/fixes.server";
@@ -48,15 +49,21 @@ export default function RecentFixesPage() {
   const { fixes, fixedWeek, fixedTotal, timeZone, locale } = useLoaderData();
   const n = (v) => Number(v || 0).toLocaleString(locale);
   const fetcher = useFetcher();
-  const navigate = useNavigate();
   const busy = fetcher.state !== "idle";
-  const undo = (batchId) => fetcher.submit({ intent: "undo", batchId }, { method: "post" });
-  const back = () => navigate("/app");
+  // One submission at a time: a second click before the busy state renders is ignored.
+  const inFlight = useRef(false);
+  useEffect(() => {
+    if (fetcher.state === "idle") inFlight.current = false;
+  }, [fetcher.state]);
+  const undo = (batchId) => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    fetcher.submit({ intent: "undo", batchId }, { method: "post" });
+  };
 
   return (
-    <s-page heading="Recent Fixes" inlineSize="large">
+    <s-page heading="Recent fixes" inlineSize="large">
       <s-link slot="breadcrumb-actions" href="/app">Home</s-link>
-      <s-button slot="secondary-actions" onClick={back}>Back to issues</s-button>
       <Notices data={fetcher.data} onUndo={undo} busy={busy} />
       <s-section padding="none">
         <s-box padding="base">
@@ -73,7 +80,7 @@ export default function RecentFixesPage() {
         </s-box>
         {fixes.length === 0 ? (
           <s-box padding="base" paddingBlockStart="none">
-            <s-text color="subdued">No fixes yet. Fixes you apply or save on an issue page show up here.</s-text>
+            <s-text color="subdued">No fixes yet.</s-text>
           </s-box>
         ) : (
           <s-table loading={busy || undefined}>
@@ -119,7 +126,7 @@ export default function RecentFixesPage() {
         )}
         <s-box padding="base">
           <s-stack direction="inline" gap="base" alignItems="center" justifyContent="space-between">
-            <s-button variant="tertiary" icon="arrow-left" onClick={back}>Back to issues</s-button>
+            <s-link href="/app">Back to issues</s-link>
             {fixes.length >= LIMIT ? <s-text color="subdued">Showing the latest {LIMIT}.</s-text> : null}
           </s-stack>
         </s-box>
