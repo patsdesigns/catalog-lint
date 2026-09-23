@@ -6,7 +6,7 @@ Method: one full read of every file, then seven independent review passes (one p
 
 Legend: `[ ]` open, `[x]` fixed. Severity: high (wrong data, lost undo, outage, security), medium (wrong behaviour in a real case), low (polish, robustness, consistency). Line numbers refer to the code before Phase 2. Product decisions are not changed; they are listed under Questions at the end.
 
-Totals: 136 items found; 136 fixed; 22 questions asked, 22 decided (see Decisions); the review of the decisions found 7 more defects, all fixed (see Review of the decisions).
+Totals: 136 items found; 136 fixed; 22 questions asked, 22 decided (see Decisions); the review of the decisions found 7 more defects, all fixed (see Review of the decisions); the launch readiness review found 3 more, all fixed (see Launch readiness review).
 
 ## 1. Correctness of every check
 
@@ -260,3 +260,13 @@ An adversarial review of the changes above (twenty agents over the rules, the ed
 - **Bulk scans** built the export query with the tracked metafields of the moment but read the export with the settings at finish time, so a plan change or a tracked-list edit during a long export could put values under the wrong metafield. The list is stored on the `ScanJob` row (migration `20260923170500_add_scan_job_tracked`) and the finish reads it from there.
 - **`customShopDomains`** no longer exists in `@shopify/shopify-api` 15; the `SHOP_CUSTOM_DOMAIN` option was dead and is removed.
 - **Library noise, not fixable here.** `@shopify/shopify-app-react-router` 3.0.0 logs `config.future.expiringOfflineAccessTokens` to the console during token exchange. Nothing in this repo triggers it on purpose; it goes away with the next library release.
+
+## Launch readiness review
+
+On 2026-09-23, before submitting to the App Store, the code was checked against Shopify's published self-review requirements (see `STORE_CHECKLIST.md`) and against the live development store. Three defects came out of it, all fixed the same day and released in 0.10.0:
+
+- **Billing on development stores** (`app/lib/billing.server.js`). One global test flag decided every charge, and production turns it off. Development stores accept only test charges, and that is where Shopify's reviewers work, so a reviewer could not subscribe to a paid plan. Charges are now test charges when the flag says so or the store is a development store, and test subscriptions count on exactly those stores. Checked live: the development store is recognized in production mode, and its test Deep Clean subscription counts.
+- **Plans page wording** (`app/routes/app.plans.jsx`). It told every store that charges were test charges, including real stores in production. The sentence now shows only where it is true.
+- **Store address form** (`app/routes/auth.login/route.jsx`). The page outside the admin asked for a myshopify address, which self-review item 2.3.1 forbids. It now points to the admin and the App Store; links that name the store still go straight to the install.
+
+Not covered by these checks and still to prove on the live store before submitting: alt text through `fileUpdate`, undo, the whole billing flow, uninstall and reinstall, the bulk path (the development store now has 18 products), webhooks (they need the public host) and the weekly email.

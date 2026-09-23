@@ -14,7 +14,9 @@ State on 2026-09-23, after the audit in `AUDIT.md`. "Done" means it is in the co
 | App icon | Needed | 1200 by 1200, no Shopify branding. |
 | Screenshots | Needed | 1600 by 900, three to six, desktop, no browser chrome, no pricing in the images. Suggested: the home overview after a scan, an issue page with Quick apply, the Settings page, Recent fixes, the Plans page. Add one phone-width shot if mobile is claimed. |
 | Pricing in the listing | Needed | Must match `app/lib/plans.js`: Dust Off free (20 products), Quick Clean $10 every 30 days, Deep Clean $20 every 30 days, Early Bird $10 for the first 50 stores. No trial. |
-| Demo store or test instructions | Needed | A development store with products that trigger a range of checks, and a note that charges are test charges while `BILLING_TEST` is on. |
+| Demo store or test instructions | Needed | A development store with products that trigger a range of checks. Charges on development stores are always test charges, so reviewers can try every plan. |
+| Demo screencast | Needed | A video of setup and the main features as the listing describes them, in English or with English subtitles (App Store requirement 4.5.3). |
+| Emergency developer contact | Needed | Set in the Partner Dashboard account settings (App Store requirement 4.5.6). |
 
 ## Hosting and configuration
 
@@ -31,7 +33,8 @@ State on 2026-09-23, after the audit in `AUDIT.md`. "Done" means it is in the co
 
 - Embedded in the admin with the latest App Bridge (`AppProvider`, `s-app-nav`), session token authentication on every `/app` route, no cookies.
 - GraphQL Admin API only; no REST.
-- Billing through the Billing API with in-app upgrade and downgrade, declined charges handled, test charges on development stores.
+- Billing through the Billing API with in-app upgrade and downgrade and declined charges handled. Development stores always get test charges, where Shopify's reviewers and other Partners try the app; real stores are charged for real in production.
+- No page asks for a store address: the one page outside the admin points to the admin and the App Store, and links that name the store go straight to the install.
 - Mandatory privacy webhooks (`customers/data_request`, `customers/redact`, `shop/redact`) handled and registered in the production config; `shop/redact` deletes every row for the shop.
 - `app/uninstalled` deletes sessions, stops the weekly email, clears queued work; reinstall works (sessions are upserted by the library).
 - Every webhook verifies the HMAC and answers within the timeout; product webhooks work after answering.
@@ -43,13 +46,25 @@ State on 2026-09-23, after the audit in `AUDIT.md`. "Done" means it is in the co
 
 ## Billing test flow (before submitting)
 
-1. On a development store with `BILLING_TEST` unset (test charges), open Plans and choose Quick Clean: Shopify shows the approval screen; approve; back on Plans the card reads "Current plan".
+Run it once with `BILLING_TEST=false` in the development `.env` (then restart the dev server): that is the production setting, and a development store still gets test charges, so the run shows exactly what a reviewer sees.
+
+1. On a development store, open Plans and choose Quick Clean: Shopify shows the approval screen for a test charge; approve; back on Plans the card reads "Current plan".
 2. Open an issue page: inline edits, Trust word and Ignore appear. Quick apply a suggestion, then undo it from the row and from Recent fixes.
 3. Choose Deep Clean: the subscription is replaced; Deep Clean areas unlock on Home.
 4. Choose Early Bird on a second store: the seat is claimed on return (Plans shows "N of 50 claimed"); choose Dust Off: the seat lapses.
 5. Choose Dust Off: the subscription is canceled; Home shows the 20-product limit banner if the last scan was larger.
 6. Decline a charge on the approval screen: Plans reloads with the previous plan and no error page.
 7. Uninstall and reinstall: the app authenticates again and the previous data is still there until `shop/redact` arrives 48 hours later.
+
+## Shopify self-review
+
+Shopify publishes the requirements that can be checked from the code. Fetch the current list from the project root, never from memory, and check each one:
+
+```bash
+npx shopify doc fetch --url https://shopify.dev/docs/apps/launch/app-store-review/app-store-ai-self-review-requirements
+```
+
+Result on 2026-09-23: 28 likely passing, none failing, 3 needing review. Two of the three were fixed that day: billing on development stores (1.2.2) and the store address form (2.3.1). The third, a valid TLS certificate (3.1.1), depends on the host. Ten groups were skipped: the app has no extensions, and four groups are opt-in categories that do not apply.
 
 ## Built for Shopify: not yet met
 
