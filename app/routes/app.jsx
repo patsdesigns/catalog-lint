@@ -14,7 +14,7 @@ export default function App() {
   const { apiKey } = useLoaderData();
 
   return (
-    <AppProvider embedded apiKey={apiKey}>
+    <AppProvider apiKey={apiKey}>
       <s-app-nav>
         <s-link rel="home" href="/app">Home</s-link>
         <s-link href="/app/settings">Settings</s-link>
@@ -35,7 +35,7 @@ export function ErrorBoundary() {
   if (isRouteErrorResponse(error)) return boundary.error(error);
   console.error("Unhandled error in the app:", error);
   return (
-    <AppProvider embedded apiKey={data?.apiKey || ""}>
+    <AppProvider apiKey={data?.apiKey || ""}>
       <s-app-nav>
         <s-link rel="home" href="/app">Home</s-link>
         <s-link href="/app/settings">Settings</s-link>

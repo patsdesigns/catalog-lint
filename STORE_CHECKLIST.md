@@ -25,7 +25,7 @@ State on 2026-09-23, after the audit in `AUDIT.md`. "Done" means it is in the co
 | Database | Needed | A persistent volume at `prisma/` (the Dockerfile declares it), or Postgres. `npm run setup` applies migrations. |
 | Weekly email schedule | Needed | A scheduler that calls `GET /cron/digest` once a week with the secret. |
 | Access scopes | Done | `write_products, read_inventory, write_inventory, read_publications, write_publications, read_locales`; nothing unused. Existing installs are asked to re-approve after the change (metaobject scopes were removed, `read_locales` added). |
-| Admin API version | Done | 2026-07 in the client and for webhooks. Question 1 in `AUDIT.md` covers moving to 2026-10. |
+| Admin API version | Done | 2026-10 in the client (`@shopify/shopify-app-react-router` 3) and for webhooks. |
 
 ## Requirements that are met in the code
 

@@ -24,7 +24,7 @@ The first 50 stores can take **Deep Clean Early Bird**: Deep Clean at the Quick 
 
 ## Running locally
 
-Requirements: Node 20 or newer, the Shopify CLI, a Partner organization and a development store.
+Requirements: Node 22.12 or newer, the Shopify CLI, a Partner organization and a development store.
 
 ```bash
 npm install
@@ -59,7 +59,7 @@ npm run lint
    In development, put any of these in a `.env` file at the project root: the Shopify CLI loads it when `npm run dev` starts, so restart the dev server after changing it.
 3. Put the hosted URL in `shopify.app.production.toml` (`application_url` and `redirect_urls`), then `npm run deploy -- -c production` to push the config, the app name, the access scopes and the webhook subscriptions to Shopify. The plain `shopify.app.toml` is the localhost development config and carries no webhook subscriptions, because a localhost session cannot register them.
 
-The access scopes are `write_products`, `read_inventory`, `write_inventory`, `read_publications`, `write_publications` and `read_locales`. The Admin API version is 2026-07 in `app/shopify.server.js` and for webhooks in both tomls; change both together.
+The access scopes are `write_products`, `read_inventory`, `write_inventory`, `read_publications`, `write_publications` and `read_locales`. The Admin API version is 2026-10 in `app/shopify.server.js` and for webhooks in both tomls; change both together.
 
 ## Webhooks
 

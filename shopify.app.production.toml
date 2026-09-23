@@ -14,7 +14,7 @@ scopes = "write_products,read_inventory,write_inventory,read_publications,write_
 
 [webhooks]
 # The same version the Admin API client uses (app/shopify.server.js).
-api_version = "2026-07"
+api_version = "2026-10"
 
   [[webhooks.subscriptions]]
   uri = "/webhooks/app/uninstalled"

@@ -13,7 +13,7 @@ scopes = "write_products,read_inventory,write_inventory,read_publications,write_
 
 [webhooks]
 # The same version the Admin API client uses (app/shopify.server.js).
-api_version = "2026-07"
+api_version = "2026-10"
 
   # Webhook subscriptions are in shopify.app.production.toml: a localhost dev session cannot
   # register webhook URIs, and the CLI refuses to start when it tries. Handlers: app/routes/webhooks.*.jsx.
