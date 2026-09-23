@@ -8,7 +8,7 @@ TidyUp is a Shopify embedded app that scans a product catalog for missing, incon
 - **One page per check** listing the products it flagged, each with its current value, a suggestion and a correction field. Quick apply saves the suggestion in one click. Three checks have a bulk fix (vendor spelling, alt text, sale prices). Every change is read before it is written, logged with its previous value, and can be undone from Recent fixes.
 - **Scans any catalog size**: up to 250 products inline, paced on the API rate limit; larger catalogs through a Shopify bulk operation in the background.
 - **Keeps the stored result current**: product webhooks re-check a product as it changes (paid plans) or queue it (free plan); ignoring a finding, learning a word or turning a check off updates the result at once.
-- **Settings**: which checks run (by family or one by one), an approved vendor list, a spelling dictionary, ignored findings, tracked metafields (up to eight, each with a required flag and a pattern) and a weekly email.
+- **Settings**: which checks run (by family or one by one), an approved vendor list, a spelling dictionary, ignored findings, tracked metafields (up to seven, each with a required flag and a pattern) and a weekly email.
 
 ## Plans
 

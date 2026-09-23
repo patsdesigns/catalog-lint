@@ -7,8 +7,8 @@ import { patternError } from "./regex.server";
 // as a column on every issue page.
 
 // Each tracked metafield adds a field to every product query; this many keeps the by-id and paged
-// reads under the single-request cost limit.
-export const MAX_TRACKED = 8;
+// reads under the single-request cost limit with room to spare.
+export const MAX_TRACKED = 7;
 const MAX_DEFINITION_PAGES = 50;
 
 const DEFINITIONS_QUERY = `#graphql
