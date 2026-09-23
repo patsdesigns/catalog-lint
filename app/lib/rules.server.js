@@ -24,26 +24,46 @@ function norm(s) {
 function titleCase(s) {
   return s.toLowerCase().replace(/(^|\s|-)([a-z])/g, (m, pre, ch) => pre + ch.toUpperCase());
 }
+// The letters of a token, without the punctuation around them: "(jacket," -> "jacket". Apostrophes
+// of every kind are part of a word.
+const APOSTROPHES = "'’ʼ";
+function core(token) {
+  const m = new RegExp(`\\p{L}[\\p{L}${APOSTROPHES}]*`, "u").exec(token);
+  return m ? { start: m.index, text: m[0] } : null;
+}
 // A word that is only its first letter capitalized ("Cable"), as opposed to an acronym ("USB"),
 // a brand ("iPhone") or a code ("3D"), which a casing change must leave alone.
-const capitalizedWord = (w) => /^\p{Lu}[\p{Ll}']*$/u.test(w);
-const lowercaseWord = (w) => /^\p{Ll}[\p{Ll}']*$/u.test(w);
+const capitalizedWord = (w) => new RegExp(`^\\p{Lu}[\\p{Ll}${APOSTROPHES}]*$`, "u").test(w);
+const lowercaseWord = (w) => new RegExp(`^\\p{Ll}[\\p{Ll}${APOSTROPHES}]*$`, "u").test(w);
+// Recases the letters of each token of a title (punctuation around them stays), calling `recase`
+// with the word and its index among the words that have letters.
+function recaseWords(s, recase) {
+  let n = 0;
+  return s.replace(/[^\s-]+/g, (token) => {
+    const c = core(token);
+    if (!c) return token;
+    const replaced = recase(c.text, n++);
+    return token.slice(0, c.start) + replaced + token.slice(c.start + c.text.length);
+  });
+}
 // Title Case for a mixed title: lowercase words get a capital, every other word stays as it is.
 function toTitleCase(s) {
-  return s.replace(/[^\s-]+/g, (w) => (lowercaseWord(w) ? w.charAt(0).toUpperCase() + w.slice(1) : w));
+  return recaseWords(s, (w) => (lowercaseWord(w) ? w.charAt(0).toUpperCase() + w.slice(1) : w));
 }
 // Sentence case for a mixed title: the first word gets a capital, later Capitalized words are
 // lowercased, and acronyms, brands and codes stay as they are.
 function toSentenceCase(s) {
-  return s.replace(/[^\s-]+/g, (w, i) => {
+  return recaseWords(s, (w, i) => {
     if (i === 0) return lowercaseWord(w) ? w.charAt(0).toUpperCase() + w.slice(1) : w;
     return capitalizedWord(w) ? w.toLowerCase() : w;
   });
 }
+// Whether a title is in Title Case (most words with letters start with a capital); null when it
+// has too few words to tell.
 function isTitleCase(t) {
-  const words = t.split(/\s+/).filter((w) => /^[A-Za-z]/.test(w));
+  const words = t.split(/[\s-]+/).map(core).filter(Boolean);
   if (words.length < 2) return null;
-  const caps = words.filter((w) => /^[A-Z]/.test(w)).length;
+  const caps = words.filter((w) => /^\p{Lu}/u.test(w.text)).length;
   return caps / words.length >= 0.8;
 }
 
@@ -160,11 +180,14 @@ function closest(value, candidates) {
   return bestDistance <= limit ? best : "";
 }
 // The smallest amount at or above `amount` whose cents are `ending` ("99", "00", ...).
+// The smallest price with the store's ending that is at least `amount`, worked out in cents so
+// floating point never rounds it under the line the caller asked for.
 function withEnding(amount, ending) {
   const cents = Number(ending) || 0;
-  let candidate = Math.floor(Number(amount)) + cents / 100;
-  if (candidate < Number(amount)) candidate += 1;
-  return candidate.toFixed(2);
+  const target = Math.ceil(Math.round(Number(amount) * 1e6) / 1e4);
+  let candidate = Math.floor(target / 100) * 100 + cents;
+  if (candidate < target) candidate += 100;
+  return (candidate / 100).toFixed(2);
 }
 // The SKU a variant would get from its product handle and its own title: SNOWBOARD-BLUE.
 function skuFor(p, v) {
@@ -476,7 +499,11 @@ export const PRODUCT_RULES = [
   },
   {
     id: "few_images", category: "media", label: "Only one image", severity: "medium",
-    check(p) { return (p.mediaCount ?? p.images.length) === 1 ? [finding(this, p, { current: "1 image" })] : []; },
+    check(p) {
+      if ((p.mediaCount ?? p.images.length) !== 1) return [];
+      // The one item may be a video or a 3D model rather than an image.
+      return [finding(this, p, { current: p.images.length === 1 ? "1 image" : "1 media item, no image" })];
+    },
   },
   {
     id: "missing_alt_text", category: "media", label: "Image has no alt text", severity: "medium",
@@ -965,9 +992,12 @@ PRODUCT_RULES.push(
   {
     id: "thin_margin", category: "pricing", label: "Margin under 10%", severity: "medium",
     check(p, ctx) {
-      const margin = (v) => (Number(v.price) - Number(v.cost)) / Number(v.price);
+      // In cents, so a price that sits exactly on the margin is not caught by floating point.
+      const cents = (n) => Math.round(Number(n) * 100);
+      const margin = (v) => (cents(v.price) - cents(v.cost)) / cents(v.price);
+      const thin = (v) => (cents(v.price) - cents(v.cost)) * 10 < cents(v.price);
       return p.variants
-        .filter((v) => v.cost != null && Number(v.price) > 0 && Number(v.price) >= Number(v.cost) && margin(v) < MIN_MARGIN)
+        .filter((v) => v.cost != null && Number(v.price) > 0 && Number(v.price) >= Number(v.cost) && thin(v))
         .map((v) => finding(this, p, { variantId: v.id, detail: `${v.title}: price ${money(v.price, ctx)}, cost ${money(v.cost, ctx)} (${Math.round(margin(v) * 100)}% margin)`, edit: variantEdit(v, "price", `price ${money(v.price, ctx)}, cost ${money(v.cost, ctx)} (${Math.round(margin(v) * 100)}% margin)`, "", { raw: String(v.price) }) }));
     },
   },

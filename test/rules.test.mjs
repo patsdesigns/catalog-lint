@@ -170,5 +170,69 @@ let noCtxError = null;
 try { runRules(products.slice(0, 3)); } catch (e) { noCtxError = e; }
 check("runRules without a ctx (no speller, no settings) does not throw", !noCtxError, noCtxError ? String(noCtxError.stack).split("\n").slice(0, 2).join(" ") : "");
 
+// ---------- 7. suggestions and boundaries ----------
+console.log("---- suggestions");
+const { catalogContext } = await import(APP + "rules.server.js");
+const base = products.find((p) => (expected[p.id] || []).length === 0);
+const clone = (key, over) => ({ ...base, id: `gid://shopify/Product/${key}`, handle: key, ...over });
+const suggestionFor = (list, key) => list.find((f) => f.ruleId === "title_casing_outlier" && f.productId === `gid://shopify/Product/${key}`)?.edit?.suggested;
+
+// The fixture catalog is mostly Title Case: an outlier gets a Title Case suggestion that recases
+// only the letters of each word, leaves punctuation where it is, and keeps brands as they are.
+const toTitle = [
+  ["tc-punct", "warm jacket, blue (large)", "Warm Jacket, Blue (Large)"],
+  ["tc-apos", "kids’ jacket for cold days", "Kids’ Jacket For Cold Days"],
+  ["tc-brand", "wool hat for iPhone users", "Wool Hat For iPhone Users"],
+  ["tc-quote", "“warm” jacket for kids", "“Warm” Jacket For Kids"],
+];
+const titleRun = runRules([...products, ...toTitle.map(([key, title]) => clone(key, { title }))], ctx);
+for (const [key, title, want] of toTitle) {
+  const got = suggestionFor(titleRun, key);
+  check(`Title Case suggestion for "${title}"`, got === want, got === want ? "" : `got ${JSON.stringify(got)}`);
+}
+
+// A catalog that is mostly sentence case: the outliers get a sentence case suggestion that keeps
+// the first word, acronyms and brands, and lowercases the other Capitalized words.
+const toSentence = [
+  ["sc-punct", "Warm Jacket, Blue (Large)", "Warm jacket, blue (large)"],
+  ["sc-apos", "Kids’ Winter Jacket", "Kids’ winter jacket"],
+  ["sc-acronym", "USB Cable For Winter", "USB cable for winter"],
+  ["sc-brand", "Wool Hat For iPhone Users", "Wool hat for iPhone users"],
+  ["sc-lead", "(Winter) Jacket Blue", "(Winter) jacket blue"],
+];
+const sentenceCatalog = Array.from({ length: 18 }, (_, i) => clone(`sc-base-${i}`, { title: `Warm jacket for cold days ${i + 1}` }));
+const sentenceRun = runRules([...sentenceCatalog, ...toSentence.map(([key, title]) => clone(key, { title }))], ctx);
+for (const [key, title, want] of toSentence) {
+  const got = suggestionFor(sentenceRun, key);
+  check(`sentence case suggestion for "${title}"`, got === want, got === want ? "" : `got ${JSON.stringify(got)}`);
+}
+check("a title already in the majority style is not an outlier", !sentenceRun.some((f) => f.ruleId === "title_casing_outlier" && f.productId.includes("sc-base-")));
+
+// Margins are judged in cents: a price exactly on the 10% line is not thin, one cent under is.
+const priced = (key, price, cost) => clone(key, { variants: [{ ...base.variants[0], id: `gid://shopify/ProductVariant/${key}`, price, cost }] });
+const marginRun = runRules([priced("m-edge", "1.00", "0.90"), priced("m-thin", "1.00", "0.91")], ctx);
+const marginIds = (key) => marginRun.filter((f) => f.productId === `gid://shopify/Product/${key}`).map((f) => f.ruleId);
+check("a 10% margin is not thin", !marginIds("m-edge").includes("thin_margin"), marginIds("m-edge").join(", "));
+check("a 9% margin is thin", marginIds("m-thin").includes("thin_margin"), marginIds("m-thin").join(", "));
+
+// The price suggested for a variant priced below cost clears the margin check, whatever the
+// store's price ending.
+for (const [ending, cost] of [["99", "100.00"], ["00", "0.90"], ["95", "57.30"], ["01", "0.91"]]) {
+  const withEnding = { ...ctx, catalog: { ...catalogContext(products), priceEnding: ending } };
+  const below = runRules([priced("m-below", "0.50", cost)], withEnding).find((f) => f.ruleId === "price_below_cost");
+  const suggested = below?.edit?.suggested;
+  const after = suggested ? runRules([priced("m-after", suggested, cost)], withEnding).filter((f) => f.productId.endsWith("m-after")).map((f) => f.ruleId) : [];
+  const ok = Boolean(suggested) && suggested.endsWith(ending) && !after.includes("thin_margin") && !after.includes("price_below_cost");
+  check(`price_below_cost with cost ${cost} and ending ${ending} suggests a price that clears the margin`, ok, `suggested=${suggested} after=[${after}]`);
+}
+
+// A product whose one media item is not an image says so.
+const oneImage = products.find((p) => p.id.endsWith("/placeholder")).images[0];
+const mediaRun = runRules([clone("video-only", { images: [], mediaCount: 1 }), clone("one-image", { images: [oneImage], mediaCount: 1 })], ctx);
+const fewFor = (key) => mediaRun.find((f) => f.ruleId === "few_images" && f.productId.endsWith(`/${key}`));
+check("few_images on a video-only product reads \"1 media item, no image\"", fewFor("video-only")?.current === "1 media item, no image", JSON.stringify(fewFor("video-only")?.current));
+check("few_images on a one-image product reads \"1 image\"", fewFor("one-image")?.current === "1 image", JSON.stringify(fewFor("one-image")?.current));
+check("a video-only product is not reported as having no image", !mediaRun.some((f) => f.ruleId === "missing_image" && f.productId.endsWith("/video-only")));
+
 console.log(failed ? `${failed} FAILED` : "PASS");
 process.exit(failed ? 1 : 0);
