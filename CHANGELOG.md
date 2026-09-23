@@ -6,6 +6,12 @@ Versions follow [semantic versioning](https://semver.org): the first number chan
 
 ## Unreleased
 
+Nothing yet.
+
+## 0.10.0 - 2026-09-23
+
+Ready for Shopify's review: billing works on the development stores reviewers use, no page asks for a store address, and the home page has its color back.
+
 ### Changed
 
 - Color is back on the home page, from the Polaris palette only: each area card has its own color again (stripe, wash and dot), every value a Polaris token; severity badges are red, orange and yellow, with low severity yellow instead of grey everywhere.
