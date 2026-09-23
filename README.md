@@ -59,7 +59,17 @@ npm run lint
    In development, put any of these in a `.env` file at the project root: the Shopify CLI loads it when `npm run dev` starts, so restart the dev server after changing it.
 3. Put the hosted URL in `shopify.app.production.toml` (`application_url` and `redirect_urls`), then `npm run deploy -- -c production` to push the config, the app name, the access scopes and the webhook subscriptions to Shopify. The plain `shopify.app.toml` is the localhost development config and carries no webhook subscriptions, because a localhost session cannot register them.
 
-The access scopes are `write_products`, `read_inventory`, `write_inventory`, `read_publications`, `write_publications` and `read_locales`. The Admin API version is 2026-10 in `app/shopify.server.js` and for webhooks in both tomls; change both together.
+The access scopes are `write_products`, `write_files` (image alt text is written with `fileUpdate`), `read_inventory`, `write_inventory`, `read_publications`, `write_publications` and `read_locales`. The Admin API version is 2026-10 in `app/shopify.server.js` and for webhooks in both tomls; change both together.
+
+## Versions
+
+The version is in `package.json`, shows on the Support page in the app and is tagged in git as `vX.Y.Z`; `CHANGELOG.md` lists what each version changed. To cut one:
+
+1. Move the Unreleased entries in `CHANGELOG.md` under the new number with the date, and commit that. `npm version` refuses to run with uncommitted changes.
+2. Run `npm version minor` (or `patch` for fixes only, `major` for a break merchants would notice). It updates `package.json` and `package-lock.json`, commits them and creates the tag.
+3. Push with `git push --follow-tags`.
+
+Versions stay below 1.0.0 until the app is listed in the App Store. The first version, 0.9.0, was set and tagged by hand.
 
 ## Webhooks
 

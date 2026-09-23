@@ -10,7 +10,7 @@ Use the [Shopify AI Toolkit](https://shopify.dev/docs/apps/build/ai-toolkit) for
 - Every Admin API call goes through `app/lib/graphql.server.js` (pacing, throttle retries, plain error messages). Every write goes through `app/lib/writes.server.js`, reads the value it replaces first, and is logged to `FixLog` so it can be undone. The browser never sends an edit descriptor: the issue page posts a finding key and the server looks the finding up in the stored scan.
 - Plans and features are in `app/lib/plans.js`. Gate every feature and area on the server (loader and action) as well as in the page. A plan check that fails means Dust Off plus `planUnknown`: pages warn, scans and writes wait.
 - The stored scan is a `Scan` row per save (pruned to the last twenty); `rescan.server.js` refreshes it after actions without re-reading the catalog. Catalogs over 250 products scan through a bulk operation finished in the background.
-- Pages use Polaris web components only, sentence-case headings, verbs on buttons, no exclamation marks. The area colors, the card stripe and the dots are a deliberate exception to "no custom colors".
+- Pages use Polaris web components only, sentence-case headings, verbs on buttons, no exclamation marks, no custom colors or typography (the app is to pass Shopify's review).
 
 ## Working in this repo
 
@@ -18,3 +18,4 @@ Use the [Shopify AI Toolkit](https://shopify.dev/docs/apps/build/ai-toolkit) for
 - Schema changes need a migration under `prisma/migrations/` (see the README); stop the dev server first.
 - The dev config `shopify.app.toml` has no webhook subscriptions on purpose; production ones live in `shopify.app.production.toml`. Keep the API version in `app/shopify.server.js` and both tomls the same.
 - Copy: American English, sentence case, "compare-at price", "weekly email", "Fix all".
+- Versions: the number lives in `package.json` only (the Support page reads it); note user-visible changes under Unreleased in `CHANGELOG.md`. Cut a version as the README describes: commit the changelog first, then `npm version`, then push with tags.
