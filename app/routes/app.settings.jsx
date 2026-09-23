@@ -11,6 +11,8 @@ import { PASS_LABELS } from "../lib/checkLabels";
 import { FAMILIES, TIERS } from "../lib/checkGroups";
 import { currentPlan, PLAN_UNKNOWN } from "../lib/billing.server";
 import { getDigestSettings, saveDigestSettings, sendDigest } from "../lib/digest.server";
+import { shopInfo } from "../lib/shop.server";
+import { describeError } from "../lib/graphql.server";
 import { planFor } from "../lib/plans";
 
 export async function loader({ request }) {
@@ -47,31 +49,64 @@ export async function action({ request }) {
       return { ok: true, digestSaved: true };
     }
     if (!valid) return { ok: false, digest: "test", error: "Enter an email address to send the test to." };
+    if (!allowTest(session.shop)) return { ok: false, digest: "test", error: `Up to ${TEST_EMAILS_PER_HOUR} test emails an hour. Try again later.` };
     try {
-      await sendDigest(session.shop, email);
+      const info = await shopInfo(admin.graphql, session.shop);
+      await sendDigest(session.shop, email, info.locale);
       return { ok: true, testSent: email };
     } catch (err) {
-      // Reported inside the Weekly Email card, where the button is, not in the page banner.
-      return { ok: false, digest: "test", error: err.message || String(err) };
+      // Reported inside the Weekly email card, where the button is, not in the page banner.
+      return { ok: false, digest: "test", error: describeError(err) };
     }
   }
   if (intent === "saveSettings") {
-    const current = await getSettings(session.shop);
-    const next = { ...current };
-    if (form.has("vendorWhitelist")) {
-      next.vendorWhitelist = String(form.get("vendorWhitelist")).split("\n").map((v) => v.trim()).filter(Boolean);
+    try {
+      const current = await getSettings(session.shop);
+      const next = { ...current };
+      if (form.has("vendorWhitelist")) {
+        next.vendorWhitelist = String(form.get("vendorWhitelist")).split("\n").map((v) => v.trim().slice(0, 255)).filter(Boolean).slice(0, 1000);
+      }
+      if (form.has("preset")) next.preset = form.get("preset");
+      // Flipping any single check means the merchant has their own list: an array of known check ids.
+      if (form.has("disabledRules")) {
+        const ids = parseRuleIds(form.get("disabledRules"));
+        if (!ids) return { ok: false, error: "The list of checks was not understood. Reload the page and try again." };
+        next.customDisabled = ids;
+        next.preset = "custom";
+      }
+      await saveSettings(session.shop, next);
+      // Findings of checks that were just turned off disappear from the stored scan right away.
+      if (form.has("preset") || form.has("disabledRules")) await refreshAfter(admin.graphql, session.shop, { kind: "settings" });
+      return { ok: true, saved: form.has("vendorWhitelist") ? "vendors" : "checks" };
+    } catch (err) {
+      return { ok: false, error: describeError(err) };
     }
-    if (form.has("preset")) next.preset = form.get("preset");
-    // Flipping any single check means the merchant has their own list.
-    if (form.has("disabledRules")) {
-      next.customDisabled = JSON.parse(form.get("disabledRules"));
-      next.preset = "custom";
-    }
-    await saveSettings(session.shop, next);
-    // Findings of checks that were just turned off disappear from the stored scan right away.
-    if (form.has("preset") || form.has("disabledRules")) await refreshAfter(admin.graphql, session.shop, { kind: "settings" });
   }
   return { ok: true };
+}
+
+// The check ids to turn off, or null when the browser sent anything else.
+function parseRuleIds(raw) {
+  try {
+    const list = JSON.parse(raw);
+    if (!Array.isArray(list) || list.length > RULE_CATALOG.length) return null;
+    const known = new Set(RULE_CATALOG.map((r) => r.id));
+    return list.every((id) => known.has(id)) ? [...new Set(list)] : null;
+  } catch {
+    return null;
+  }
+}
+
+// Test emails per shop per hour, so the app cannot be used to mail third parties at will.
+const TEST_EMAILS_PER_HOUR = 3;
+const testsSent = new Map();
+function allowTest(shop) {
+  const now = Date.now();
+  const recent = (testsSent.get(shop) || []).filter((t) => now - t < 60 * 60 * 1000);
+  if (recent.length >= TEST_EMAILS_PER_HOUR) return false;
+  recent.push(now);
+  testsSent.set(shop, recent);
+  return true;
 }
 
 const FAMILY_COLUMNS = "@container (inline-size > 720px) 1fr 1fr, 1fr";

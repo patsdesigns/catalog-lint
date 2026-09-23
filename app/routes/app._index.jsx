@@ -15,6 +15,7 @@ import { planFor, lockedAreas, areaLocked, allAreasPlan } from "../lib/plans";
 import { RULE_CATALOG } from "../lib/rules.server";
 import { CATEGORIES, categoryOf } from "../lib/categories";
 import { PASS_LABELS, SETUP_LABELS } from "../lib/checkLabels";
+import { shopInfo } from "../lib/shop.server";
 import { timeAgo } from "../lib/format";
 import { TONE, Dot, Notices } from "../lib/ui";
 
@@ -50,7 +51,9 @@ export async function loader({ request }) {
   const locked = lockedAreas(plan);
   // A stored scan bigger than the plan allows (after a downgrade) stays until Scan again.
   const overLimit = Boolean(!planUnknown && plan.productLimit && state.result && state.result.total > plan.productLimit);
-  return { ...state, job, plan, planUnknown, overLimit, newProducts, pending, streak, locked };
+  // Numbers and times read in the store language.
+  const { locale } = await shopInfo(admin.graphql, session.shop);
+  return { ...state, job, plan, planUnknown, overLimit, newProducts, pending, streak, locked, locale };
 }
 
 async function countNewProducts(graphql, since) {
@@ -176,7 +179,7 @@ const PASSED_BACKGROUND = "rgba(41, 132, 90, 0.08)";
 
 // A background scan (Shopify bulk export) in progress or failed. The page polls the loader while
 // one is running, so the banner updates on its own.
-function ScanProgress({ job }) {
+function ScanProgress({ job, locale }) {
   if (!job) return null;
   if (job.status === "failed") {
     return (
@@ -186,12 +189,14 @@ function ScanProgress({ job }) {
     );
   }
   if (job.status !== "running") return null;
-  const n = (v) => Number(v || 0).toLocaleString("en-US");
+  const n = (v) => Number(v || 0).toLocaleString(locale);
   return (
     <s-banner tone="info" heading={`Scanning ${n(job.expected)} products`}>
       <s-paragraph>
-        Shopify is exporting the catalog in the background{job.objects ? `: ${n(job.objects)} records so far` : ""}. This
-        page updates by itself, and it is safe to leave and come back.
+        {job.finishing
+          ? "The export is done and the checks are running. "
+          : `Shopify is exporting the catalog in the background${job.objects ? `: ${n(job.objects)} records so far` : ""}. `}
+        This page updates by itself, and it is safe to leave and come back.
       </s-paragraph>
     </s-banner>
   );
@@ -245,13 +250,13 @@ const STAT_STYLE = { fontSize: "32px", lineHeight: 1, fontWeight: 650, letterSpa
 // The summary column fills its card (a plain div: the card box has a definite height once the header
 // grid stretches it), so the footer sits at the bottom whatever height Start here needs.
 const FILL_COLUMN = { height: "100%", display: "flex", flexDirection: "column", justifyContent: "space-between", gap: "16px" };
-function Stat({ label, value, text, badge, children }) {
+function Stat({ label, value, text, badge, locale, children }) {
   return (
     <s-grid gridTemplateColumns={STAT_COLUMNS} gap="base" alignItems="start">
       <s-stack gap="small-200">
         <s-text color="subdued">{label}</s-text>
         <s-stack direction="inline" gap="small" alignItems="center">
-          <span style={STAT_STYLE}>{text ?? (value || 0).toLocaleString("en-US")}</span>
+          <span style={STAT_STYLE}>{text ?? (value || 0).toLocaleString(locale)}</span>
           {badge}
         </s-stack>
       </s-stack>
@@ -262,7 +267,7 @@ function Stat({ label, value, text, badge, children }) {
 
 // Open problems per saved result as bars. The tallest bar is the most any of them found, so the
 // direction shows even when the counts are close: 4px for none, 40px for the most.
-function Trend({ history }) {
+function Trend({ history, locale }) {
   if (!history || history.length < 2) return <s-text color="subdued">Scan again to start a trend.</s-text>;
   const most = history.reduce((m, h) => Math.max(m, h.open || 0), 0);
   const barHeight = (open) => 4 + (most ? Math.round(((open || 0) / most) * 36) : 0);
@@ -270,7 +275,7 @@ function Trend({ history }) {
   const trackWidth = history.length * 16 - 4;
   // ISO date, not toLocaleString(): the server and the browser must render the same markup.
   const dateOf = (iso) => (iso ? String(iso).slice(0, 10) : "");
-  const describe = (h) => `${(h.open || 0).toLocaleString("en-US")}${h.at ? ` on ${dateOf(h.at)}` : ""}`;
+  const describe = (h) => `${(h.open || 0).toLocaleString(locale)}${h.at ? ` on ${dateOf(h.at)}` : ""}`;
   return (
     <s-stack direction="inline" gap="small" alignItems="end">
       {/* Polaris has no sparkline/bar primitive: the bars are plain boxes on a divider baseline. */}
@@ -301,15 +306,15 @@ function Trend({ history }) {
 
 // The summary: two compact tiles stacked, potential problems and problems fixed, with the last
 // scan and the checks running at the bottom. Beside Start here in the header.
-function Summary({ result, history, fixedWeek, fixedTotal, checksOn, checksTotal, newProducts, streak, locked }) {
+function Summary({ result, history, fixedWeek, fixedTotal, checksOn, checksTotal, newProducts, streak, locked, locale }) {
   const open = result.open || 0;
   const lockedFindings = result.rules.filter((r) => locked.includes(r.category)).reduce((sum, r) => sum + r.count, 0);
   const previous = history && history.length >= 2 ? history[history.length - 2].open : null;
   const delta = previous == null ? 0 : open - previous;
   const affected = Math.max(0, result.total - result.clean);
-  const n = (v) => (v || 0).toLocaleString("en-US");
+  const n = (v) => (v || 0).toLocaleString(locale);
   const products = `${n(result.total)} ${result.total === 1 ? "product" : "products"}`;
-  const lastScan = `Last scan ${timeAgo(result.scannedAt)} · ${products}${result.ignoredCount ? ` · ${n(result.ignoredCount)} ignored` : ""}${newProducts ? ` · ${n(newProducts)} added since` : ""}`;
+  const lastScan = `Last scan ${timeAgo(result.scannedAt, locale)} · ${products}${result.ignoredCount ? ` · ${n(result.ignoredCount)} ignored` : ""}${newProducts ? ` · ${n(newProducts)} added since` : ""}`;
   return (
     <s-section accessibilityLabel="Catalog summary">
       {/* Two groups, the tiles and the footer, so the footer stays at the bottom of the card. The query
@@ -320,6 +325,7 @@ function Summary({ result, history, fixedWeek, fixedTotal, checksOn, checksTotal
           <Stat
             label="Potential problems"
             value={open}
+            locale={locale}
             badge={
               delta !== 0 ? (
                 // Fewer is better: the direction is in the text as well as the icon and tone.
@@ -342,10 +348,10 @@ function Summary({ result, history, fixedWeek, fixedTotal, checksOn, checksTotal
                 </s-text>
               </s-stack>
             ) : null}
-            <Trend history={history} />
+            <Trend history={history} locale={locale} />
           </Stat>
           <s-divider></s-divider>
-          <Stat label="Problems fixed" value={fixedTotal}>
+          <Stat label="Problems fixed" value={fixedTotal} locale={locale}>
             <s-text color="subdued">{fixedWeek ? `${n(fixedWeek)} this week` : fixedTotal ? "None this week" : "Fixes you apply or save are counted here"}</s-text>
             <s-text color="subdued">
               <s-link href="/app/fixes">Recent fixes</s-link>
@@ -529,8 +535,8 @@ function CardBody({ table, panel }) {
 
 // The failing checks with the most weight across every section, so a merchant knows where to
 // begin: findings count times severity. Beside the summary in the header.
-function StartHere({ result, locked, onSelect, onFixAll, busy }) {
-  const n = (v) => (v || 0).toLocaleString("en-US");
+function StartHere({ result, locked, onSelect, onFixAll, busy, locale }) {
+  const n = (v) => (v || 0).toLocaleString(locale);
   const ranked = result.rules
     .filter((r) => !locked.includes(r.category))
     .sort((a, b) => SEVERITY_WEIGHT[b.severity] * b.count - SEVERITY_WEIGHT[a.severity] * a.count || b.count - a.count)
@@ -579,6 +585,19 @@ function StartHere({ result, locked, onSelect, onFixAll, busy }) {
             ))}
           </s-stack>
         )}
+      </s-stack>
+    </s-section>
+  );
+}
+
+// A store with nothing to check yet.
+function NoProducts() {
+  return (
+    <s-section>
+      <s-stack alignItems="center" gap="small" paddingBlock="large">
+        <s-icon type="search" />
+        <s-heading>No products yet</s-heading>
+        <s-text color="subdued">Add products in Shopify, then run a full scan.</s-text>
       </s-stack>
     </s-section>
   );
@@ -696,7 +715,7 @@ function CategoryCard({ cat, rules, checks, showChecks, showPassed, locked, onSe
 // Remembered per browser: whether the cards list every passed check or just the count.
 const SHOW_PASSED_KEY = "catalog-lint:show-passed";
 
-function Overview({ result, history, fixedWeek, fixedTotal, plan, newProducts, streak, locked, onSelect, onIgnore, onFixAll, busy }) {
+function Overview({ result, history, fixedWeek, fixedTotal, plan, newProducts, streak, locked, locale, onSelect, onIgnore, onFixAll, busy }) {
   const [filter, setFilter] = useState(null);
   const [showPassed, setShowPassed] = useState(false);
   const checks = result.checks || [];
@@ -725,15 +744,15 @@ function Overview({ result, history, fixedWeek, fixedTotal, plan, newProducts, s
       <s-box paddingBlockEnd="small">
       <s-query-container>
         <s-grid gridTemplateColumns={HEADER_COLUMNS} gap="base">
-          <Summary result={result} history={history} fixedWeek={fixedWeek} fixedTotal={fixedTotal} checksOn={checksOn} checksTotal={checks.length} newProducts={newProducts} streak={streak} locked={locked} />
-          {result.rules.length === 0 ? <CleanSection total={result.total} /> : <StartHere result={result} locked={locked} onSelect={onSelect} onFixAll={onFixAll} busy={busy} />}
+          <Summary result={result} history={history} fixedWeek={fixedWeek} fixedTotal={fixedTotal} checksOn={checksOn} checksTotal={checks.length} newProducts={newProducts} streak={streak} locked={locked} locale={locale} />
+          {result.rules.length === 0 ? <CleanSection total={result.total} /> : <StartHere result={result} locked={locked} onSelect={onSelect} onFixAll={onFixAll} busy={busy} locale={locale} />}
         </s-grid>
       </s-query-container>
       </s-box>
 
       {newProducts > 0 && !plan.features.newProductScans ? (
         // The free plan can only run a full scan; the paid plans get a Scan New Products button.
-        <s-banner tone="info" heading={`${newProducts.toLocaleString("en-US")} ${newProducts === 1 ? "product" : "products"} added since your last scan`}>
+        <s-banner tone="info" heading={`${newProducts.toLocaleString(locale)} ${newProducts === 1 ? "product" : "products"} added since your last scan`}>
           <s-paragraph>
             Scanning only what is new is part of the {planFor("newProductScans").name} plan. <s-link href="/app/plans">Upgrade</s-link>, or run
             a full scan.
@@ -743,9 +762,9 @@ function Overview({ result, history, fixedWeek, fixedTotal, plan, newProducts, s
 
       {result.truncated ? (
         // The plan's product limit left products out of the scan.
-        <s-banner tone="warning" heading={`Scanned ${result.total.toLocaleString("en-US")} of ${result.catalogTotal.toLocaleString("en-US")} products`}>
+        <s-banner tone="warning" heading={`Scanned ${result.total.toLocaleString(locale)} of ${result.catalogTotal.toLocaleString(locale)} products`}>
           <s-paragraph>
-            {plan.productLimit ? `The ${plan.name} plan scans up to ${plan.productLimit.toLocaleString("en-US")} products. ` : "Scan again to include every product. "}
+            {plan.productLimit ? `The ${plan.name} plan scans up to ${plan.productLimit.toLocaleString(locale)} products. ` : "Scan again to include every product. "}
             <s-link href="/app/plans">Upgrade to scan everything.</s-link>
           </s-paragraph>
         </s-banner>
@@ -831,7 +850,7 @@ export default function Index() {
   const data = fetcher.data;
   // The loader is revalidated after every action and while a background scan runs, so it is the
   // source of truth for the page; the fetcher's data only carries the action's notices.
-  const { result, history, fixedWeek, fixedTotal, job, checkCount, plan, planUnknown, overLimit, newProducts, pending, streak, locked } = initial;
+  const { result, history, fixedWeek, fixedTotal, job, checkCount, plan, planUnknown, overLimit, newProducts, pending, streak, locked, locale } = initial;
   const revalidator = useRevalidator();
   const scanning = job?.status === "running";
 
@@ -895,14 +914,16 @@ export default function Index() {
         </s-banner>
       ) : null}
       {overLimit && result ? (
-        <s-banner tone="warning" heading={`The ${plan.name} plan scans up to ${plan.productLimit.toLocaleString("en-US")} products`}>
-          <s-paragraph>The last scan covered {result.total.toLocaleString("en-US")}. Run a full scan to apply the limit.</s-paragraph>
+        <s-banner tone="warning" heading={`The ${plan.name} plan scans up to ${plan.productLimit.toLocaleString(locale)} products`}>
+          <s-paragraph>The last scan covered {result.total.toLocaleString(locale)}. Run a full scan to apply the limit.</s-paragraph>
         </s-banner>
       ) : null}
-      <ScanProgress job={job} />
+      <ScanProgress job={job} locale={locale} />
 
       {!result ? (
         <Welcome checkCount={checkCount} onScan={runScan} busy={busy} scanning={scanning} />
+      ) : result.total === 0 && !newProducts ? (
+        <NoProducts />
       ) : (
         <Overview
           result={result}
@@ -913,6 +934,7 @@ export default function Index() {
           newProducts={newProducts}
           streak={streak}
           locked={locked}
+          locale={locale}
           onSelect={openIssue}
           onIgnore={runIgnore}
           onFixAll={runFixAll}

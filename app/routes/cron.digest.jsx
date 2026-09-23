@@ -3,6 +3,7 @@ import { timingSafeEqual } from "node:crypto";
 import { unauthenticated } from "../shopify.server";
 import { digestRecipients, sendDigest } from "../lib/digest.server";
 import { planForShop } from "../lib/billing.server";
+import { shopInfo } from "../lib/shop.server";
 
 // Sends the weekly email to every shop that turned it on and whose plan includes it. Called by the
 // host's scheduler once a week (GET or POST) with the CRON_SECRET, as a bearer token or an
@@ -39,7 +40,8 @@ async function run(request) {
         skipped.push({ shop, reason: `not in the ${plan.name} plan` });
         continue;
       }
-      await sendDigest(shop, email);
+      const info = await shopInfo(admin.graphql, shop);
+      await sendDigest(shop, email, info.locale);
       sent.push(shop);
     } catch (err) {
       failed.push({ shop, error: err.message || String(err) });

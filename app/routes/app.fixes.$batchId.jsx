@@ -6,13 +6,15 @@ import { fixBatch, undoFix } from "../lib/fixes.server";
 import { refreshAfter } from "../lib/rescan.server";
 import { currentPlan, PLAN_UNKNOWN } from "../lib/billing.server";
 import { withShopLock } from "../lib/lock.server";
+import { shopInfo } from "../lib/shop.server";
 import { adminUrl, timeAgo } from "../lib/format";
 
 // One recent fix: the products it changed, each of which can be undone on its own.
 
 export async function loader({ request, params }) {
-  const { session } = await authenticate.admin(request);
-  return { batch: await fixBatch(session.shop, params.batchId) };
+  const { admin, session } = await authenticate.admin(request);
+  const [batch, info] = await Promise.all([fixBatch(session.shop, params.batchId), shopInfo(admin.graphql, session.shop)]);
+  return { batch, locale: info.locale };
 }
 
 // Undo one product's changes (productId) or every change in the batch.
@@ -55,15 +57,14 @@ const FIELD_LABELS = {
   available: "available quantity",
   metafield: "metafield",
 };
-const n = (v) => Number(v || 0).toLocaleString("en-US");
-
-function describe(p) {
+function describe(p, locale) {
   const fields = p.fields.map((f) => FIELD_LABELS[f] || f).join(", ");
-  return `${n(p.changes)} ${p.changes === 1 ? "change" : "changes"} · ${fields}`;
+  return `${Number(p.changes || 0).toLocaleString(locale)} ${p.changes === 1 ? "change" : "changes"} · ${fields}`;
 }
 
 export default function FixBatchPage() {
-  const { batch } = useLoaderData();
+  const { batch, locale } = useLoaderData();
+  const n = (v) => Number(v || 0).toLocaleString(locale);
   const fetcher = useFetcher();
   const busy = fetcher.state !== "idle";
   const outcome = fetcher.data;
@@ -119,7 +120,7 @@ export default function FixBatchPage() {
           <s-stack gap="small">
             <s-stack direction="inline" gap="small" alignItems="center">
               <s-heading>{n(batch.count)} {batch.count === 1 ? "change" : "changes"} on {products}</s-heading>
-              <s-text color="subdued">{timeAgo(batch.at)}</s-text>
+              <s-text color="subdued">{timeAgo(batch.at, locale)}</s-text>
             </s-stack>
             <s-text color="subdued">Undo a product to put its previous values back, or undo everything at once.</s-text>
           </s-stack>
@@ -148,7 +149,7 @@ export default function FixBatchPage() {
                     </s-link>
                   </s-table-cell>
                   <s-table-cell>
-                    <s-text>{describe(p)}</s-text>
+                    <s-text>{describe(p, locale)}</s-text>
                   </s-table-cell>
                   <s-table-cell>
                     <s-button variant="secondary" onClick={() => undo(p.productId)} disabled={busy || undefined} accessibilityLabel={`Undo the changes to ${p.title}`}>

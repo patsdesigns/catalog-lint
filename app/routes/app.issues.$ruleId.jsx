@@ -16,6 +16,7 @@ import { withShopLock } from "../lib/lock.server";
 import { findingKey } from "../lib/validate.server";
 import { planFor, areaLocked, allAreasPlan } from "../lib/plans";
 import { categoryOf } from "../lib/categories";
+import { shopInfo } from "../lib/shop.server";
 import { adminUrl, truncate } from "../lib/format";
 import { TONE, CategoryChip, Notices, passesWhen } from "../lib/ui";
 
@@ -23,9 +24,9 @@ import { TONE, CategoryChip, Notices, passesWhen } from "../lib/ui";
 // re-check them. Its own route, so the home page never carries every finding of every check.
 
 export async function loader({ request, params }) {
-  const { session, billing } = await authenticate.admin(request);
+  const { admin, session, billing } = await authenticate.admin(request);
   const { plan, planUnknown } = await currentPlan(billing, session.shop);
-  const [result, settings] = await Promise.all([latestScan(session.shop), getSettings(session.shop)]);
+  const [result, settings, info] = await Promise.all([latestScan(session.shop), getSettings(session.shop), shopInfo(admin.graphql, session.shop)]);
   const rule = result?.rules.find((r) => r.ruleId === params.ruleId) || null;
   const known = RULE_CATALOG.find((r) => r.id === params.ruleId) || null;
   // A check in an area the plan does not cover has no page: Plans explains what covers it.
@@ -35,7 +36,7 @@ export async function loader({ request, params }) {
   const label = rule?.label || known?.label || "Check";
   // Tracked metafields show as columns on every check.
   const tracked = (settings.trackedMetafields || []).map((t) => ({ key: t.fullKey, name: t.name }));
-  return { rule, findings, plan, planUnknown, label, tracked };
+  return { rule, findings, plan, planUnknown, label, tracked, locale: info.locale };
 }
 
 // The browser names a finding by its key (rule, product, variant, word, field); everything else
@@ -405,7 +406,7 @@ function FindingRow({ f, columns, tracked, features, onSave, onLearn, onIgnore, 
   );
 }
 
-function Detail({ rule, findings, tracked, features, onSave, onLearn, onIgnore, onUndo, onBack, busy }) {
+function Detail({ rule, findings, tracked, features, locale, onSave, onLearn, onIgnore, onUndo, onBack, busy }) {
   const [query, setQuery] = useState("");
   const q = query.trim().toLowerCase();
   const filtered = q
@@ -484,7 +485,7 @@ function Detail({ rule, findings, tracked, features, onSave, onLearn, onIgnore, 
             <s-text color="subdued">Showing {rows.length} of {filtered.length}. Use search to narrow down.</s-text>
           ) : rule.count > findings.length ? (
             // The stored list is capped per check; the count is not.
-            <s-text color="subdued">Showing the first {findings.length.toLocaleString("en-US")} of {rule.count.toLocaleString("en-US")}. Fix some and scan again for the rest.</s-text>
+            <s-text color="subdued">Showing the first {findings.length.toLocaleString(locale)} of {rule.count.toLocaleString(locale)}. Fix some and scan again for the rest.</s-text>
           ) : null}
         </s-stack>
       </s-box>
@@ -512,7 +513,7 @@ function AllClear({ onBack }) {
 const keyOf = (f) => ({ ruleId: f.ruleId, productId: f.productId, variantId: f.variantId || "", word: f.word || "", field: f.field || "" });
 
 export default function IssuePage() {
-  const { rule, findings, plan, planUnknown, label, tracked } = useLoaderData();
+  const { rule, findings, plan, planUnknown, label, tracked, locale } = useLoaderData();
   const fetcher = useFetcher();
   const navigate = useNavigate();
   const busy = fetcher.state !== "idle";
@@ -579,6 +580,7 @@ export default function IssuePage() {
           rule={rule}
           findings={findings}
           tracked={tracked || []}
+          locale={locale}
           onSave={saveEdit}
           onLearn={learnWord}
           onIgnore={ignoreFinding}

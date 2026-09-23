@@ -5,6 +5,7 @@ import { authenticate } from "../shopify.server";
 import { listTracked, trackMetafield, updateTracked, untrackMetafield, fetchDefinitions, MAX_TRACKED } from "../lib/metafields.server";
 import { refreshAfter } from "../lib/rescan.server";
 import { currentPlan, PLAN_UNKNOWN } from "../lib/billing.server";
+import { describeError } from "../lib/graphql.server";
 import { planFor } from "../lib/plans";
 import { PlanUnknown } from "../lib/ui";
 
@@ -51,11 +52,11 @@ export async function action({ request }) {
       });
     }
     if (intent === "untrack") await untrackMetafield(session.shop, form.get("id"));
+    // Checks that no longer exist (a metafield untracked, a setting turned off) lose their findings now.
+    await refreshAfter(admin.graphql, session.shop, { kind: "settings" });
   } catch (err) {
-    return { ok: false, error: err.message || String(err) };
+    return { ok: false, error: describeError(err) };
   }
-  // Checks that no longer exist (a metafield untracked, a setting turned off) lose their findings now.
-  await refreshAfter(admin.graphql, session.shop, { kind: "settings" });
   return { ok: true, done: intent, name };
 }
 

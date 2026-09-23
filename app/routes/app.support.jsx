@@ -3,6 +3,7 @@ import { useFetcher } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { describeError } from "../lib/graphql.server";
 
 // Contact form. Messages are kept per shop in SupportMessage and, when SUPPORT_WEBHOOK_URL is set,
 // posted there as well (a Slack incoming webhook, Zapier, Make or any endpoint that takes JSON).
@@ -15,6 +16,10 @@ export async function loader({ request }) {
   const { session } = await authenticate.admin(request);
   return { shop: session.shop };
 }
+
+// How long each field may be, and how many messages a shop may send in an hour.
+const LIMITS = { name: 100, email: 254, subject: 200, message: 5000 };
+const MESSAGES_PER_HOUR = 10;
 
 export async function action({ request }) {
   const { session } = await authenticate.admin(request);
@@ -31,7 +36,16 @@ export async function action({ request }) {
     return { ok: false, error: "Name, email, subject and message are all needed." };
   }
   if (!EMAIL_RE.test(entry.email)) return { ok: false, error: "That email address does not look right." };
-  await prisma.supportMessage.create({ data: { shop: session.shop, ...entry } });
+  for (const [key, max] of Object.entries(LIMITS)) {
+    if (entry[key].length > max) return { ok: false, error: `The ${key} can have up to ${max.toLocaleString("en-US")} characters.` };
+  }
+  try {
+    const recent = await prisma.supportMessage.count({ where: { shop: session.shop, createdAt: { gte: new Date(Date.now() - 60 * 60 * 1000) } } });
+    if (recent >= MESSAGES_PER_HOUR) return { ok: false, error: "Up to ten messages an hour. Try again later." };
+    await prisma.supportMessage.create({ data: { shop: session.shop, ...entry } });
+  } catch (err) {
+    return { ok: false, error: describeError(err) };
+  }
   await forward(session.shop, entry);
   return { ok: true };
 }
@@ -51,7 +65,8 @@ async function forward(shop, entry) {
     });
     if (!res.ok) console.error(`Support webhook responded ${res.status}`);
   } catch (err) {
-    console.error("Support webhook failed", err);
+    // The message only: the error object can carry the webhook address.
+    console.error(`Support webhook failed: ${err?.message || err}`);
   }
 }
 

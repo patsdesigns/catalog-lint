@@ -3,12 +3,13 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { PLANS, DEFAULT_PLAN, EARLY_BIRD, EARLY_BIRD_SEATS, FEATURE_LABELS, COMING_SOON, ALL_AREAS } from "../lib/plans";
 import { BILLING_TEST, PLAN_UNKNOWN, currentPlan, forgetPlan, earlyBirdSeatsLeft, earlyBirdClaim, claimEarlyBird, lapseEarlyBird, isEarlyBirdSubscription } from "../lib/billing.server";
+import { shopInfo } from "../lib/shop.server";
 
 // The three plans, plus the Early Bird offer while seats remain. Choosing a paid plan sends the
 // merchant to Shopify's approval screen and back here; choosing Dust Off cancels the subscription.
 
 export async function loader({ request }) {
-  const { billing, session } = await authenticate.admin(request);
+  const { admin, billing, session } = await authenticate.admin(request);
   const shop = session.shop;
   // Read fresh: this page is where the merchant comes back after approving a change.
   const { plan, subscription, planUnknown } = await currentPlan(billing, shop, { fresh: true });
@@ -47,7 +48,8 @@ export async function loader({ request }) {
     show: plan.id === EARLY_BIRD.id || claim?.status === "active" || (!claim && seatsLeft > 0),
     plan: EARLY_BIRD,
   };
-  return { currentId, plans: PLANS, earlyBird, notice, planUnknown };
+  const { locale } = await shopInfo(admin.graphql, shop);
+  return { currentId, plans: PLANS, earlyBird, notice, planUnknown, locale };
 }
 
 export async function action({ request }) {
@@ -90,7 +92,7 @@ const THREE_COLUMNS = "@container (inline-size > 900px) 1fr 1fr 1fr, (inline-siz
 const FOUR_COLUMNS = "@container (inline-size > 1000px) 1fr 1fr 1fr 1fr, (inline-size > 560px) and (inline-size <= 1000px) 1fr 1fr, 1fr";
 const FEATURE_ORDER = Object.keys(FEATURE_LABELS);
 
-function PlanCard({ plan, current, note, claimed, footnote, busy, onChoose }) {
+function PlanCard({ plan, current, note, claimed, footnote, busy, locale, onChoose }) {
   const included = FEATURE_ORDER.filter((key) => plan.features[key] && !COMING_SOON.has(key));
   const later = FEATURE_ORDER.filter((key) => plan.features[key] && COMING_SOON.has(key));
   return (
@@ -102,7 +104,7 @@ function PlanCard({ plan, current, note, claimed, footnote, busy, onChoose }) {
             {current ? <s-badge tone="success">Current plan</s-badge> : plan.earlyBird ? <s-badge tone="info">Limited offer</s-badge> : null}
           </s-stack>
           <s-text type="strong">{plan.price ? `$${plan.price} / month` : "Free"}</s-text>
-          <s-text color="subdued">{plan.productLimit ? `Up to ${plan.productLimit.toLocaleString("en-US")} products` : "Unlimited products"}</s-text>
+          <s-text color="subdued">{plan.productLimit ? `Up to ${plan.productLimit.toLocaleString(locale)} products` : "Unlimited products"}</s-text>
           <s-text color="subdued">{plan.areas.length === ALL_AREAS.length ? `All ${ALL_AREAS.length} check areas` : `${plan.areas.length} of ${ALL_AREAS.length} check areas`}</s-text>
           {note ? <s-text>{note}</s-text> : null}
           {claimed ? <s-text color="subdued">{claimed}</s-text> : null}
@@ -134,7 +136,7 @@ function PlanCard({ plan, current, note, claimed, footnote, busy, onChoose }) {
 }
 
 export default function PlansPage() {
-  const { currentId, plans, earlyBird, notice } = useLoaderData();
+  const { currentId, plans, earlyBird, notice, locale } = useLoaderData();
   const fetcher = useFetcher();
   const busy = fetcher.state !== "idle";
   const outcome = fetcher.data;
@@ -179,6 +181,7 @@ export default function PlansPage() {
                   claimed={plan.earlyBird ? claimed : null}
                   footnote={plan.earlyBird ? "* Keep it as long as you stay subscribed." : null}
                   busy={busy}
+                  locale={locale}
                   onChoose={choose}
                 />
               ))}

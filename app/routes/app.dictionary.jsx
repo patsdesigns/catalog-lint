@@ -4,6 +4,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { listWords, removeWord, addWord } from "../lib/dictionary.server";
 import { currentPlan, PLAN_UNKNOWN } from "../lib/billing.server";
+import { describeError } from "../lib/graphql.server";
 import { planFor } from "../lib/plans";
 import { PlanUnknown } from "../lib/ui";
 
@@ -27,9 +28,21 @@ export async function action({ request }) {
   }
   const form = await request.formData();
   const intent = form.get("intent");
-  if (intent === "addWord") await addWord(session.shop, form.get("word"));
-  if (intent === "removeWord") await removeWord(session.shop, form.get("id"));
-  return { ok: true };
+  try {
+    if (intent === "addWord") {
+      const word = String(form.get("word") || "").trim().slice(0, 100);
+      if (!word) return { ok: false, error: "Enter a word to add." };
+      await addWord(session.shop, word);
+    }
+    if (intent === "removeWord") {
+      const id = Number(form.get("id"));
+      if (!Number.isInteger(id)) return { ok: false, error: "That word was not understood. Reload the page and try again." };
+      await removeWord(session.shop, id);
+    }
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: describeError(err) };
+  }
 }
 
 const MAX_ROWS = 200;

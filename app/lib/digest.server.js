@@ -3,6 +3,7 @@ import prisma from "../db.server";
 import { latestScan } from "./scans.server";
 import { snapshotDaysAgo } from "./snapshots.server";
 import { categoryOf } from "./categories";
+import { formatNumber } from "./format";
 
 // The weekly email: potential problems, the change over the last seven days (from DailySnapshot),
 // the five Start Here issues and a link to the app. Sent with Resend (RESEND_API_KEY), from
@@ -33,9 +34,8 @@ function escapeHtml(s) {
   return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-const n = (v) => Number(v || 0).toLocaleString("en-US");
-
-export async function buildDigest(shop) {
+export async function buildDigest(shop, locale = "en") {
+  const n = (v) => formatNumber(v, locale);
   const latest = await latestScan(shop);
   const open = latest ? latest.findings.length : 0;
   const weekAgo = await snapshotDaysAgo(shop, 7);
@@ -92,9 +92,9 @@ export async function buildDigest(shop) {
 }
 
 // Builds and sends the digest to one address. Throws when Resend is not configured or rejects it.
-export async function sendDigest(shop, to) {
+export async function sendDigest(shop, to, locale = "en") {
   if (!env.RESEND_API_KEY) throw new Error("RESEND_API_KEY is not set, so emails cannot be sent yet.");
-  const digest = await buildDigest(shop);
+  const digest = await buildDigest(shop, locale);
   const resend = new Resend(env.RESEND_API_KEY);
   const { error } = await resend.emails.send({
     from: env.DIGEST_FROM || "TidyUp <onboarding@resend.dev>",

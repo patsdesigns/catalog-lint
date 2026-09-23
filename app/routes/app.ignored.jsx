@@ -4,7 +4,8 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { getIgnores, removeIgnore } from "../lib/ignores.server";
 import { refreshAfter } from "../lib/rescan.server";
-import { shopTimeZone } from "../lib/shop.server";
+import { shopInfo } from "../lib/shop.server";
+import { describeError } from "../lib/graphql.server";
 import { RULE_CATALOG } from "../lib/rules.server";
 import { currentPlan, PLAN_UNKNOWN } from "../lib/billing.server";
 import { planFor } from "../lib/plans";
@@ -21,8 +22,9 @@ export async function loader({ request }) {
   const { admin, session, billing } = await authenticate.admin(request);
   const { plan, planUnknown } = await currentPlan(billing, session.shop);
   // The rows are only sent to a plan that includes them.
-  if (planUnknown || !plan.features.ignores) return { ignores: [], plan, planUnknown, timeZone: "UTC" };
-  const [rows, timeZone] = await Promise.all([getIgnores(session.shop), shopTimeZone(admin.graphql, session.shop)]);
+  if (planUnknown || !plan.features.ignores) return { ignores: [], plan, planUnknown, timeZone: "UTC", locale: "en" };
+  const [rows, info] = await Promise.all([getIgnores(session.shop), shopInfo(admin.graphql, session.shop)]);
+  const { timeZone, locale } = info;
   const labels = new Map(RULE_CATALOG.map((r) => [r.id, r.label]));
   const ignores = rows.map((i) => ({
     id: i.id,
@@ -32,7 +34,7 @@ export async function loader({ request }) {
     detail: i.detail,
     at: i.createdAt.toISOString(),
   }));
-  return { ignores, plan, planUnknown, timeZone };
+  return { ignores, plan, planUnknown, timeZone, locale };
 }
 
 export async function action({ request }) {
@@ -45,21 +47,27 @@ export async function action({ request }) {
   const form = await request.formData();
   if (form.get("intent") !== "restore") return { ok: true };
   const id = Number(form.get("id"));
-  const row = (await getIgnores(session.shop)).find((i) => i.id === id);
-  if (!row) return { ok: true, restored: null };
-  await removeIgnore(session.shop, id);
+  if (!Number.isInteger(id)) return { ok: false, error: "That finding was not understood. Reload the page and try again." };
+  let row;
+  try {
+    row = (await getIgnores(session.shop)).find((i) => i.id === id);
+    if (!row) return { ok: true, restored: null };
+    await removeIgnore(session.shop, id);
+  } catch (err) {
+    return { ok: false, error: describeError(err) };
+  }
   try {
     // The product is re-checked so the finding is back on the home page if it still applies.
     await refreshAfter(admin.graphql, session.shop, { kind: "products", ids: [row.productId] }, plan.productLimit);
     return { ok: true, restored: { title: row.title, rechecked: true } };
   } catch (err) {
     // The ignore is gone either way; the finding then returns with the next scan.
-    return { ok: true, restored: { title: row.title, rechecked: false, error: err.message || String(err) } };
+    return { ok: true, restored: { title: row.title, rechecked: false, error: describeError(err) } };
   }
 }
 
 export default function IgnoredPage() {
-  const { ignores, plan, planUnknown, timeZone } = useLoaderData();
+  const { ignores, plan, planUnknown, timeZone, locale } = useLoaderData();
   const fetcher = useFetcher();
   const busy = fetcher.state !== "idle";
   const outcome = fetcher.data;
@@ -156,8 +164,8 @@ export default function IgnoredPage() {
                   </s-table-cell>
                   <s-table-cell>
                     <s-stack gap="small-500">
-                      <s-text fontVariantNumeric="tabular-nums">{formatWhen(i.at, timeZone)}</s-text>
-                      <s-text color="subdued">{timeAgo(i.at)}</s-text>
+                      <s-text fontVariantNumeric="tabular-nums">{formatWhen(i.at, timeZone, undefined, locale)}</s-text>
+                      <s-text color="subdued">{timeAgo(i.at, locale)}</s-text>
                     </s-stack>
                   </s-table-cell>
                   <s-table-cell>

@@ -6,7 +6,7 @@ import { refreshAfter } from "../lib/rescan.server";
 import { currentPlan, PLAN_UNKNOWN } from "../lib/billing.server";
 import { withShopLock } from "../lib/lock.server";
 import { formatWhen, timeAgo, truncate } from "../lib/format";
-import { shopTimeZone } from "../lib/shop.server";
+import { shopInfo } from "../lib/shop.server";
 import { ruleLabel, Notices } from "../lib/ui";
 
 // Recent fixes: every bulk fix and saved edit still in place, newest first, each undoable here. A
@@ -17,13 +17,13 @@ const LIMIT = 50;
 export async function loader({ request }) {
   const { admin, session } = await authenticate.admin(request);
   const shop = session.shop;
-  const [fixes, fixedWeek, fixedTotal, timeZone] = await Promise.all([
+  const [fixes, fixedWeek, fixedTotal, info] = await Promise.all([
     recentFixes(shop, LIMIT),
     fixedCount(shop, 7),
     fixedCount(shop),
-    shopTimeZone(admin.graphql, shop),
+    shopInfo(admin.graphql, shop),
   ]);
-  return { fixes, fixedWeek, fixedTotal, timeZone };
+  return { fixes, fixedWeek, fixedTotal, timeZone: info.timeZone, locale: info.locale };
 }
 
 export async function action({ request }) {
@@ -44,10 +44,9 @@ export async function action({ request }) {
   }
 }
 
-const n = (v) => Number(v || 0).toLocaleString("en-US");
-
 export default function RecentFixesPage() {
-  const { fixes, fixedWeek, fixedTotal, timeZone } = useLoaderData();
+  const { fixes, fixedWeek, fixedTotal, timeZone, locale } = useLoaderData();
+  const n = (v) => Number(v || 0).toLocaleString(locale);
   const fetcher = useFetcher();
   const navigate = useNavigate();
   const busy = fetcher.state !== "idle";
@@ -90,8 +89,8 @@ export default function RecentFixesPage() {
                   <s-table-cell>
                     {/* In the store time zone, with how long ago underneath. */}
                     <s-stack gap="small-500">
-                      <s-text fontVariantNumeric="tabular-nums">{formatWhen(f.at, timeZone)}</s-text>
-                      <s-text color="subdued">{timeAgo(f.at)}</s-text>
+                      <s-text fontVariantNumeric="tabular-nums">{formatWhen(f.at, timeZone, undefined, locale)}</s-text>
+                      <s-text color="subdued">{timeAgo(f.at, locale)}</s-text>
                     </s-stack>
                   </s-table-cell>
                   <s-table-cell>

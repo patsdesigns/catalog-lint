@@ -6,7 +6,7 @@ Method: one full read of every file, then seven independent review passes (one p
 
 Legend: `[ ]` open, `[x]` fixed. Severity: high (wrong data, lost undo, outage, security), medium (wrong behaviour in a real case), low (polish, robustness, consistency). Line numbers refer to the code before Phase 2. Product decisions are not changed; they are listed under Questions at the end.
 
-Totals: 136 items found; 81 fixed so far; 22 open questions.
+Totals: 136 items found; 93 fixed so far; 22 open questions.
 
 ## 1. Correctness of every check
 
@@ -116,13 +116,13 @@ Confirmed: the migrations apply from empty to exactly the current schema (`prism
 
 Confirmed: zero-product and one-product stores scan without throwing (score 100, no findings); every action on issue, home, plans and fixes pages has a try/catch that returns a banner; `shopTimeZone` and `countNewProducts` fall back quietly.
 
-- [ ] **7.1** high — `app/routes/app.jsx:30` — the error boundary only handles Shopify responses and rethrows everything else, so any uncaught loader error shows React Router's default page (a stack trace in development) with the app layout gone. Fix: render the layout with an `s-banner` carrying a plain message for other errors and log the raw error on the server.
-- [ ] **7.2** medium — `app/routes/app.settings.jsx:66`, `app/routes/app.tracked.jsx:48`, `app/routes/app.ignored.jsx:44`, `app/routes/app.dictionary.jsx:26`, `app/routes/app.support.jsx:34`, `app/routes/app.plans.jsx:24` — parts of these actions run outside any try (JSON parse, saves, refresh, cancel inside a catch), so a failure becomes the error page instead of a banner; banners also print raw Prisma and `[object Response]` messages. Fix: try/catch every action, map Prisma, JSON and thrown Response errors to plain sentences.
-- [ ] **7.3** medium — `app/lib/rescan.server.js:56` — a finished bulk export is downloaded and scanned inside the home loader with no lock, so a second tab (or a webhook page load) processes it twice and saves two rows, and a 5,000-product scan can outrun the request timeout. Fix: claim the job atomically, mark it "finishing", run the download and rules detached, and let the loader only report status.
+- [x] **7.1** high — `app/routes/app.jsx:30` — the error boundary only handles Shopify responses and rethrows everything else, so any uncaught loader error shows React Router's default page (a stack trace in development) with the app layout gone. Fix: render the layout with an `s-banner` carrying a plain message for other errors and log the raw error on the server.
+- [x] **7.2** medium — `app/routes/app.settings.jsx:66`, `app/routes/app.tracked.jsx:48`, `app/routes/app.ignored.jsx:44`, `app/routes/app.dictionary.jsx:26`, `app/routes/app.support.jsx:34`, `app/routes/app.plans.jsx:24` — parts of these actions run outside any try (JSON parse, saves, refresh, cancel inside a catch), so a failure becomes the error page instead of a banner; banners also print raw Prisma and `[object Response]` messages. Fix: try/catch every action, map Prisma, JSON and thrown Response errors to plain sentences.
+- [x] **7.3** medium — `app/lib/rescan.server.js:56` — a finished bulk export is downloaded and scanned inside the home loader with no lock, so a second tab (or a webhook page load) processes it twice and saves two rows, and a 5,000-product scan can outrun the request timeout. Fix: claim the job atomically, mark it "finishing", run the download and rules detached, and let the loader only report status.
 - [x] **7.4** high — `app/lib/scan.server.js:110`, `app/lib/writes.server.js:3`, `app/lib/metafields.server.js:93`, `app/lib/billing.server.js:35` — no call retries a throttled response: the client throws `GraphqlQueryError` for a THROTTLED body and a `Response` for HTTP 429, the `errors` branches in the app are unreachable, and route banners show "[object Response]". Fix: one shared `app/lib/graphql.server.js` helper used by every call site: paces on `throttleStatus`, retries THROTTLED and 429/503 with backoff (3 attempts), passes `tries`, and returns plain error messages.
-- [ ] **7.5** low — `app/lib/spelling.server.js:4` — a failed dictionary load is cached forever. Fix: clear the cached promise on failure.
-- [ ] **7.6** medium — `app/lib/rules.server.js:89`, `app/lib/format.js:15`, `app/routes/app._index.jsx:179` — money values are printed without the store currency and every date and number is formatted en-US regardless of the store. Fix: read `shop { currencyCode ianaTimezone }` and the primary locale once per shop (cached), format money with the store currency in findings, and format dates, relative times and numbers with the store locale on the pages.
-- [ ] **7.7** low — `app/routes/app._index.jsx:578` — a store with zero products shows "Your catalog is clean, no issues found across 0 products". Fix: a "No products yet" state.
+- [x] **7.5** low — `app/lib/spelling.server.js:4` — a failed dictionary load is cached forever. Fix: clear the cached promise on failure.
+- [x] **7.6** medium — `app/lib/rules.server.js:89`, `app/lib/format.js:15`, `app/routes/app._index.jsx:179` — money values are printed without the store currency and every date and number is formatted en-US regardless of the store. Fix: read `shop { currencyCode ianaTimezone }` and the primary locale once per shop (cached), format money with the store currency in findings, and format dates, relative times and numbers with the store locale on the pages.
+- [x] **7.7** low — `app/routes/app._index.jsx:578` — a store with zero products shows "Your catalog is clean, no issues found across 0 products". Fix: a "No products yet" state.
 - [x] **7.8** low — `app/lib/billing.server.js:35` — `planForShop` never checks for missing data and silently yields Dust Off. Fix: throw when data is missing (the webhook then queues the product, see 2.12).
 
 ## 8. UI and Polaris
@@ -152,8 +152,8 @@ Confirmed: every page uses Polaris web components; every input has a label (visi
 
 - [x] **9.1** high — `app/lib/ui.jsx:82` — "1 changes reverted". Fix: pluralize.
 - [ ] **9.2** medium — `app/routes/app.plans.jsx:26`, `:150` — "cancelled" (British). Fix: "canceled".
-- [ ] **9.3** medium — `app/lib/rules.server.js:485`, `:488`, `app/routes/app.fixes.$batchId.jsx:35` — compare-at is written three ways. Fix: "compare-at price" everywhere.
-- [ ] **9.4** medium — `app/lib/format.js:41` — "3 min ago", "2 h ago", "5 d ago". Fix: spelled-out units.
+- [x] **9.3** medium — `app/lib/rules.server.js:485`, `:488`, `app/routes/app.fixes.$batchId.jsx:35` — compare-at is written three ways. Fix: "compare-at price" everywhere.
+- [x] **9.4** medium — `app/lib/format.js:41` — "3 min ago", "2 h ago", "5 d ago". Fix: spelled-out units.
 - [ ] **9.5** medium — `app/lib/checkLabels.js:9`, `:10`, `:11`, `:19`, `:44`, `:55`, `:57`, `:64`, `:82`, `:87`, `app/lib/ui.jsx:22` — ten "No X" pass labels read as non-sentences after "Passes when" ("Passes when no misspellings found."). Fix: reword them as clauses ("There are no misspellings").
 - [ ] **9.6** medium — `app/routes/app.plans.jsx:92`, `:132`, `:156` — "$10 / month" beside "billed every 30 days". Fix: say both once: "$10 every 30 days".
 - [ ] **9.7** medium — `app/routes/app.plans.jsx:99` — "fix-all buttons" but the button is "Fix all". Fix: "Full scans, Fix all and undo".
@@ -171,12 +171,12 @@ Confirmed: no secrets in tracked files; `.env` is gitignored and untracked; ever
 
 - [x] **10.1** high — see 3.1 — the client-supplied edit descriptor is trusted. Fix: resolve the descriptor server-side from the stored finding and whitelist fields per kind.
 - [ ] **10.2** high — `app/lib/metafields.server.js:54`, `app/lib/rules.server.js:1016` — merchant regex patterns are only syntax-checked: no length cap, no rejection of nested quantifiers, no timeout, compiled per product and run on unbounded values in the shared process. Fix: cap the pattern at 200 characters, reject nested quantifiers and backreferences, probe the pattern in a worker with a 200 ms timeout at save time, compile once per scan and test at most 1,000 characters.
-- [ ] **10.3** medium — `app/routes/app.settings.jsx:66` — `disabledRules` is parsed outside any try and any JSON shape is stored. Fix: parse safely, require an array of known rule ids.
+- [x] **10.3** medium — `app/routes/app.settings.jsx:66` — `disabledRules` is parsed outside any try and any JSON shape is stored. Fix: parse safely, require an array of known rule ids.
 - [x] **10.4** low — `app/routes/app.issues.$ruleId.jsx:86` — the `finding` JSON feeds the ignore key and the Ignore row unbounded. Fix: validate the shape (known rule id, gid product id, capped strings) and store the server's copy of the finding.
-- [ ] **10.5** low — `app/routes/app.support.jsx:22` — no length caps and no rate limit on the support form. Fix: caps (100/254/200/5,000) and at most 10 messages per shop per hour.
-- [ ] **10.6** low — `app/routes/app.settings.jsx:40` — "Send test email" is unlimited, so the app can be used to mail third parties. Fix: at most 3 test emails per shop per hour.
+- [x] **10.5** low — `app/routes/app.support.jsx:22` — no length caps and no rate limit on the support form. Fix: caps (100/254/200/5,000) and at most 10 messages per shop per hour.
+- [x] **10.6** low — `app/routes/app.settings.jsx:40` — "Send test email" is unlimited, so the app can be used to mail third parties. Fix: at most 3 test emails per shop per hour.
 - [x] **10.7** low — `.dockerignore` — see 6.6 (local `.env`, SQLite file and `.shopify/` can end up in the image). Fix: exclude them.
-- [ ] **10.8** low — `app/routes/app.support.jsx:54` — the failed forward logs the error object, which can contain the webhook URL. Fix: log the message only.
+- [x] **10.8** low — `app/routes/app.support.jsx:54` — the failed forward logs the error object, which can contain the webhook URL. Fix: log the message only.
 
 ## 11. Performance
 

@@ -100,8 +100,16 @@ function trimAt(text, max) {
   const i = cut.lastIndexOf(" ");
   return (i > max * 0.6 ? cut.slice(0, i) : cut.slice(0, max)).replace(/[\s,;:.\-–]+$/, "");
 }
-function money(n) {
-  return Number(n || 0).toFixed(2);
+// An amount as text: with the store currency (ctx.currency) where the merchant reads it, plain
+// (two decimals) where it is a value to store or compare.
+function money(n, ctx) {
+  const amount = Number(n || 0);
+  if (!ctx?.currency) return amount.toFixed(2);
+  try {
+    return new Intl.NumberFormat("en-US", { style: "currency", currency: ctx.currency }).format(amount);
+  } catch {
+    return amount.toFixed(2);
+  }
 }
 // Edit distance between two values, for the closest of a few candidates.
 function distance(a, b) {
@@ -516,19 +524,19 @@ export const PRODUCT_RULES = [
   },
   {
     id: "zero_price", category: "pricing", label: "No price set", severity: "high",
-    check(p) {
+    check(p, ctx) {
       const siblings = p.variants.map((v) => Number(v.price)).filter((n) => n > 0);
       const suggested = siblings.length ? money(median(siblings)) : "";
       return p.variants.filter((v) => Number(v.price) === 0)
-        .map((v) => finding(this, p, { variantId: v.id, detail: v.title, edit: variantEdit(v, "price", "0.00", suggested, { raw: "0", apply: Boolean(suggested) }) }));
+        .map((v) => finding(this, p, { variantId: v.id, detail: v.title, edit: variantEdit(v, "price", money(0, ctx), suggested, { raw: "0", apply: Boolean(suggested) }) }));
     },
   },
   {
     id: "compare_at_not_higher", category: "pricing", label: "Sale price is not a discount", severity: "medium",
-    fixable: true, fixLabel: "Clear the compare at price",
-    check(p) {
+    fixable: true, fixLabel: "Clear the compare-at price",
+    check(p, ctx) {
       return p.variants.filter((v) => v.compareAtPrice != null && Number(v.compareAtPrice) <= Number(v.price))
-        .map((v) => finding(this, p, { variantId: v.id, detail: `${v.title}: ${v.compareAtPrice} vs ${v.price}`, edit: variantEdit(v, "compareAt", `compare ${money(v.compareAtPrice)} vs price ${money(v.price)}`, "", { raw: String(v.compareAtPrice), apply: true, applyValue: "", applyLabel: "Clear compare at" }) }));
+        .map((v) => finding(this, p, { variantId: v.id, detail: `${v.title}: ${money(v.compareAtPrice, ctx)} vs ${money(v.price, ctx)}`, edit: variantEdit(v, "compareAt", `compare-at ${money(v.compareAtPrice, ctx)} vs price ${money(v.price, ctx)}`, "", { raw: String(v.compareAtPrice), apply: true, applyValue: "", applyLabel: "Clear compare-at price" }) }));
     },
   },
   {
@@ -543,7 +551,7 @@ export const PRODUCT_RULES = [
     check(p, ctx) {
       const ending = ctx?.catalog?.priceEnding || "99";
       return p.variants.filter((v) => v.cost != null && Number(v.price) > 0 && Number(v.price) < Number(v.cost))
-        .map((v) => finding(this, p, { variantId: v.id, detail: `${v.title}: price ${v.price}, cost ${v.cost}`, edit: variantEdit(v, "price", `price ${money(v.price)}, cost ${money(v.cost)}`, withEnding(v.cost, ending), { raw: String(v.price), apply: true }) }));
+        .map((v) => finding(this, p, { variantId: v.id, detail: `${v.title}: price ${money(v.price, ctx)}, cost ${money(v.cost, ctx)}`, edit: variantEdit(v, "price", `price ${money(v.price, ctx)}, cost ${money(v.cost, ctx)}`, withEnding(v.cost, ending), { raw: String(v.price), apply: true }) }));
     },
   },
   {
@@ -582,22 +590,22 @@ export const PRODUCT_RULES = [
   // Pricing
   {
     id: "price_outlier", category: "pricing", label: "One variant priced far from the others", severity: "medium",
-    check(p) {
+    check(p, ctx) {
       // Three priced variants at least: with two there is no majority to be far from.
       const prices = p.variants.map((v) => Number(v.price)).filter((n) => n > 0);
       if (prices.length < 3) return [];
       const med = median(prices);
       return p.variants
         .filter((v) => Number(v.price) > 0 && (Number(v.price) > med * 5 || Number(v.price) < med / 5))
-        .map((v) => finding(this, p, { variantId: v.id, detail: `${v.title}: ${v.price}, others around ${med.toFixed(2)}`, edit: variantEdit(v, "price", `${money(v.price)}, others around ${money(med)}`, money(med), { raw: String(v.price), apply: true }) }));
+        .map((v) => finding(this, p, { variantId: v.id, detail: `${v.title}: ${money(v.price, ctx)}, others around ${money(med, ctx)}`, edit: variantEdit(v, "price", `${money(v.price, ctx)}, others around ${money(med, ctx)}`, money(med), { raw: String(v.price), apply: true }) }));
     },
   },
   {
     id: "stale_sale", category: "pricing", label: "On sale for more than 90 days", severity: "low",
-    check(p) {
+    check(p, ctx) {
       return p.variants
         .filter((v) => v.compareAtPrice != null && Number(v.compareAtPrice) > Number(v.price) && (Date.now() - new Date(v.updatedAt).getTime()) / DAY > 90)
-        .map((v) => finding(this, p, { variantId: v.id, detail: `${v.title}: ${v.price} was ${v.compareAtPrice}`, edit: variantEdit(v, "compareAt", `on sale since ${String(v.updatedAt).slice(0, 10)}`, "", { raw: String(v.compareAtPrice), apply: true, applyValue: "", applyLabel: "End sale" }) }));
+        .map((v) => finding(this, p, { variantId: v.id, detail: `${v.title}: ${money(v.price, ctx)} was ${money(v.compareAtPrice, ctx)}`, edit: variantEdit(v, "compareAt", `on sale since ${String(v.updatedAt).slice(0, 10)}`, "", { raw: String(v.compareAtPrice), apply: true, applyValue: "", applyLabel: "End sale" }) }));
     },
   },
 
@@ -925,20 +933,20 @@ PRODUCT_RULES.push(
   // Pricing
   {
     id: "thin_margin", category: "pricing", label: "Margin under 10%", severity: "medium",
-    check(p) {
+    check(p, ctx) {
       const margin = (v) => (Number(v.price) - Number(v.cost)) / Number(v.price);
       return p.variants
         .filter((v) => v.cost != null && Number(v.price) > 0 && Number(v.price) >= Number(v.cost) && margin(v) < MIN_MARGIN)
-        .map((v) => finding(this, p, { variantId: v.id, detail: `${v.title}: price ${v.price}, cost ${v.cost} (${Math.round(margin(v) * 100)}% margin)`, edit: variantEdit(v, "price", `price ${money(v.price)}, cost ${money(v.cost)} (${Math.round(margin(v) * 100)}% margin)`, "", { raw: String(v.price) }) }));
+        .map((v) => finding(this, p, { variantId: v.id, detail: `${v.title}: price ${money(v.price, ctx)}, cost ${money(v.cost, ctx)} (${Math.round(margin(v) * 100)}% margin)`, edit: variantEdit(v, "price", `price ${money(v.price, ctx)}, cost ${money(v.cost, ctx)} (${Math.round(margin(v) * 100)}% margin)`, "", { raw: String(v.price) }) }));
     },
   },
   {
     id: "deep_discount", category: "pricing", label: "Discount over 80%", severity: "medium",
-    check(p) {
+    check(p, ctx) {
       const off = (v) => 1 - Number(v.price) / Number(v.compareAtPrice);
       return p.variants
         .filter((v) => v.compareAtPrice != null && Number(v.price) > 0 && Number(v.compareAtPrice) > Number(v.price) && off(v) > 0.8)
-        .map((v) => finding(this, p, { variantId: v.id, detail: `${v.title}: ${v.price} was ${v.compareAtPrice} (${Math.round(off(v) * 100)}% off)`, edit: variantEdit(v, "compareAt", `${money(v.price)} was ${money(v.compareAtPrice)} (${Math.round(off(v) * 100)}% off)`, "", { raw: String(v.compareAtPrice) }) }));
+        .map((v) => finding(this, p, { variantId: v.id, detail: `${v.title}: ${money(v.price, ctx)} was ${money(v.compareAtPrice, ctx)} (${Math.round(off(v) * 100)}% off)`, edit: variantEdit(v, "compareAt", `${money(v.price, ctx)} was ${money(v.compareAtPrice, ctx)} (${Math.round(off(v) * 100)}% off)`, "", { raw: String(v.compareAtPrice) }) }));
     },
   },
 

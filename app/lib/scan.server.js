@@ -10,6 +10,7 @@ import { loadSpeller, seedWords, catalogNames } from "./spelling.server";
 import { getWords } from "./dictionary.server";
 import { getIgnoreKeys, ignoreKey } from "./ignores.server";
 import { getSettings } from "./settings.server";
+import { shopInfo } from "./shop.server";
 import { request } from "./graphql.server";
 
 export const SYNC_LIMIT = Number(process.env.CATALOG_LINT_SYNC_LIMIT ?? 250);
@@ -114,12 +115,6 @@ const CANCEL_BULK = `#graphql
   }
 `;
 
-const LOCALE_QUERY = `#graphql
-  query PrimaryLocale {
-    shopLocales(published: true) { locale primary }
-  }
-`;
-
 // Every read here goes through the shared helper: paced on the cost bucket, retried on throttling.
 const graphqlJson = (graphql, query, variables) => request(graphql, query, variables);
 
@@ -193,15 +188,6 @@ export function normalize(node, tracked = []) {
       weightUnit: v.inventoryItem?.measurement?.weight?.unit || "KILOGRAMS",
     })),
   };
-}
-
-export async function fetchPrimaryLocale(graphql) {
-  try {
-    const data = await graphqlJson(graphql, LOCALE_QUERY);
-    return (data?.shopLocales || []).find((l) => l.primary)?.locale || "en";
-  } catch {
-    return "en";
-  }
 }
 
 // The store's product count, or the count matching a product search query such as
@@ -336,24 +322,25 @@ export async function downloadBulkCatalog(url, tracked = []) {
 // ---------- running the rules ----------
 
 async function scanContext(graphql, shop) {
-  const [speller, storeWords, ignored, settings, locale] = await Promise.all([
+  const [speller, storeWords, ignored, settings, info] = await Promise.all([
     loadSpeller(),
     shop ? getWords(shop) : [],
     shop ? getIgnoreKeys(shop) : new Set(),
     shop ? getSettings(shop) : { vendorWhitelist: [], trackedMetafields: [] },
-    fetchPrimaryLocale(graphql),
+    shopInfo(graphql, shop),
   ]);
-  return { speller, storeWords, ignored, settings, locale };
+  // The store language decides which language checks apply; the currency reads the prices.
+  return { speller, storeWords, ignored, settings, locale: info.locale, currency: info.currency };
 }
 
 // Runs every rule over an already-read catalog and builds the stored scan result. catalogTotal is
 // how many products the store has when a plan limit left some unscanned.
 export async function scanProducts(products, graphql, shop, startedAt = Date.now(), catalogTotal = products.length) {
-  const { speller, storeWords, ignored, settings, locale } = await scanContext(graphql, shop);
+  const { speller, storeWords, ignored, settings, locale, currency } = await scanContext(graphql, shop);
   const names = catalogNames(products, speller);
   // What the catalog as a whole suggests, stored with the scan so rechecks suggest the same.
   const catalog = catalogContext(products);
-  const ctx = { speller, customWords: seedWords(products, storeWords), nameWords: new Set(names), settings, locale, catalog };
+  const ctx = { speller, customWords: seedWords(products, storeWords), nameWords: new Set(names), settings, locale, currency, catalog };
   const all = runRules(products, ctx);
   const findings = all.filter((f) => !ignored.has(ignoreKey(f)));
   // Counts come from every finding; the stored list is capped per check.
@@ -389,10 +376,10 @@ export async function scanCatalog(graphql, shop, limit = null) {
 // the merchant just acted on (dropRuleId), which the action has resolved for them.
 export async function recheckProducts(graphql, shop, latest, ids, dropRuleId = null) {
   const started = Date.now();
-  const { speller, storeWords, ignored, settings, locale } = await scanContext(graphql, shop);
+  const { speller, storeWords, ignored, settings, locale, currency } = await scanContext(graphql, shop);
   const products = await fetchProductsByIds(graphql, ids, settings.trackedMetafields || []);
   const names = latest.names || [];
-  const ctx = { speller, customWords: seedWords(products, storeWords), nameWords: new Set(names), settings, locale, catalog: latest.context || undefined };
+  const ctx = { speller, customWords: seedWords(products, storeWords), nameWords: new Set(names), settings, locale, currency, catalog: latest.context || undefined };
   const fresh = runProductRules(products, ctx).filter((f) => !ignored.has(ignoreKey(f)));
   const touched = new Set(ids);
   // Products the scan covers: an id it did not know is an addition (a webhook, a queued product),
@@ -433,10 +420,10 @@ export async function scanNewProducts(graphql, shop, latest) {
   const known = new Set(latest.productIds || []);
   const ids = (await fetchNewProductIds(graphql, latest.readAt || latest.scannedAt)).filter((id) => !known.has(id));
   if (!ids.length) return null;
-  const { speller, storeWords, ignored, settings, locale } = await scanContext(graphql, shop);
+  const { speller, storeWords, ignored, settings, locale, currency } = await scanContext(graphql, shop);
   const products = await fetchProductsByIds(graphql, ids, settings.trackedMetafields || []);
   const names = latest.names || [];
-  const ctx = { speller, customWords: seedWords(products, storeWords), nameWords: new Set(names), settings, locale, catalog: latest.context || undefined };
+  const ctx = { speller, customWords: seedWords(products, storeWords), nameWords: new Set(names), settings, locale, currency, catalog: latest.context || undefined };
   const fresh = runProductRules(products, ctx).filter((f) => !ignored.has(ignoreKey(f)));
   const added = new Set(ids);
   const findings = capFindings([...knownFindings(latest.findings).filter((f) => !added.has(f.productId)), ...fresh]);

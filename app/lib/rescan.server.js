@@ -19,13 +19,16 @@ import {
 
 // A background job is given up after this long, whatever Shopify says about the export.
 const STALE_JOB_MS = 24 * 60 * 60 * 1000;
+// A finish (download, checks, save) that has run longer than this is taken over by the next load:
+// the process that started it is presumed gone.
+const STALE_FINISH_MS = 15 * 60 * 1000;
 // Polls and downloads that fail this many times in a row fail the job; fewer are retried next load.
 const MAX_JOB_ERRORS = 5;
 import { saveScan, latestScan } from "./scans.server";
 import { summarizeFindings, knownFindings, capFindings } from "./rules.server";
 import { ignoreKey } from "./ignores.server";
 import { getSettings } from "./settings.server";
-import { activeJob, createJob, updateJob, jobView } from "./jobs.server";
+import { activeJob, createJob, updateJob, claimJob, jobView } from "./jobs.server";
 
 // Starts a full scan. Returns the running job for a large catalog, or null when the scan already
 // completed inline.
@@ -68,6 +71,17 @@ export async function advanceJob(graphql, shop, limit = null) {
     return fail("The export took more than a day and was stopped. Run the scan again.");
   }
 
+  // Another request is downloading the export and running the checks: nothing to do but wait,
+  // unless it has been at it so long that it must have died.
+  if (job.status === "finishing") {
+    const since = job.finishingAt ? Date.now() - job.finishingAt.getTime() : Infinity;
+    if (since < STALE_FINISH_MS) return jobView(job);
+    if (!(await claimJob(job.id, "finishing", "running", { errors: (job.errors || 0) + 1, error: "The previous attempt to finish the scan did not complete." }))) return jobView(job);
+    job.status = "running";
+    job.errors = (job.errors || 0) + 1;
+    if (job.errors >= MAX_JOB_ERRORS) return fail("The scan could not be finished. Run it again.");
+  }
+
   let op;
   try {
     op = await bulkScanStatus(graphql, job.operationId);
@@ -77,22 +91,35 @@ export async function advanceJob(graphql, shop, limit = null) {
   if (!op) return fail("Shopify no longer has this export.");
 
   if (op.status === "COMPLETED") {
-    try {
-      const all = op.url ? await downloadBulkCatalog(op.url, (await getSettings(shop)).trackedMetafields || []) : [];
-      const products = limit ? all.slice(0, limit) : all;
-      const result = await scanProducts(products, graphql, shop, job.createdAt.getTime(), all.length);
-      await saveScan(shop, result);
-      await updateJob(job.id, { status: "done", objects: Number(op.objectCount || 0) });
-      return null;
-    } catch (err) {
-      return stumble(err);
-    }
+    // One request claims the finish and does it after answering; the page keeps polling and sees
+    // the result once it is saved.
+    if (!(await claimJob(job.id, "running", "finishing", { finishingAt: new Date(), objects: Number(op.objectCount || 0) }))) return jobView(job);
+    void finishJob(graphql, shop, job, op, limit).catch((err) => console.error(`Finishing the scan for ${shop} failed: ${err?.message || err}`));
+    return jobView({ ...job, status: "finishing" });
   }
   if (op.status === "FAILED" || op.status === "CANCELED" || op.status === "EXPIRED") {
     return fail(`Shopify ${op.status.toLowerCase()} the export${op.errorCode ? ` (${op.errorCode})` : ""}.`);
   }
   // CREATED, RUNNING, CANCELING: keep polling.
   return jobView(await updateJob(job.id, { objects: Number(op.objectCount || 0) }));
+}
+
+// Downloads a finished export, runs the checks and saves the result. On a failure the job goes
+// back to running with the error noted, so the next page load tries again (or gives up after
+// MAX_JOB_ERRORS).
+async function finishJob(graphql, shop, job, op, limit) {
+  try {
+    const all = op.url ? await downloadBulkCatalog(op.url, (await getSettings(shop)).trackedMetafields || []) : [];
+    const products = limit ? all.slice(0, limit) : all;
+    const result = await scanProducts(products, graphql, shop, job.createdAt.getTime(), all.length);
+    await saveScan(shop, result);
+    await claimJob(job.id, "finishing", "done");
+  } catch (err) {
+    const errors = (job.errors || 0) + 1;
+    const error = err?.message || String(err);
+    if (errors >= MAX_JOB_ERRORS) await claimJob(job.id, "finishing", "failed", { errors, error });
+    else await claimJob(job.id, "finishing", "running", { errors, error, finishingAt: null });
+  }
 }
 
 // Brings the stored scan up to date after an action.

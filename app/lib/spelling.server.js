@@ -16,6 +16,10 @@ export function loadSpeller() {
           : dict;
       return nspell({ aff: Buffer.from(loaded.aff), dic: Buffer.from(loaded.dic) });
     })();
+    // A load that fails is not remembered, so the next scan tries again.
+    spellerPromise.catch(() => {
+      spellerPromise = null;
+    });
   }
   return spellerPromise;
 }
