@@ -24,7 +24,7 @@ State on 2026-09-23, after the audit in `AUDIT.md`. "Done" means it is in the co
 | Environment | Needed | `SHOPIFY_API_KEY`, `SHOPIFY_API_SECRET`, `SHOPIFY_APP_URL`, `SCOPES`, `NODE_ENV=production`, `BILLING_TEST=false`, `RESEND_API_KEY`, `DIGEST_FROM`, `CRON_SECRET`, optionally `SUPPORT_WEBHOOK_URL`. |
 | Database | Needed | A persistent volume at `prisma/` (the Dockerfile declares it), or Postgres. `npm run setup` applies migrations. |
 | Weekly email schedule | Needed | A scheduler that calls `GET /cron/digest` once a week with the secret. |
-| Access scopes | Done | `write_products, read_inventory, write_inventory, read_publications, write_publications, read_locales`; nothing unused. Existing installs are asked to re-approve after the change (metaobject scopes were removed, `read_locales` added). |
+| Access scopes | Done | `write_products, write_files, read_inventory, write_inventory, read_publications, write_publications, read_locales`; nothing unused. Existing installs are asked to re-approve after the change (metaobject scopes were removed, `read_locales` and `write_files` added). |
 | Admin API version | Done | 2026-10 in the client (`@shopify/shopify-app-react-router` 3) and for webhooks. |
 
 ## Requirements that are met in the code
@@ -58,4 +58,3 @@ State on 2026-09-23, after the audit in `AUDIT.md`. "Done" means it is in the co
 - Contextual save bar: the Settings forms (approved vendors, weekly email) and the tracked metafield rows use their own Save buttons rather than the App Bridge save bar.
 - Two banners can appear close together on Home (a notice plus the scan progress or a plan banner); the guidelines prefer one.
 - Onboarding: the first-run page disappears after the first scan, which meets the "removable onboarding" rule; there is no setup guide beyond it.
-- `productUpdateMedia` is deprecated (Question 22 in `AUDIT.md`); switching to `fileUpdate` needs the `write_files` scope.

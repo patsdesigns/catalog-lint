@@ -6,7 +6,7 @@ Method: one full read of every file, then seven independent review passes (one p
 
 Legend: `[ ]` open, `[x]` fixed. Severity: high (wrong data, lost undo, outage, security), medium (wrong behaviour in a real case), low (polish, robustness, consistency). Line numbers refer to the code before Phase 2. Product decisions are not changed; they are listed under Questions at the end.
 
-Totals: 136 items found; 135 fixed; 1 left open on purpose (2.4, see Question 22); 22 questions asked, 21 decided (see Decisions); the review of the decisions found 7 more defects, all fixed (see Review of the decisions).
+Totals: 136 items found; 136 fixed; 22 questions asked, 22 decided (see Decisions); the review of the decisions found 7 more defects, all fixed (see Review of the decisions).
 
 ## 1. Correctness of every check
 
@@ -44,7 +44,7 @@ All 26 operations validate against 2026-10 and 2026-07 with no removed fields; `
 - [x] **2.1** medium — `app/shopify.server.js:15`, `shopify.app.toml:37`, `shopify.app.production.toml:38` — Admin calls run at 2026-07 (`ApiVersion.July26`; the installed library has no `October26`) while webhooks are pinned to 2026-10, a release candidate until 2026-10-01. Fix: pin webhooks to `2026-07` so both match; move both together when the library is upgraded (see Questions).
 - [x] **2.2** medium — `shopify.app.toml:10`, `app/lib/scan.server.js:104` — `shopLocales` requires `read_locales`, which is not requested; the query fails on every scan, is swallowed, and every store is treated as English (so a French store gets "may not be in your store language" on every French description). Fix: add `read_locales` to both tomls and to `SCOPES` in the dev config.
 - [x] **2.3** low — `shopify.app.toml:10-34`, `shopify.app.production.toml:11-35` — `write_metaobject_definitions`, `write_metaobjects`, `[product.metafields.app.demo_info]` and `[metaobjects.app.example]` are template leftovers; nothing in `app/` uses metaobjects or `demo_info`. Fix: remove the two scopes and both sections from both tomls.
-- [ ] **2.4** low — `app/lib/writes.server.js:45` — `productUpdateMedia` is deprecated in 2026-07 and 2026-10 ("Use fileUpdate instead"). Fix: use `fileUpdate(files: [{ id, alt }])`. Not changed: `fileUpdate` requires the `write_files` scope (every file in the store), which the app does not request, and the deprecated mutation still validates in both versions. See Question 22.
+- [x] **2.4** low — `app/lib/writes.server.js:45` — `productUpdateMedia` is deprecated in 2026-07 and 2026-10 ("Use fileUpdate instead"). Fix: use `fileUpdate(files: [{ id, alt }])`. Done on decision 22: the `write_files` scope is requested in both tomls and alt text is written with `fileUpdate`.
 - [x] **2.5** low — `app/lib/writes.server.js:79`, `:241` — `Publication.name` is deprecated ("Use Catalog.title"). Fix: select `catalog { title }` and match the Online Store on it.
 - [x] **2.6** medium — `app/lib/scan.server.js:16`, `app/lib/metafields.server.js:36` — cost of `byIdsQuery` is about 10 x (89 + N tracked metafields): 900 of the 1,000-point limit with one tracked metafield and over the limit from 11, and the number of tracked metafields is not capped, so rechecks, webhooks and bulk fixes would fail for a shop tracking 11 fields. Fix: read 5 ids per query and cap tracked metafields at 8 (with a message on the Tracked metafields page).
 - [x] **2.7** medium — `app/lib/scan.server.js:110`, `:222` — the inline scan fetches 32 pages back to back at about 720 requested points each; Shopify refuses a query when the requested cost exceeds the points available, so an inline scan of a 250-product store gets THROTTLED after a few pages and, with no retry, fails with "Throttled". Fix: a shared GraphQL helper that reads `extensions.cost.throttleStatus` after every response, waits until the bucket can take the next request, and retries THROTTLED and HTTP 429/503 with backoff (see 7.4).
@@ -248,7 +248,7 @@ Answers given on 2026-09-23 and what was done with them.
 - **13, few_images and missing_image.** Every media item counts (videos and 3D models included); alt text checks still look at images only.
 - **14 and 15, colors and typography.** Removed for Polaris compliance: no area colors, card stripes or dots; the summary tiles use the Polaris metrics card layout (heading and text); the trend is a line of numbers.
 - **16 to 21.** Unchanged as designed: the first-run page, the home heading, the 250-product inline limit, the retention of twenty rows and twelve full scans, the 24-hour job timeout, and the owner-only stats module stay.
-- **22, alt text mutation.** Still open: `fileUpdate` needs `write_files`; `productUpdateMedia` validates on 2026-10 and stays until you decide.
+- **22, alt text mutation.** Decided: request `write_files` and write alt text with `fileUpdate`. Both tomls carry the scope; existing installs are asked to approve it the next time they open the app.
 
 ## Review of the decisions
 

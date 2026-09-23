@@ -48,13 +48,13 @@ const INVENTORY_UPDATE = `#graphql
   }
 `;
 
-// productUpdateMedia is deprecated in favour of fileUpdate, which needs the write_files scope
-// (every file in the store); it still validates in 2026-07 and 2026-10 (AUDIT.md, question 22).
-const MEDIA_UPDATE = `#graphql
-  mutation MediaUpdate($productId: ID!, $media: [UpdateMediaInput!]!) {
-    productUpdateMedia(productId: $productId, media: $media) {
-      media { id }
-      mediaUserErrors { field message }
+// Alt text is written with fileUpdate (a product image is a file), which needs the write_files
+// scope. productUpdateMedia, the older way, is deprecated.
+const FILE_UPDATE = `#graphql
+  mutation FileUpdate($files: [FileUpdateInput!]!) {
+    fileUpdate(files: $files) {
+      files { id }
+      userErrors { field message code }
     }
   }
 `;
@@ -350,12 +350,13 @@ export async function setCost(graphql, inventoryItemId, cost) {
   );
 }
 
+// productId is not needed by fileUpdate; it stays so every write helper has the same shape.
 export async function setAlt(graphql, productId, mediaId, alt) {
   return mutate(
     graphql,
-    MEDIA_UPDATE,
-    { productId, media: [{ id: mediaId, alt }] },
-    (d) => d.productUpdateMedia?.mediaUserErrors,
+    FILE_UPDATE,
+    { files: [{ id: mediaId, alt }] },
+    (d) => d.fileUpdate?.userErrors,
   );
 }
 
