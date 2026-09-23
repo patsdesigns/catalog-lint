@@ -20,8 +20,25 @@ function wordCount(text) {
 function norm(s) {
   return (s || "").trim().toLowerCase().replace(/\s+/g, " ");
 }
+// Every word capitalized, for a title that is all caps (nothing else can be told about its words).
 function titleCase(s) {
   return s.toLowerCase().replace(/(^|\s|-)([a-z])/g, (m, pre, ch) => pre + ch.toUpperCase());
+}
+// A word that is only its first letter capitalized ("Cable"), as opposed to an acronym ("USB"),
+// a brand ("iPhone") or a code ("3D"), which a casing change must leave alone.
+const capitalizedWord = (w) => /^\p{Lu}[\p{Ll}']*$/u.test(w);
+const lowercaseWord = (w) => /^\p{Ll}[\p{Ll}']*$/u.test(w);
+// Title Case for a mixed title: lowercase words get a capital, every other word stays as it is.
+function toTitleCase(s) {
+  return s.replace(/[^\s-]+/g, (w) => (lowercaseWord(w) ? w.charAt(0).toUpperCase() + w.slice(1) : w));
+}
+// Sentence case for a mixed title: the first word gets a capital, later Capitalized words are
+// lowercased, and acronyms, brands and codes stay as they are.
+function toSentenceCase(s) {
+  return s.replace(/[^\s-]+/g, (w, i) => {
+    if (i === 0) return lowercaseWord(w) ? w.charAt(0).toUpperCase() + w.slice(1) : w;
+    return capitalizedWord(w) ? w.toLowerCase() : w;
+  });
 }
 function isTitleCase(t) {
   const words = t.split(/\s+/).filter((w) => /^[A-Za-z]/.test(w));
@@ -57,10 +74,11 @@ function median(nums) {
   const m = Math.floor(a.length / 2);
   return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
 }
-// GTIN-8/12/13/14 check digit (UPC and EAN are GTINs). Returns null for other formats: no opinion.
+// GTIN-12/13/14 check digit (UPC and EAN are GTINs). Returns null for other formats: no opinion.
+// Eight digits are left alone: an internal code of that length is far more common than an EAN-8.
 function gtinValid(code) {
   const digits = (code || "").replace(/[\s-]/g, "");
-  if (!/^\d+$/.test(digits) || ![8, 12, 13, 14].includes(digits.length)) return null;
+  if (!/^\d+$/.test(digits) || ![12, 13, 14].includes(digits.length)) return null;
   const padded = digits.padStart(14, "0");
   let sum = 0;
   for (let i = 0; i < 13; i++) sum += Number(padded[i]) * (i % 2 === 0 ? 3 : 1);
@@ -453,11 +471,12 @@ export const PRODUCT_RULES = [
   // Images
   {
     id: "missing_image", category: "media", label: "No product image", severity: "high",
-    check(p) { return p.images.length === 0 ? [finding(this, p, { current: "No images" })] : []; },
+    // Any media counts: a product with a video has something to show.
+    check(p) { return (p.mediaCount ?? p.images.length) === 0 ? [finding(this, p, { current: "No images" })] : []; },
   },
   {
     id: "few_images", category: "media", label: "Only one image", severity: "medium",
-    check(p) { return p.images.length === 1 ? [finding(this, p, { current: "1 image" })] : []; },
+    check(p) { return (p.mediaCount ?? p.images.length) === 1 ? [finding(this, p, { current: "1 image" })] : []; },
   },
   {
     id: "missing_alt_text", category: "media", label: "Image has no alt text", severity: "medium",
@@ -510,8 +529,9 @@ export const PRODUCT_RULES = [
     id: "missing_weight", category: "shipping", label: "No shipping weight", severity: "medium",
     check(p) {
       // A sibling with a weight lends its value and its unit (the empty variant has no unit of its own).
+      // A variant that does not ship (a digital good, a service) needs no weight.
       const donor = p.variants.find((v) => v.weight > 0);
-      return p.variants.filter((v) => !v.weight || v.weight <= 0).map((v) => {
+      return p.variants.filter((v) => (!v.weight || v.weight <= 0) && v.requiresShipping !== false).map((v) => {
         const unit = donor ? donor.weightUnit : v.weightUnit || "KILOGRAMS";
         return finding(this, p, {
           variantId: v.id, detail: v.title,
@@ -550,8 +570,9 @@ export const PRODUCT_RULES = [
     id: "price_below_cost", category: "pricing", label: "Price below cost", severity: "high",
     check(p, ctx) {
       const ending = ctx?.catalog?.priceEnding || "99";
+      // The suggestion clears the minimum margin, so applying it does not trip the margin check.
       return p.variants.filter((v) => v.cost != null && Number(v.price) > 0 && Number(v.price) < Number(v.cost))
-        .map((v) => finding(this, p, { variantId: v.id, detail: `${v.title}: price ${money(v.price, ctx)}, cost ${money(v.cost, ctx)}`, edit: variantEdit(v, "price", `price ${money(v.price, ctx)}, cost ${money(v.cost, ctx)}`, withEnding(v.cost, ending), { raw: String(v.price), apply: true }) }));
+        .map((v) => finding(this, p, { variantId: v.id, detail: `${v.title}: price ${money(v.price, ctx)}, cost ${money(v.cost, ctx)}`, edit: variantEdit(v, "price", `price ${money(v.price, ctx)}, cost ${money(v.cost, ctx)}`, withEnding(Number(v.cost) / (1 - MIN_MARGIN), ending), { raw: String(v.price), apply: true }) }));
     },
   },
   {
@@ -650,7 +671,9 @@ export const PRODUCT_RULES = [
     id: "not_published", category: "publishing", label: "Not visible on your store", severity: "high",
     // Published somewhere but not on the Online Store; a product on no channel at all is
     // unpublished_everywhere instead.
-    check(p) {
+    check(p, ctx) {
+      // A store without an Online Store channel has nothing to be visible on.
+      if (ctx?.hasOnlineStore === false) return [];
       return p.status === "ACTIVE" && !p.publishedAt && (p.publications == null || p.publications > 0)
         ? [finding(this, p, { edit: { kind: "publish", current: "Unpublished", suggested: "Online Store", apply: true, applyLabel: "Publish to Online Store", noInput: true } })] : [];
     },
@@ -724,18 +747,20 @@ export const CATALOG_RULES = [
   {
     id: "duplicate_sku", category: "inventory", label: "Duplicate SKU", severity: "high",
     check(products) {
+      // Grouped without regard to case: "abc-1" and "ABC-1" are the same SKU typed twice.
       const bySku = new Map();
       for (const p of products) for (const v of p.variants) {
         const sku = (v.sku || "").trim();
         if (!sku) continue;
-        if (!bySku.has(sku)) bySku.set(sku, []);
-        bySku.get(sku).push({ p, v });
+        const key = sku.toUpperCase();
+        if (!bySku.has(key)) bySku.set(key, []);
+        bySku.get(key).push({ p, v, sku });
       }
       const out = [];
-      for (const [sku, hits] of bySku) {
+      for (const [, hits] of bySku) {
         if (hits.length < 2) continue;
         // The first keeps the SKU; the others get a numbered suffix.
-        hits.forEach(({ p, v }, i) => {
+        hits.forEach(({ p, v, sku }, i) => {
           const suggested = i === 0 ? sku : `${sku}-${i + 1}`;
           out.push(finding(this, p, { variantId: v.id, detail: `${v.title}: ${sku} used ${hits.length} times`, edit: variantEdit(v, "sku", `${sku} used ${hits.length} times`, suggested, { raw: sku, apply: i > 0 }) }));
         });
@@ -786,12 +811,15 @@ export const CATALOG_RULES = [
       const share = styles.filter((x) => x.tc).length / styles.length;
       const majorityTitleCase = share >= 0.75 ? true : share <= 0.25 ? false : null;
       if (majorityTitleCase === null) return [];
-      return styles.filter((x) => x.tc !== majorityTitleCase).map(({ p }) =>
-        finding(this, p, {
+      // The suggestion changes only the words a casing style is about: acronyms, brands and codes
+      // keep their casing, so Quick apply is safe.
+      return styles.filter((x) => x.tc !== majorityTitleCase).map(({ p }) => {
+        const suggested = majorityTitleCase ? toTitleCase(p.title) : toSentenceCase(p.title);
+        return finding(this, p, {
           detail: majorityTitleCase ? "most titles use Title Case" : "most titles use sentence case",
-          edit: productEdit("title", p.title, majorityTitleCase ? titleCase(p.title) : p.title.charAt(0).toUpperCase() + p.title.slice(1).toLowerCase(), { apply: true }),
-        }),
-      );
+          edit: productEdit("title", p.title, suggested, { apply: suggested !== p.title }),
+        });
+      });
     },
   },
   {
@@ -961,17 +989,19 @@ CATALOG_RULES.push(
   {
     id: "duplicate_barcode", category: "inventory", label: "Duplicate barcode", severity: "high",
     check(products) {
+      // Grouped without regard to case or spacing: the same code typed twice.
       const by = new Map();
       for (const p of products) for (const v of p.variants) {
         const b = (v.barcode || "").trim();
         if (!b) continue;
-        if (!by.has(b)) by.set(b, []);
-        by.get(b).push({ p, v });
+        const key = b.replace(/[\s-]/g, "").toUpperCase();
+        if (!by.has(key)) by.set(key, []);
+        by.get(key).push({ p, v, b });
       }
       const out = [];
-      for (const [b, hits] of by) {
+      for (const [, hits] of by) {
         if (hits.length < 2) continue;
-        for (const { p, v } of hits) out.push(finding(this, p, { variantId: v.id, detail: `${v.title}: ${b} used ${hits.length} times`, edit: variantEdit(v, "barcode", `${b} used ${hits.length} times`, b, { raw: b }) }));
+        for (const { p, v, b } of hits) out.push(finding(this, p, { variantId: v.id, detail: `${v.title}: ${b} used ${hits.length} times`, edit: variantEdit(v, "barcode", `${b} used ${hits.length} times`, b, { raw: b }) }));
       }
       return out;
     },

@@ -11,6 +11,7 @@ import { getWords } from "./dictionary.server";
 import { getIgnoreKeys, ignoreKey } from "./ignores.server";
 import { getSettings } from "./settings.server";
 import { shopInfo } from "./shop.server";
+import { onlineStorePublicationId } from "./writes.server";
 import { request } from "./graphql.server";
 
 export const SYNC_LIMIT = Number(process.env.CATALOG_LINT_SYNC_LIMIT ?? 250);
@@ -44,10 +45,10 @@ function productFields(paged, tracked = []) {
     availablePublicationsCount { count }
     collections${arg(1)} ${conn("id")}
     ${trackedFields(tracked)}
-    media${arg(10)} ${conn("... on MediaImage { id alt image { width height } }")}
+    media${arg(10)} ${conn("id mediaContentType ... on MediaImage { alt image { width height } }")}
     variants${arg(10)} ${conn(`
       id title sku barcode price compareAtPrice inventoryPolicy inventoryQuantity updatedAt
-      inventoryItem { id tracked locationsCount { count } unitCost { amount } measurement { weight { value unit } } }
+      inventoryItem { id tracked requiresShipping locationsCount { count } unitCost { amount } measurement { weight { value unit } } }
     `)}
   `;
 }
@@ -167,8 +168,11 @@ export function normalize(node, tracked = []) {
       type: node[`tf_${i}`]?.type || t.type,
       value: node[`tf_${i}`]?.value ?? "",
     })),
+    // Every media item counts as media (a video or a 3D model is one too); only images carry alt
+    // text and dimensions.
+    mediaCount: (node.media?.nodes || []).filter((m) => m && m.id).length,
     images: (node.media?.nodes || [])
-      .filter((m) => m && m.id)
+      .filter((m) => m && m.id && (m.mediaContentType ? m.mediaContentType === "IMAGE" : m.__typename ? m.__typename === "MediaImage" : true))
       .map((m) => ({ id: m.id, alt: m.alt, width: m.image?.width, height: m.image?.height })),
     variants: (node.variants?.nodes || []).map((v) => ({
       id: v.id,
@@ -182,6 +186,7 @@ export function normalize(node, tracked = []) {
       updatedAt: v.updatedAt,
       locations: v.inventoryItem?.locationsCount?.count ?? 0,
       tracked: Boolean(v.inventoryItem?.tracked),
+      requiresShipping: v.inventoryItem?.requiresShipping ?? true,
       cost: v.inventoryItem?.unitCost?.amount ?? null,
       inventoryItemId: v.inventoryItem?.id,
       weight: v.inventoryItem?.measurement?.weight?.value ?? 0,
@@ -322,25 +327,27 @@ export async function downloadBulkCatalog(url, tracked = []) {
 // ---------- running the rules ----------
 
 async function scanContext(graphql, shop) {
-  const [speller, storeWords, ignored, settings, info] = await Promise.all([
+  const [speller, storeWords, ignored, settings, info, hasOnlineStore] = await Promise.all([
     loadSpeller(),
     shop ? getWords(shop) : [],
     shop ? getIgnoreKeys(shop) : new Set(),
     shop ? getSettings(shop) : { vendorWhitelist: [], trackedMetafields: [] },
     shopInfo(graphql, shop),
+    // A store with no Online Store channel (headless, POS only) has nothing to publish to.
+    onlineStorePublicationId(graphql).then(Boolean).catch(() => true),
   ]);
   // The store language decides which language checks apply; the currency reads the prices.
-  return { speller, storeWords, ignored, settings, locale: info.locale, currency: info.currency };
+  return { speller, storeWords, ignored, settings, locale: info.locale, currency: info.currency, hasOnlineStore };
 }
 
 // Runs every rule over an already-read catalog and builds the stored scan result. catalogTotal is
 // how many products the store has when a plan limit left some unscanned.
 export async function scanProducts(products, graphql, shop, startedAt = Date.now(), catalogTotal = products.length) {
-  const { speller, storeWords, ignored, settings, locale, currency } = await scanContext(graphql, shop);
+  const { speller, storeWords, ignored, settings, locale, currency, hasOnlineStore } = await scanContext(graphql, shop);
   const names = catalogNames(products, speller);
   // What the catalog as a whole suggests, stored with the scan so rechecks suggest the same.
   const catalog = catalogContext(products);
-  const ctx = { speller, customWords: seedWords(products, storeWords), nameWords: new Set(names), settings, locale, currency, catalog };
+  const ctx = { speller, customWords: seedWords(products, storeWords), nameWords: new Set(names), settings, locale, currency, hasOnlineStore, catalog };
   const all = runRules(products, ctx);
   const findings = all.filter((f) => !ignored.has(ignoreKey(f)));
   // Counts come from every finding; the stored list is capped per check.
@@ -376,10 +383,10 @@ export async function scanCatalog(graphql, shop, limit = null) {
 // the merchant just acted on (dropRuleId), which the action has resolved for them.
 export async function recheckProducts(graphql, shop, latest, ids, dropRuleId = null) {
   const started = Date.now();
-  const { speller, storeWords, ignored, settings, locale, currency } = await scanContext(graphql, shop);
+  const { speller, storeWords, ignored, settings, locale, currency, hasOnlineStore } = await scanContext(graphql, shop);
   const products = await fetchProductsByIds(graphql, ids, settings.trackedMetafields || []);
   const names = latest.names || [];
-  const ctx = { speller, customWords: seedWords(products, storeWords), nameWords: new Set(names), settings, locale, currency, catalog: latest.context || undefined };
+  const ctx = { speller, customWords: seedWords(products, storeWords), nameWords: new Set(names), settings, locale, currency, hasOnlineStore, catalog: latest.context || undefined };
   const fresh = runProductRules(products, ctx).filter((f) => !ignored.has(ignoreKey(f)));
   const touched = new Set(ids);
   // Products the scan covers: an id it did not know is an addition (a webhook, a queued product),
@@ -420,10 +427,10 @@ export async function scanNewProducts(graphql, shop, latest) {
   const known = new Set(latest.productIds || []);
   const ids = (await fetchNewProductIds(graphql, latest.readAt || latest.scannedAt)).filter((id) => !known.has(id));
   if (!ids.length) return null;
-  const { speller, storeWords, ignored, settings, locale, currency } = await scanContext(graphql, shop);
+  const { speller, storeWords, ignored, settings, locale, currency, hasOnlineStore } = await scanContext(graphql, shop);
   const products = await fetchProductsByIds(graphql, ids, settings.trackedMetafields || []);
   const names = latest.names || [];
-  const ctx = { speller, customWords: seedWords(products, storeWords), nameWords: new Set(names), settings, locale, currency, catalog: latest.context || undefined };
+  const ctx = { speller, customWords: seedWords(products, storeWords), nameWords: new Set(names), settings, locale, currency, hasOnlineStore, catalog: latest.context || undefined };
   const fresh = runProductRules(products, ctx).filter((f) => !ignored.has(ignoreKey(f)));
   const added = new Set(ids);
   const findings = capFindings([...knownFindings(latest.findings).filter((f) => !added.has(f.productId)), ...fresh]);
