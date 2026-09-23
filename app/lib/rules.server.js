@@ -30,13 +30,27 @@ function isTitleCase(t) {
   return caps / words.length >= 0.8;
 }
 
-const EMOJI_RE = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]|\u{FE0F}/u;
+// Pictographs and flags, minus the copyright, registered and trademark signs that the Unicode
+// property also covers.
+const EMOJI_RE = /(?![©®™])\p{Extended_Pictographic}|\p{Regional_Indicator}|\u{FE0F}|\u{200D}|\u{20E3}/u;
 const EN_STOPWORDS = ["the", "and", "with", "for", "this", "that", "your", "from", "are", "is", "of", "to", "in", "on", "it"];
+// Common words of other languages: a description with none of these and no accented letters is
+// most likely English with few stopwords (a spec list), not another language.
+const FOREIGN_WORDS = new Set(["und", "der", "die", "das", "mit", "für", "nicht", "ist", "les", "des", "une", "pour", "avec", "est", "sur", "dans", "el", "los", "las", "para", "con", "del", "una", "por", "que", "il", "di", "che", "per", "non", "een", "het", "van", "voor", "niet", "zijn", "os", "um", "uma", "não", "com", "são", "och", "att", "det", "med"]);
 function englishRatio(text) {
   const words = text.toLowerCase().split(/[^a-z']+/).filter(Boolean);
   if (words.length < 30) return null;
   const hits = words.filter((w) => EN_STOPWORDS.includes(w)).length;
   return hits / words.length;
+}
+function looksForeign(text) {
+  const letters = text.replace(/[^\p{L}\s]/gu, "");
+  if (/[^A-Za-z\s]/.test(letters)) return true; // an accented or non-Latin letter
+  const hits = letters.toLowerCase().split(/\s+/).filter((w) => FOREIGN_WORDS.has(w)).length;
+  return hits >= 2;
+}
+function escapeRe(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 function median(nums) {
   const a = [...nums].sort((x, y) => x - y);
@@ -161,17 +175,20 @@ function catalogContext(products) {
   const priceEnding = priced >= 10 && top(endings) ? top(endings)[0] : "99";
   const vendorTop = products.length >= 10 ? top(vendors) : null;
   const commonVendor = vendorTop && vendorTop[1] / products.length > 0.6 ? vendorTop[0] : "";
-  const typeByCollection = new Map();
+  // A plain object, so the context can be stored with the scan and reused by rechecks.
+  const typeByCollection = {};
   for (const [c, types] of byCollection) {
     const t = top(types);
-    if (t && t[1] >= 3) typeByCollection.set(c, t[0]);
+    if (t && t[1] >= 3) typeByCollection[c] = t[0];
   }
   return { priceEnding, commonVendor, typeByCollection };
 }
+export { catalogContext };
 const KG = { KILOGRAMS: 1, GRAMS: 0.001, POUNDS: 0.45359237, OUNCES: 0.028349523125 };
 const toKg = (value, unit) => Number(value) * (KG[unit] ?? 1);
-const FILENAME_ALT_RE = /\.(jpe?g|png|gif|webp|heic|tiff?|bmp|svg)$|^(img|dsc|dcim|pxl|dscn|screenshot|image|photo)[_ -]?\d+|^\d{4,}[_-]?\d*$/i;
+const FILENAME_ALT_RE = /\.(jpe?g|png|gif|webp|heic|tiff?|bmp|svg)$|^(img|dsc|dcim|pxl|dscn|screenshot|image|photo)[_ -]?\d+(\.\w{3,4})?$|^\d{4,}[_-]?\d*$/i;
 const MIN_MARGIN = 0.1;
+const MAX_PATTERN_INPUT = 1000; // characters of a metafield value a merchant pattern is tested on
 
 function finding(rule, product, extra = {}) {
   const f = {
@@ -238,7 +255,7 @@ export const PRODUCT_RULES = [
     check(p, ctx) {
       if (!ctx?.speller) return [];
       const fields = textFields(p);
-      return findMisspellings(fields, ctx).slice(0, 8).map((m) => {
+      return findMisspellings(fields, ctx, 8).map((m) => {
         const text = fields.find((f) => f.field === m.field)?.text || "";
         return finding(this, p, {
           word: m.word,
@@ -268,9 +285,10 @@ export const PRODUCT_RULES = [
     id: "title_formatting", category: "description", label: "Title has stray spaces or punctuation", severity: "low",
     check(p) {
       const cleaned = p.title.replace(/\s{2,}/g, " ").trim().replace(/[.,;:!?-]+$/, "").trim();
-      // Quoted, so the extra spaces and the stray punctuation show.
+      // Quoted, so the extra spaces and the stray punctuation show. A title that is nothing but
+      // punctuation has no one-click correction: Shopify does not accept an empty title.
       return cleaned !== p.title
-        ? [finding(this, p, { edit: productEdit("title", `"${p.title}"`, cleaned, { raw: p.title, apply: true }) })] : [];
+        ? [finding(this, p, { edit: productEdit("title", `"${p.title}"`, cleaned, { raw: p.title, apply: cleaned.length > 0 }) })] : [];
     },
   },
   {
@@ -295,7 +313,7 @@ export const PRODUCT_RULES = [
         hits.push("raw URL");
         snippets.push(around(plain, url[0], 12));
       }
-      if (/<(p|div|span|h\d)>\s*(<br\s*\/?>)?\s*<\/\1>/i.test(html)) {
+      if (/<(p|div|span|h\d)(\s[^>]*)?>(\s|&nbsp;|<br\s*\/?>)*<\/\1>/i.test(html)) {
         hits.push("empty tags");
         snippets.push("empty tags");
       }
@@ -323,8 +341,9 @@ export const PRODUCT_RULES = [
       if (!(ctx?.locale || "en").startsWith("en")) return [];
       const text = stripHtml(p.descriptionHtml);
       const ratio = englishRatio(text);
-      // A description in another language needs rewriting, not a quick correction.
-      return ratio !== null && ratio < 0.04 ? [finding(this, p, { current: first(text, 80) })] : [];
+      // A description in another language needs rewriting, not a quick correction. Few English
+      // stopwords alone is not enough (a spec list has few too): it must also look foreign.
+      return ratio !== null && ratio < 0.04 && looksForeign(text) ? [finding(this, p, { current: first(text, 80) })] : [];
     },
   },
   {
@@ -332,19 +351,22 @@ export const PRODUCT_RULES = [
     check(p) {
       const v = norm(p.vendor);
       if (!v || v.length < 3) return [];
-      const t = norm(p.title);
-      const count = t.split(v).length - 1;
-      if (count < 2) return [];
-      const idx = p.title.toLowerCase().lastIndexOf(v);
-      const suggested = (p.title.slice(0, idx) + p.title.slice(idx + v.length)).replace(/\s{2,}/g, " ").trim();
-      return [finding(this, p, { edit: productEdit("title", p.title, suggested, { apply: true }) })];
+      // Whole words only: vendor "Art" is not in "Party Art Cart" twice.
+      const re = new RegExp(`(^|[^a-z0-9])(${escapeRe(v).replace(/ /g, "\\s+")})(?=[^a-z0-9]|$)`, "gi");
+      const hits = [...p.title.matchAll(re)];
+      if (hits.length < 2) return [];
+      const last = hits[hits.length - 1];
+      const start = last.index + last[1].length;
+      const suggested = (p.title.slice(0, start) + p.title.slice(start + last[2].length)).replace(/\s{2,}/g, " ").replace(/\s+([,.;:!?)])/g, "$1").trim();
+      return [finding(this, p, { edit: productEdit("title", p.title, suggested, { apply: suggested.length > 0 }) })];
     },
   },
   {
     id: "emoji_in_title", category: "description", label: "Emoji in title", severity: "low",
     check(p) {
-      return EMOJI_RE.test(p.title)
-        ? [finding(this, p, { edit: productEdit("title", p.title, p.title.replace(new RegExp(EMOJI_RE.source, "gu"), "").replace(/\s{2,}/g, " ").trim(), { apply: true }) })] : [];
+      if (!EMOJI_RE.test(p.title)) return [];
+      const suggested = p.title.replace(new RegExp(EMOJI_RE.source, "gu"), "").replace(/\s{2,}/g, " ").trim();
+      return [finding(this, p, { edit: productEdit("title", p.title, suggested, { apply: suggested.length > 0 }) })];
     },
   },
 
@@ -460,15 +482,17 @@ export const PRODUCT_RULES = [
   {
     id: "missing_weight", category: "shipping", label: "No shipping weight", severity: "medium",
     check(p) {
+      // A sibling with a weight lends its value and its unit (the empty variant has no unit of its own).
       const donor = p.variants.find((v) => v.weight > 0);
-      return p.variants.filter((v) => !v.weight || v.weight <= 0).map((v) =>
-        finding(this, p, {
+      return p.variants.filter((v) => !v.weight || v.weight <= 0).map((v) => {
+        const unit = donor ? donor.weightUnit : v.weightUnit || "KILOGRAMS";
+        return finding(this, p, {
           variantId: v.id, detail: v.title,
           edit: v.inventoryItemId
-            ? { kind: "weight", inventoryItemId: v.inventoryItemId, unit: v.weightUnit, current: "0", suggested: donor ? String(donor.weight) : "", apply: Boolean(donor), hint: v.weightUnit.toLowerCase() }
+            ? { kind: "weight", inventoryItemId: v.inventoryItemId, unit, current: "0", suggested: donor ? String(donor.weight) : "", apply: Boolean(donor), hint: unit.toLowerCase() }
             : null,
-        }),
-      );
+        });
+      });
     },
   },
   {
@@ -540,8 +564,9 @@ export const PRODUCT_RULES = [
   {
     id: "price_outlier", category: "pricing", label: "One variant priced far from the others", severity: "medium",
     check(p) {
+      // Three priced variants at least: with two there is no majority to be far from.
       const prices = p.variants.map((v) => Number(v.price)).filter((n) => n > 0);
-      if (prices.length < 2) return [];
+      if (prices.length < 3) return [];
       const med = median(prices);
       return p.variants
         .filter((v) => Number(v.price) > 0 && (Number(v.price) > med * 5 || Number(v.price) < med / 5))
@@ -561,13 +586,14 @@ export const PRODUCT_RULES = [
   {
     id: "draft_stale", category: "status", label: "Draft for more than 30 days", severity: "low",
     check(p) {
-      const age = (Date.now() - new Date(p.createdAt).getTime()) / DAY;
+      // Since the last change (a lower bound: setting a product to draft changes it), not since creation.
+      const age = (Date.now() - new Date(p.updatedAt || p.createdAt).getTime()) / DAY;
       if (!(p.status === "DRAFT" && age > 30)) return [];
       const days = Math.round(age);
       return [finding(this, p, {
         detail: `${days} days`,
         edit: { kind: "choice", current: `Draft for ${days} days`, noInput: true, choices: [
-          { label: "Set active", kind: "product", field: "status", value: "ACTIVE" },
+          { label: "Set to active", kind: "product", field: "status", value: "ACTIVE" },
           { label: "Archive", kind: "product", field: "status", value: "ARCHIVED" },
         ] },
       })];
@@ -581,9 +607,10 @@ export const PRODUCT_RULES = [
       const canSell = p.variants.some((v) => v.inventoryPolicy === "CONTINUE");
       if (!(tracked && !canSell && p.totalInventory <= 0)) return [];
       return [finding(this, p, {
+        // The policy choice names no variant ids: every variant of the product is read when it is applied.
         edit: { kind: "choice", current: "Quantity 0, does not continue selling", noInput: true, choices: [
-          { label: "Set to Draft", kind: "product", field: "status", value: "DRAFT" },
-          { label: "Continue selling when out of stock", kind: "policy", variantIds: p.variants.map((v) => v.id), before: "DENY", value: "CONTINUE" },
+          { label: "Set to draft", kind: "product", field: "status", value: "DRAFT" },
+          { label: "Continue selling when out of stock", kind: "policy", value: "CONTINUE" },
         ] },
       })];
     },
@@ -635,7 +662,7 @@ export const PRODUCT_RULES = [
     check(p, ctx) {
       if ((p.productType || "").trim()) return [];
       // The type most products in the same collection have.
-      const common = (p.collectionIds || []).map((c) => ctx?.catalog?.typeByCollection?.get(c)).find(Boolean) || "";
+      const common = (p.collectionIds || []).map((c) => ctx?.catalog?.typeByCollection?.[c]).find(Boolean) || "";
       return [finding(this, p, { edit: productEdit("productType", "", common, { apply: Boolean(common) }) })];
     },
   },
@@ -750,15 +777,20 @@ export const CATALOG_RULES = [
         const counts = groups.get(key);
         counts.set(raw, (counts.get(raw) || 0) + 1);
       }
-      const out = [];
-      for (const [, counts] of groups) {
+      // The most common spelling of each mixed group wins; only the other spellings are reported,
+      // in one pass over the products.
+      const canonical = new Map();
+      for (const [key, counts] of groups) {
         if (counts.size < 2) continue;
-        const spellings = [...counts.keys()];
-        const canonical = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
-        for (const p of products) {
-          const raw = (p.vendor || "").trim();
-          if (spellings.includes(raw)) out.push(finding(this, p, { detail: spellings.join(" / "), edit: productEdit("vendor", raw, canonical, { apply: raw !== canonical }) }));
-        }
+        canonical.set(key, { keep: [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0], spellings: [...counts.keys()] });
+      }
+      if (!canonical.size) return [];
+      const out = [];
+      for (const p of products) {
+        const raw = (p.vendor || "").trim();
+        const group = raw ? canonical.get(norm(raw)) : null;
+        if (!group || raw === group.keep) continue;
+        out.push(finding(this, p, { detail: group.spellings.join(" / "), edit: productEdit("vendor", raw, group.keep, { apply: true }) }));
       }
       return out;
     },
@@ -817,8 +849,17 @@ PRODUCT_RULES.push(
   {
     id: "dead_link", category: "description", label: "Dead link in description", severity: "low",
     check(p) {
-      const links = (p.descriptionHtml || "").match(/<a\b[^>]*>/gi) || [];
-      const dead = links.filter((tag) => !/\bhref\s*=\s*"[^"]+"/i.test(tag) || /\bhref\s*=\s*"(#|javascript:)/i.test(tag));
+      const tags = (p.descriptionHtml || "").match(/<a\b[^>]*>/gi) || [];
+      // A named anchor without an href is a target, not a link.
+      const links = tags.filter((tag) => /\bhref\s*=/i.test(tag) || !/\b(name|id)\s*=/i.test(tag));
+      const hrefOf = (tag) => {
+        const m = /\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(tag);
+        return m ? (m[1] ?? m[2] ?? m[3] ?? "").trim() : "";
+      };
+      const dead = links.filter((tag) => {
+        const href = hrefOf(tag);
+        return !href || /^(#|javascript:)/i.test(href);
+      });
       return dead.length ? [finding(this, p, { detail: `${dead.length} of ${links.length} links`, current: `${dead.length} of ${links.length} links` })] : [];
     },
   },
@@ -830,9 +871,11 @@ PRODUCT_RULES.push(
       const hits = p.images.filter((i) => FILENAME_ALT_RE.test((i.alt || "").trim()));
       if (!hits.length) return [];
       const firstAlt = hits[0].alt.trim();
+      // Each image gets its own value on Quick apply: the title, numbered when several images need one.
+      const perImage = hits.map((i, n) => ({ id: i.id, raw: i.alt.trim(), suggested: hits.length > 1 ? `${p.title} ${n + 1}` : p.title }));
       return [finding(this, p, {
         detail: `"${firstAlt}"${hits.length > 1 ? ` and ${hits.length - 1} more` : ""}`,
-        edit: { kind: "alt", mediaIds: hits.map((i) => i.id), current: firstAlt, suggested: p.title, apply: true },
+        edit: { kind: "alt", mediaIds: hits.map((i) => i.id), perImage, current: firstAlt, suggested: perImage[0].suggested, apply: true },
       })];
     },
   },
@@ -842,9 +885,11 @@ PRODUCT_RULES.push(
       const hits = p.images.filter((i) => (i.alt || "").trim().length > 125);
       if (!hits.length) return [];
       const firstAlt = hits[0].alt.trim();
+      // Each image keeps its own text, trimmed, on Quick apply.
+      const perImage = hits.map((i) => ({ id: i.id, raw: i.alt.trim(), suggested: trimAt(i.alt.trim(), 125) }));
       return [finding(this, p, {
         detail: `${hits.length} of ${p.images.length} images, longest ${Math.max(...hits.map((i) => i.alt.trim().length))} characters`,
-        edit: { kind: "alt", mediaIds: hits.map((i) => i.id), current: firstAlt, suggested: trimAt(firstAlt, 125), apply: true },
+        edit: { kind: "alt", mediaIds: hits.map((i) => i.id), perImage, current: firstAlt, suggested: perImage[0].suggested, apply: true },
       })];
     },
   },
@@ -912,14 +957,18 @@ CATALOG_RULES.push(
         if (!groups.has(k)) groups.set(k, new Map());
         groups.get(k).set(raw, (groups.get(k).get(raw) || 0) + 1);
       }
-      const out = [];
-      for (const [, counts] of groups) {
+      const canonical = new Map();
+      for (const [key, counts] of groups) {
         if (counts.size < 2) continue;
-        const canonical = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
-        for (const p of products) {
-          const raw = (p.productType || "").trim();
-          if (counts.has(raw) && raw !== canonical) out.push(finding(this, p, { detail: [...counts.keys()].join(" / "), edit: productEdit("productType", raw, canonical, { apply: true }) }));
-        }
+        canonical.set(key, { keep: [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0], spellings: [...counts.keys()] });
+      }
+      if (!canonical.size) return [];
+      const out = [];
+      for (const p of products) {
+        const raw = (p.productType || "").trim();
+        const group = raw ? canonical.get(norm(raw)) : null;
+        if (!group || raw === group.keep) continue;
+        out.push(finding(this, p, { detail: group.spellings.join(" / "), edit: productEdit("productType", raw, group.keep, { apply: true }) }));
       }
       return out;
     },
@@ -1010,12 +1059,17 @@ PRODUCT_RULES.push(
     applies: (settings) => (settings.trackedMetafields || []).some((t) => t.pattern),
     check(p, ctx) {
       const out = [];
+      // Each pattern is compiled once per run (ctx.patterns) and tested on a bounded slice of the value.
+      const cache = ctx?.patterns || new Map();
       for (const t of ctx?.settings?.trackedMetafields || []) {
         if (!t.pattern || !appliesTo(p, t)) continue;
-        let re;
-        try { re = new RegExp(t.pattern); } catch { continue; }
+        if (!cache.has(t.pattern)) {
+          try { cache.set(t.pattern, new RegExp(t.pattern)); } catch { cache.set(t.pattern, null); }
+        }
+        const re = cache.get(t.pattern);
+        if (!re) continue;
         const v = String(trackedValue(p, t));
-        if (v.trim() && !re.test(v)) out.push(finding(this, p, { field: t.fullKey, detail: `${t.name} = "${v.slice(0, 40)}"`, edit: metafieldEdit(t, { current: v }) }));
+        if (v.trim() && !re.test(v.slice(0, MAX_PATTERN_INPUT))) out.push(finding(this, p, { field: t.fullKey, detail: `${t.name} = "${v.slice(0, 40)}"`, edit: metafieldEdit(t, { current: v }) }));
       }
       return out;
     },
@@ -1045,8 +1099,9 @@ function enabled(rules, ctx) {
 
 export function runRules(products, ctx = {}) {
   const findings = [];
-  // What the catalog as a whole suggests (catalogContext) rides along for the product rules.
-  const run = { ...ctx, catalog: catalogContext(products) };
+  // What the catalog as a whole suggests (catalogContext) rides along for the product rules; the
+  // caller may pass one computed earlier. Merchant patterns compile once per run.
+  const run = { ...ctx, catalog: ctx.catalog || catalogContext(products), patterns: new Map() };
   const productRules = enabled(PRODUCT_RULES, run);
   for (const p of products) for (const rule of productRules) findings.push(...rule.check(p, run));
   for (const rule of enabled(CATALOG_RULES, run)) findings.push(...rule.check(products, run));
@@ -1054,14 +1109,16 @@ export function runRules(products, ctx = {}) {
 }
 
 // Product rules only, for re-checking a handful of products without reading the whole catalog.
+// ctx.catalog should be the context stored with the scan, so suggestions match the full scan.
 export function runProductRules(products, ctx = {}) {
   const findings = [];
-  const run = { ...ctx, catalog: ctx.catalog || catalogContext(products) };
+  const run = { ...ctx, catalog: ctx.catalog || catalogContext(products), patterns: new Map() };
   const productRules = enabled(PRODUCT_RULES, run);
   for (const p of products) for (const rule of productRules) findings.push(...rule.check(p, run));
   return findings;
 }
 export const CATALOG_RULE_IDS = new Set(CATALOG_RULES.map((r) => r.id));
+const RULE_BY_ID = new Map(ALL_RULES.map((r) => [r.id, r]));
 
 const WEIGHT = { high: 3, medium: 1.5, low: 0.5 };
 const MAX_PENALTY_PER_PRODUCT = 10;
@@ -1078,15 +1135,17 @@ export function summarizeFindings(total, findings, settings = {}) {
   const byRule = {};
   const penalty = new Map();
   for (const f of findings) {
+    // The rule as it is now, not as it was when the finding was stored: labels and severities can change.
+    const rule = RULE_BY_ID.get(f.ruleId);
+    const severity = rule?.severity || f.severity;
     if (!byRule[f.ruleId]) {
-      const rule = ALL_RULES.find((r) => r.id === f.ruleId);
       byRule[f.ruleId] = {
-        ruleId: f.ruleId, label: f.label, category: rule?.category || "description", severity: f.severity,
+        ruleId: f.ruleId, label: rule?.label || f.label, category: rule?.category || f.category || "description", severity,
         fixable: Boolean(rule?.fixable), fixLabel: rule?.fixLabel || null, count: 0,
       };
     }
     byRule[f.ruleId].count += 1;
-    penalty.set(f.productId, (penalty.get(f.productId) || 0) + WEIGHT[f.severity]);
+    penalty.set(f.productId, (penalty.get(f.productId) || 0) + (WEIGHT[severity] ?? 0));
   }
   let sum = 0;
   for (const pen of penalty.values()) sum += Math.min(MAX_PENALTY_PER_PRODUCT, pen);

@@ -43,6 +43,7 @@ model Scan {
   findings   String
   checks     String   @default("[]")
   names      String   @default("[]")
+  context    String   @default("{}")
   catalogTotal Int    @default(0)
   readAt     DateTime?
   productIds String   @default("[]")

@@ -5,7 +5,7 @@
 // file in the background, the page loader polls it (rescan.server.js) and the rules run once the
 // file is ready, so a 50k-product catalog scans without request timeouts or API rate limits.
 
-import { runRules, runProductRules, CATALOG_RULE_IDS, summarize, summarizeFindings, knownFindings } from "./rules.server";
+import { runRules, runProductRules, catalogContext, CATALOG_RULE_IDS, summarize, summarizeFindings, knownFindings } from "./rules.server";
 import { loadSpeller, seedWords, catalogNames } from "./spelling.server";
 import { getWords } from "./dictionary.server";
 import { getIgnoreKeys, ignoreKey } from "./ignores.server";
@@ -39,7 +39,7 @@ function productFields(paged, tracked = []) {
     availablePublicationsCount { count }
     collections${arg(1)} ${conn("id")}
     ${trackedFields(tracked)}
-    media${arg(5)} ${conn("... on MediaImage { id alt image { width height } }")}
+    media${arg(10)} ${conn("... on MediaImage { id alt image { width height } }")}
     variants${arg(10)} ${conn(`
       id title sku barcode price compareAtPrice inventoryPolicy inventoryQuantity updatedAt
       inventoryItem { id tracked locationsCount { count } unitCost { amount } measurement { weight { value unit } } }
@@ -118,8 +118,8 @@ async function graphqlJson(graphql, query, variables) {
 export function normalize(node, tracked = []) {
   return {
     id: node.id,
-    title: node.title,
-    handle: node.handle,
+    title: node.title ?? "",
+    handle: node.handle ?? "",
     status: node.status,
     createdAt: node.createdAt,
     updatedAt: node.updatedAt,
@@ -330,7 +330,9 @@ async function scanContext(graphql, shop) {
 export async function scanProducts(products, graphql, shop, startedAt = Date.now(), catalogTotal = products.length) {
   const { speller, storeWords, ignored, settings, locale } = await scanContext(graphql, shop);
   const names = catalogNames(products, speller);
-  const ctx = { speller, customWords: seedWords(products, storeWords), nameWords: new Set(names), settings, locale };
+  // What the catalog as a whole suggests, stored with the scan so rechecks suggest the same.
+  const catalog = catalogContext(products);
+  const ctx = { speller, customWords: seedWords(products, storeWords), nameWords: new Set(names), settings, locale, catalog };
   const all = runRules(products, ctx);
   const findings = all.filter((f) => !ignored.has(ignoreKey(f)));
   const summary = summarize(products, findings, settings);
@@ -338,6 +340,7 @@ export async function scanProducts(products, graphql, shop, startedAt = Date.now
     ...summary,
     findings,
     names,
+    context: catalog,
     catalogTotal: Math.max(catalogTotal, products.length),
     truncated: catalogTotal > products.length,
     readAt: new Date(startedAt).toISOString(),
@@ -366,7 +369,7 @@ export async function recheckProducts(graphql, shop, latest, ids, dropRuleId = n
   const { speller, storeWords, ignored, settings, locale } = await scanContext(graphql, shop);
   const products = await fetchProductsByIds(graphql, ids, settings.trackedMetafields || []);
   const names = latest.names || [];
-  const ctx = { speller, customWords: seedWords(products, storeWords), nameWords: new Set(names), settings, locale };
+  const ctx = { speller, customWords: seedWords(products, storeWords), nameWords: new Set(names), settings, locale, catalog: latest.context || undefined };
   const fresh = runProductRules(products, ctx).filter((f) => !ignored.has(ignoreKey(f)));
   const touched = new Set(ids);
   const kept = knownFindings(latest.findings).filter(
@@ -388,6 +391,7 @@ export async function recheckProducts(graphql, shop, latest, ids, dropRuleId = n
     ...summary,
     findings,
     names,
+    context: latest.context || {},
     catalogTotal: Math.max(total, (latest.catalogTotal || latest.total) - deleted.length + added.length),
     readAt: latest.readAt,
     productIds,
@@ -408,7 +412,7 @@ export async function scanNewProducts(graphql, shop, latest) {
   const { speller, storeWords, ignored, settings, locale } = await scanContext(graphql, shop);
   const products = await fetchProductsByIds(graphql, ids, settings.trackedMetafields || []);
   const names = latest.names || [];
-  const ctx = { speller, customWords: seedWords(products, storeWords), nameWords: new Set(names), settings, locale };
+  const ctx = { speller, customWords: seedWords(products, storeWords), nameWords: new Set(names), settings, locale, catalog: latest.context || undefined };
   const fresh = runProductRules(products, ctx).filter((f) => !ignored.has(ignoreKey(f)));
   const added = new Set(ids);
   const findings = [...knownFindings(latest.findings).filter((f) => !added.has(f.productId)), ...fresh];
@@ -418,6 +422,7 @@ export async function scanNewProducts(graphql, shop, latest) {
     ...summary,
     findings,
     names,
+    context: latest.context || {},
     catalogTotal: (latest.catalogTotal || latest.total) + products.length,
     readAt: new Date(started).toISOString(),
     productIds: [...(latest.productIds || []), ...products.map((p) => p.id)],

@@ -147,6 +147,7 @@ export function withFindings(latest, findings, settings, ignoredDelta = 0) {
     ...summary,
     findings: kept,
     names: latest.names || [],
+    context: latest.context || {},
     catalogTotal: latest.catalogTotal || latest.total,
     readAt: latest.readAt,
     productIds: latest.productIds || [],

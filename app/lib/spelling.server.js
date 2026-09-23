@@ -29,14 +29,17 @@ function stripHtml(html) {
     .replace(/\s+/g, " ")
     .trim();
 }
+// Links and addresses are not words.
+const URL_RE = /\b(?:https?:\/\/|www\.)\S+|\b[\w.+-]+@[\w-]+\.[\w.-]+/gi;
+const prose = (text) => String(text || "").replace(URL_RE, " ");
 
 // Every field on a product that a human wrote, with a label for the finding.
 export function textFields(p) {
   const fields = [
-    { field: "Title", key: "title", text: p.title || "", titleLike: true },
-    { field: "Description", key: "descriptionHtml", text: stripHtml(p.descriptionHtml) },
-    { field: "SEO title", key: "seoTitle", text: p.seoTitle || "", titleLike: true },
-    { field: "SEO description", key: "seoDescription", text: p.seoDescription || "" },
+    { field: "Title", key: "title", text: prose(p.title), titleLike: true },
+    { field: "Description", key: "descriptionHtml", text: prose(stripHtml(p.descriptionHtml)) },
+    { field: "SEO title", key: "seoTitle", text: prose(p.seoTitle), titleLike: true },
+    { field: "SEO description", key: "seoDescription", text: prose(p.seoDescription) },
     { field: "Vendor", key: "vendor", text: p.vendor || "" },
     { field: "Product type", key: "productType", text: p.productType || "" },
     { field: "Tags", key: "tags", text: (p.tags || []).join(" ") },
@@ -47,25 +50,28 @@ export function textFields(p) {
   return fields;
 }
 
-// Returns [{ word, suggestion, field }] for words the dictionary does not know.
+// Returns [{ word, suggestion, field }] for words the dictionary does not know, at most `max`.
 // Skips short words, mixed-case codes, and capitalized words (brands, names) in prose. Titles
 // capitalize every word, so in a title or SEO title a capitalized word is checked too, unless the
 // catalog uses it as a name (see catalogNames) or no known word is within two edits of it.
-export function findMisspellings(fields, ctx) {
+export function findMisspellings(fields, ctx, max = Infinity) {
   const seen = new Set();
   const out = [];
   const names = ctx.nameWords || new Set();
+  const custom = ctx.customWords || new Set();
   // Dictionary lookups, and suggestions above all, are the slow part of a scan, and the same unknown
   // words recur across a catalog, so results are kept for the whole scan (ctx lives that long).
   const cache = ctx.spellCache || (ctx.spellCache = new Map());
   for (const { field, key, text, titleLike } of fields) {
+    if (out.length >= max) break;
     for (const match of text.matchAll(WORD_RE)) {
+      if (out.length >= max) break;
       const word = match[0];
       const lower = word.toLowerCase();
       if (word.length < 4) continue;
       if (seen.has(lower)) continue;
       if (/[A-Z]/.test(word.slice(1))) continue;
-      if (ctx.customWords.has(lower)) continue;
+      if (custom.has(lower)) continue;
       const capitalized = /^[A-Z]/.test(word);
       if (capitalized && (!titleLike || names.has(lower))) continue;
       const cacheKey = (capitalized ? "C:" : "w:") + word;

@@ -16,6 +16,7 @@ export async function saveScan(shop, result) {
       findings: JSON.stringify(result.findings),
       checks: JSON.stringify(result.checks || []),
       names: JSON.stringify(result.names || []),
+      context: JSON.stringify(result.context || {}),
       catalogTotal: result.catalogTotal ?? result.total,
       readAt: result.readAt ? new Date(result.readAt) : new Date(),
       productIds: JSON.stringify(result.productIds || []),
@@ -76,6 +77,7 @@ function toResult(row) {
     findings,
     checks: JSON.parse(row.checks || "[]"), // scans saved before checks were recorded have none
     names: JSON.parse(row.names || "[]"), // catalog names the title spell check trusts
+    context: JSON.parse(row.context || "{}"), // what the catalog as a whole suggested (rules.server.js catalogContext)
     catalogTotal: row.catalogTotal || row.total,
     truncated: (row.catalogTotal || row.total) > row.total, // a plan limit left products unscanned
     readAt: (row.readAt || row.createdAt).toISOString(), // when the catalog was read: new products are those added since
