@@ -6,7 +6,7 @@ Method: one full read of every file, then seven independent review passes (one p
 
 Legend: `[ ]` open, `[x]` fixed. Severity: high (wrong data, lost undo, outage, security), medium (wrong behaviour in a real case), low (polish, robustness, consistency). Line numbers refer to the code before Phase 2. Product decisions are not changed; they are listed under Questions at the end.
 
-Totals: 136 items found; 135 fixed; 1 left open on purpose (2.4, see Question 22); 22 open questions.
+Totals: 136 items found; 135 fixed; 1 left open on purpose (2.4, see Question 22); 22 questions asked, 21 decided (see Decisions).
 
 ## 1. Correctness of every check
 
@@ -231,3 +231,21 @@ Product decisions found during the audit; nothing below was changed.
 20. **Stuck bulk jobs** time out after 24 hours. Very large exports can legitimately run for hours; is 24 hours right?
 21. **`app/lib/stats.server.js`** (owner-only numbers, used by a script outside the repo) is unused by the app. Keep or remove?
 22. **Alt text mutation.** `productUpdateMedia` is deprecated in favour of `fileUpdate`, which needs the `write_files` scope (every file in the store, not only product media). Add the scope and switch, or keep the deprecated mutation until Shopify removes it?
+## Decisions
+
+Answers given on 2026-09-23 and what was done with them.
+
+- **1, API version.** Upgraded: `@shopify/shopify-app-react-router` 3.0.0 (`@shopify/shopify-api` 15), `@shopify/shopify-app-session-storage-prisma` 11, Admin API 2026-10 in the client, the codegen config and both tomls. Node 22.12 or newer is now required; the Docker image builds on Node 22. The provider lost its `embedded` prop and the login page outside the admin is plain HTML.
+- **2, tracked metafield cap.** Seven.
+- **3, downgrades.** Tracked metafields are paused while the plan does not include them: not read, not checked, not shown, their findings dropped; the rows stay for when the plan returns. Ignored findings and dictionary words keep applying on every plan (they cost nothing, and dropping them would only bring noise back).
+- **6, missing_weight.** Variants that do not require shipping are not flagged (`requiresShipping` is read with every variant).
+- **7, not_published.** Skipped when the store has no Online Store sales channel (read once per scan).
+- **8, seo_title_missing.** Kept as it is: the page title falls back to the product title, but an explicit SEO title is still the better state, and the check reads exactly as what it finds.
+- **9, price_below_cost.** The suggested price now clears the minimum margin (cost divided by 0.9, rounded to the common ending), so applying it does not trip the margin check.
+- **10, title_casing_outlier.** Quick apply stays, with a safer conversion: only lowercase words get a capital for Title Case, only Capitalized words are lowercased for sentence case; acronyms, brands and codes keep their casing.
+- **11, duplicate_sku and duplicate_barcode.** Grouped without regard to case (and spacing for barcodes).
+- **12, barcode_invalid.** Eight-digit codes are no longer judged; only 12, 13 and 14 digits are checked.
+- **13, few_images and missing_image.** Every media item counts (videos and 3D models included); alt text checks still look at images only.
+- **14 and 15, colors and typography.** Removed for Polaris compliance: no area colors, card stripes or dots; the summary tiles use the Polaris metrics card layout (heading and text); the trend is a line of numbers.
+- **16 to 21.** Unchanged as designed: the first-run page, the home heading, the 250-product inline limit, the retention of twenty rows and twelve full scans, the 24-hour job timeout, and the owner-only stats module stay.
+- **22, alt text mutation.** Still open: `fileUpdate` needs `write_files`; `productUpdateMedia` validates on 2026-10 and stays until you decide.
