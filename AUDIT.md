@@ -6,7 +6,7 @@ Method: one full read of every file, then seven independent review passes (one p
 
 Legend: `[ ]` open, `[x]` fixed. Severity: high (wrong data, lost undo, outage, security), medium (wrong behaviour in a real case), low (polish, robustness, consistency). Line numbers refer to the code before Phase 2. Product decisions are not changed; they are listed under Questions at the end.
 
-Totals: 136 items found; 134 fixed so far; 22 open questions.
+Totals: 136 items found; 135 fixed; 1 left open on purpose (2.4, see Question 22); 22 open questions.
 
 ## 1. Correctness of every check
 
@@ -203,7 +203,7 @@ Confirmed: no `app.additional.jsx`, no demo product generation, no unused import
 
 ## 13. App Store readiness checklist
 
-- [ ] **13.1** — Fix: add `STORE_CHECKLIST.md` with what is done and what is still needed: listing name "TidyUp: Product Data Cleanup", privacy policy URL, support email, screenshots, mandatory webhooks, billing test flow, and the Built for Shopify requirements not yet met.
+- [x] **13.1** — Fix: add `STORE_CHECKLIST.md` with what is done and what is still needed: listing name "TidyUp: Product Data Cleanup", privacy policy URL, support email, screenshots, mandatory webhooks, billing test flow, and the Built for Shopify requirements not yet met.
 
 ## Questions
 
