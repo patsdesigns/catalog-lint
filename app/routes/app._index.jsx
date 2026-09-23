@@ -17,7 +17,7 @@ import { CATEGORIES, categoryOf } from "../lib/categories";
 import { PASS_LABELS, SETUP_LABELS } from "../lib/checkLabels";
 import { shopInfo } from "../lib/shop.server";
 import { timeAgo } from "../lib/format";
-import { TONE, Notices, SeverityIcon, worstSeverity } from "../lib/ui";
+import { TONE, Notices, Dot } from "../lib/ui";
 
 // ---------- server ----------
 
@@ -201,19 +201,43 @@ function ScanProgress({ job, locale }) {
   );
 }
 
-// A card header: a status icon, the heading and optional badges on the left; anything on the right.
-function CardHeader({ icon, heading, badges, aside }) {
+// A card header: the area dot, the heading and optional badges on the left; anything on the right.
+function CardHeader({ color, heading, badges, aside }) {
   return (
     <s-box padding="base" paddingBlockEnd="small">
       <s-stack direction="inline" gap="base" alignItems="center" justifyContent="space-between">
         <s-stack direction="inline" gap="small" alignItems="center">
-          {icon}
+          {color ? <Dot color={color} /> : null}
           <s-heading>{heading}</s-heading>
           {badges}
         </s-stack>
         {aside}
       </s-stack>
     </s-box>
+  );
+}
+
+// "#5700d1" at an opacity, for the wash of color under each stripe.
+function tint(hex, alpha) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
+}
+
+// The top of an area card: a 3px stripe in the area's color (categories.js, from the Polaris
+// palette) and a wash of the same color fading out beneath it, behind the heading only. Polaris
+// has no prop for an accent color, so both are a plain div. The radius matches the card so the
+// stripe follows the corners.
+function AccentTop({ color, children }) {
+  return (
+    <div
+      style={{
+        borderTop: `3px solid ${color}`,
+        borderRadius: "12px 12px 0 0",
+        background: `linear-gradient(to bottom, ${tint(color, 0.14)}, ${tint(color, 0)})`,
+      }}
+    >
+      {children}
+    </div>
   );
 }
 
@@ -647,11 +671,14 @@ function CategoryCard({ cat, rules, checks, showChecks, showPassed, locked, onSe
     const fullPlan = allAreasPlan().name;
     return (
       <s-section padding="none">
-        <CardHeader
-          heading={cat.label}
-          badges={<s-badge icon="lock">{fullPlan}</s-badge>}
-          aside={<s-text color="subdued" fontVariantNumeric="tabular-nums">{rules.length ? `${total} findings` : "No findings"}</s-text>}
-        />
+        <AccentTop color={cat.color}>
+          <CardHeader
+            color={cat.color}
+            heading={cat.label}
+            badges={<s-badge icon="lock">{fullPlan}</s-badge>}
+            aside={<s-text color="subdued" fontVariantNumeric="tabular-nums">{rules.length ? `${total} findings` : "No findings"}</s-text>}
+          />
+        </AccentTop>
         <s-box padding="base" paddingBlockStart="none">
           <s-stack direction="inline" gap="base" alignItems="center" justifyContent="space-between">
             <s-text color="subdued">These findings are part of {fullPlan}</s-text>
@@ -684,12 +711,14 @@ function CategoryCard({ cat, rules, checks, showChecks, showPassed, locked, onSe
     );
   return (
     <s-section padding="none">
-      <CardHeader
-        icon={<SeverityIcon severity={worstSeverity(rules)} />}
-        heading={cat.label}
-        badges={rules.length ? <SeverityBadges rules={rules} /> : null}
-        aside={<s-text color="subdued" fontVariantNumeric="tabular-nums">{rules.length ? `${total} findings` : "No findings"}</s-text>}
-      />
+      <AccentTop color={cat.color}>
+        <CardHeader
+          color={cat.color}
+          heading={cat.label}
+          badges={rules.length ? <SeverityBadges rules={rules} /> : null}
+          aside={<s-text color="subdued" fontVariantNumeric="tabular-nums">{rules.length ? `${total} findings` : "No findings"}</s-text>}
+        />
+      </AccentTop>
       <CardBody table={table} panel={showChecks ? <PassedChecks passed={passed} skipped={skipped} off={off} failing={rules.length} expanded={showPassed} /> : null} />
     </s-section>
   );

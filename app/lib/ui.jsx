@@ -2,20 +2,21 @@
 import { categoryOf } from "./categories";
 import { PASS_LABELS, FIX_NAMES } from "./checkLabels";
 
-// Severity as a Polaris tone: red, orange, yellow. Color in the app comes only from these tones
-// (the palette Shopify approves), never from a color of our own.
+// Severity as a Polaris tone: red, orange, yellow. Status color in the app comes only from these
+// tones; the one other source of color is the area palette in categories.js, itself drawn from the
+// Polaris tokens.
 export const TONE = { high: "critical", medium: "warning", low: "caution" };
-const SEVERITY_ICON = { high: "alert-circle", medium: "alert-triangle", low: "info" };
 
-// The icon that stands for the worst severity in a set of findings, or for a clean state.
-export function SeverityIcon({ severity }) {
-  if (!severity) return <s-icon type="check-circle" tone="success" />;
-  return <s-icon type={SEVERITY_ICON[severity]} tone={TONE[severity]} />;
-}
-
-// The worst severity among some rules: "high", "medium", "low", or null when there are none.
-export function worstSeverity(rules) {
-  return ["high", "medium", "low"].find((s) => rules.some((r) => r.severity === s)) || null;
+// The area dot. Polaris has no primitive that takes a color of the palette directly, so the dot is
+// the one place that uses an inline style for color. The label next to it stays in the default
+// text color for AA contrast.
+export function Dot({ color, size = 10 }) {
+  return (
+    <span
+      aria-hidden="true"
+      style={{ display: "inline-block", width: size, height: size, borderRadius: "50%", background: color, flexShrink: 0 }}
+    />
+  );
 }
 
 // Short names for the bulk fixes (checkLabels.js), used in notices and the Recent fixes card.
@@ -44,7 +45,13 @@ export function PlanUnknown({ heading }) {
 }
 
 export function CategoryChip({ id, color = "base" }) {
-  return <s-text color={color}>{categoryOf(id).label}</s-text>;
+  const cat = categoryOf(id);
+  return (
+    <s-grid gridTemplateColumns="auto auto" gap="small-200" alignItems="center">
+      <Dot color={cat.color} size={8} />
+      <s-text color={color}>{cat.label}</s-text>
+    </s-grid>
+  );
 }
 
 // Banners for the outcome of the last action: a bulk fix (with Undo), an undo, a refresh, a failed
