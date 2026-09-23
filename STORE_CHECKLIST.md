@@ -13,8 +13,8 @@ State on 2026-09-23, after the audit in `AUDIT.md`. "Done" means it is in the co
 | Support email and support URL | Needed | The in-app Support page stores messages and can forward them (`SUPPORT_WEBHOOK_URL`); the listing still needs an email address. |
 | App icon | Needed | 1200 by 1200, no Shopify branding. |
 | Screenshots | Needed | 1600 by 900, three to six, desktop, no browser chrome, no pricing in the images. Suggested: the home overview after a scan, an issue page with Quick apply, the Settings page, Recent fixes, the Plans page. Add one phone-width shot if mobile is claimed. |
-| Pricing in the listing | Needed | Must match `app/lib/plans.js`: Dust Off free (20 products), Quick Clean $10 every 30 days, Deep Clean $20 every 30 days, Early Bird $10 for the first 50 stores. No trial. |
-| Demo store or test instructions | Needed | A development store with products that trigger a range of checks. Charges on development stores are always test charges, so reviewers can try every plan. |
+| Pricing in the listing | Needed | Must match `app/lib/plans.js`: Dust Off free (20 products), Quick Clean $10 every 30 days, Deep Clean $20 every 30 days, Early Bird $10 for the first 50 paying stores (not available on development stores). No trial. |
+| Demo store or test instructions | Needed | A development store with products that trigger a range of checks. Charges on development stores are always test charges, so reviewers can try every plan except Early Bird. Say that Early Bird is Deep Clean at the Quick Clean price for the first 50 paying stores, shown but not selectable on development stores. |
 | Demo screencast | Needed | A video of setup and the main features as the listing describes them, in English or with English subtitles (App Store requirement 4.5.3). |
 | Emergency developer contact | Needed | Set in the Partner Dashboard account settings (App Store requirement 4.5.6). |
 
@@ -51,7 +51,7 @@ Run it once with `BILLING_TEST=false` in the development `.env` (then restart th
 1. On a development store, open Plans and choose Quick Clean: Shopify shows the approval screen for a test charge; approve; back on Plans the card reads "Current plan".
 2. Open an issue page: inline edits, Trust word and Ignore appear. Quick apply a suggestion, then undo it from the row and from Recent fixes.
 3. Choose Deep Clean: the subscription is replaced; Deep Clean areas unlock on Home.
-4. Choose Early Bird on a second store: the seat is claimed on return (Plans shows "N of 50 claimed"); choose Dust Off: the seat lapses.
+4. The Early Bird card shows with its button disabled and the note that it is for paying stores: a development store cannot choose it and never takes a seat. The claim and lapse of a seat can only be seen on a live store with real billing.
 5. Choose Dust Off: the subscription is canceled; Home shows the 20-product limit banner if the last scan was larger.
 6. Decline a charge on the approval screen: Plans reloads with the previous plan and no error page.
 7. Uninstall and reinstall: the app authenticates again and the previous data is still there until `shop/redact` arrives 48 hours later.

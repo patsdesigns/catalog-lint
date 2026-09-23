@@ -20,7 +20,7 @@ Plans are defined once in `app/lib/plans.js` and billed through the Shopify Bill
 | Quick Clean | $10 | unlimited | the five core areas | inline edits, spelling dictionary, ignored findings, scans of new products, automatic re-check on product change, weekly email |
 | Deep Clean | $20 | unlimited | all eleven areas | everything in Quick Clean plus tracked metafields and priority support |
 
-The first 50 stores can take **Deep Clean Early Bird**: Deep Clean at the Quick Clean price for as long as the subscription stays active. Every feature and area is enforced in the loaders and actions as well as hidden in the pages; a plan check that fails falls back to Dust Off with a warning and blocks scans and writes until Shopify answers.
+The first 50 paying stores can take **Deep Clean Early Bird**: Deep Clean at the Quick Clean price for as long as the subscription stays active. Test stores see the offer but cannot choose it, and a test charge never takes a seat. Every feature and area is enforced in the loaders and actions as well as hidden in the pages; a plan check that fails falls back to Dust Off with a warning and blocks scans and writes until Shopify answers.
 
 ## Running locally
 

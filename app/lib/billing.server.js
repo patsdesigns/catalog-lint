@@ -128,9 +128,11 @@ export async function planForShop(graphql, shop = null) {
 }
 
 // ---------- Early Bird ----------
-// Deep Clean at the Quick Clean price for the first EARLY_BIRD_SEATS stores. A claim is recorded
-// once the subscription is approved and lapses when it is cancelled or the app is uninstalled; a
-// store claims at most once, whatever the status.
+// Deep Clean at the Quick Clean price for the first EARLY_BIRD_SEATS paying stores. A claim is
+// recorded once the subscription is approved and lapses when it is cancelled or the app is
+// uninstalled; a store claims at most once, whatever the status. The offer is for paying stores
+// only: a test store cannot choose it (Plans page) and a test subscription never takes a seat.
+export const EARLY_BIRD_PAYING_ONLY = "Early Bird is for paying stores, so it is not available on a test store.";
 
 export async function earlyBirdSeatsLeft() {
   const claims = await prisma.earlyBirdClaim.count();
@@ -173,7 +175,8 @@ export function isEarlyBirdSubscription(subscription) {
 export async function syncEarlyBird(shop, plan, subscription) {
   try {
     const claim = await earlyBirdClaim(shop);
-    if (plan.id === EARLY_BIRD.id && subscription && !claim) await claimEarlyBird(shop, subscription.id);
+    // Only a real, paid subscription takes a seat.
+    if (plan.id === EARLY_BIRD.id && subscription && !subscription.test && !claim) await claimEarlyBird(shop, subscription.id);
     else if (claim?.status === "active" && plan.id !== EARLY_BIRD.id) await lapseEarlyBird(shop);
     return null;
   } catch (err) {

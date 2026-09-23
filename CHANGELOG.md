@@ -6,6 +6,10 @@ Versions follow [semantic versioning](https://semver.org): the first number chan
 
 ## Unreleased
 
+### Changed
+
+- The Early Bird offer is for paying stores only. Test stores still see it, so Shopify's reviewers can see what the listing describes, but they cannot choose it, and a test charge never takes one of the 50 seats.
+
 ### Removed
 
 - The "Vendor not on your approved list" check and the Approved vendors box in Settings. TidyUp now runs 65 checks.

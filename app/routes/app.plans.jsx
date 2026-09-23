@@ -2,7 +2,7 @@ import { useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { PLANS, DEFAULT_PLAN, EARLY_BIRD, EARLY_BIRD_SEATS, FEATURE_LABELS, COMING_SOON, ALL_AREAS } from "../lib/plans";
-import { PLAN_UNKNOWN, currentPlan, forgetPlan, testCharges, earlyBirdSeatsLeft, earlyBirdClaim, claimEarlyBird, lapseEarlyBird, isEarlyBirdSubscription } from "../lib/billing.server";
+import { PLAN_UNKNOWN, EARLY_BIRD_PAYING_ONLY, currentPlan, forgetPlan, testCharges, earlyBirdSeatsLeft, earlyBirdClaim, claimEarlyBird, lapseEarlyBird, isEarlyBirdSubscription } from "../lib/billing.server";
 import { shopInfo } from "../lib/shop.server";
 
 // The three plans, plus the Early Bird offer while seats remain. Choosing a paid plan sends the
@@ -19,7 +19,8 @@ export async function loader({ request }) {
 
   // Back from approving the Early Bird subscription: the seat is claimed now. If the seats ran out
   // between the request and the approval, the subscription is canceled again and nothing is charged.
-  if (plan.id === EARLY_BIRD.id && subscription && !claim) {
+  // A test subscription never takes a seat: the offer is for paying stores.
+  if (plan.id === EARLY_BIRD.id && subscription && !subscription.test && !claim) {
     try {
       claim = await claimEarlyBird(shop, subscription.id);
     } catch (err) {
@@ -38,6 +39,10 @@ export async function loader({ request }) {
     claim = await earlyBirdClaim(shop);
   }
 
+  // Test charges on this store: a development store, or a deployment without real billing. Said on
+  // the page only where it is true, and it keeps the Early Bird offer out of reach. Unknown counts as
+  // test here, so a failed check never opens the offer to a test store.
+  const testMode = await testCharges(admin.graphql, shop).catch(() => null);
   const seatsLeft = await earlyBirdSeatsLeft();
   const earlyBird = {
     seats: EARLY_BIRD_SEATS,
@@ -45,13 +50,15 @@ export async function loader({ request }) {
     claimed: EARLY_BIRD_SEATS - seatsLeft,
     status: claim?.status || null,
     // Offered while seats remain and the store never claimed; shown as current while it is the plan.
+    // Test stores see the offer (Shopify's reviewers should see what the listing describes) but
+    // cannot choose it.
     show: plan.id === EARLY_BIRD.id || claim?.status === "active" || (!claim && seatsLeft > 0),
+    available: testMode === false,
+    unavailableText: EARLY_BIRD_PAYING_ONLY,
     plan: EARLY_BIRD,
   };
   const { locale } = await shopInfo(admin.graphql, shop);
-  // Said on the page only where it is true: a development store, or a deployment without real billing.
-  const testMode = await testCharges(admin.graphql, shop).catch(() => false);
-  return { currentId, plans: PLANS, earlyBird, notice, planUnknown, locale, testMode };
+  return { currentId, plans: PLANS, earlyBird, notice, planUnknown, locale, testMode: testMode === true };
 }
 
 export async function action({ request }) {
@@ -72,6 +79,8 @@ export async function action({ request }) {
       return { ok: true, plan: target.id };
     }
     if (target.earlyBird) {
+      // For paying stores only: never on a store whose charges are test charges.
+      if (await testCharges(admin.graphql, shop)) return { ok: false, error: EARLY_BIRD_PAYING_ONLY };
       // Seats are checked here and again, inside a transaction, when the claim is recorded.
       if (await earlyBirdClaim(shop)) return { ok: false, error: "This store has already used the Early Bird offer." };
       if ((await earlyBirdSeatsLeft()) <= 0) return { ok: false, error: "All Early Bird seats are taken." };
@@ -95,7 +104,8 @@ const THREE_COLUMNS = "@container (inline-size > 900px) 1fr 1fr 1fr, (inline-siz
 const FOUR_COLUMNS = "@container (inline-size > 1000px) 1fr 1fr 1fr 1fr, (inline-size > 560px) and (inline-size <= 1000px) 1fr 1fr, 1fr";
 const FEATURE_ORDER = Object.keys(FEATURE_LABELS);
 
-function PlanCard({ plan, current, note, claimed, footnote, busy, choosing, locale, onChoose }) {
+// `unavailable`: why the plan cannot be chosen here; the button is disabled and the reason shown.
+function PlanCard({ plan, current, note, claimed, footnote, unavailable, busy, choosing, locale, onChoose }) {
   const included = FEATURE_ORDER.filter((key) => plan.features[key] && !COMING_SOON.has(key));
   const later = FEATURE_ORDER.filter((key) => plan.features[key] && COMING_SOON.has(key));
   return (
@@ -126,13 +136,14 @@ function PlanCard({ plan, current, note, claimed, footnote, busy, choosing, loca
         </s-unordered-list>
         <s-button
           variant={current ? "secondary" : "primary"}
-          disabled={current || busy || undefined}
+          disabled={current || busy || Boolean(unavailable) || undefined}
           loading={choosing === plan.id || undefined}
           onClick={() => onChoose(plan.id)}
           accessibilityLabel={current ? `${plan.name} is your current plan` : `Choose ${plan.name}`}
         >
           {current ? "Current plan" : plan.price ? `Choose ${plan.earlyBird ? "Early Bird" : plan.name}` : "Switch to Dust Off"}
         </s-button>
+        {unavailable && !current ? <s-text color="subdued">{unavailable}</s-text> : null}
         {footnote ? <s-text color="subdued">{footnote}</s-text> : null}
       </s-stack>
     </s-box>
@@ -186,6 +197,7 @@ export default function PlansPage() {
                   note={plan.earlyBird ? offer : null}
                   claimed={plan.earlyBird ? claimed : null}
                   footnote={plan.earlyBird ? "* Keep it as long as you stay subscribed." : null}
+                  unavailable={plan.earlyBird && !earlyBird.available ? earlyBird.unavailableText : null}
                   busy={busy}
                   choosing={choosing}
                   locale={locale}
