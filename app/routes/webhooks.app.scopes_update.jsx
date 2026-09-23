@@ -1,20 +1,15 @@
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
 
+// app/scopes_update: the session remembers the scopes the merchant has granted.
 export const action = async ({ request }) => {
-  const { payload, session, topic, shop } = await authenticate.webhook(request);
+  const { payload, session } = await authenticate.webhook(request);
+  const current = payload?.current;
 
-  console.log(`Received ${topic} webhook for ${shop}`);
-  const current = payload.current;
-
-  if (session) {
+  if (session && current) {
     await db.session.update({
-      where: {
-        id: session.id,
-      },
-      data: {
-        scope: current.toString(),
-      },
+      where: { id: session.id },
+      data: { scope: current.toString() },
     });
   }
 

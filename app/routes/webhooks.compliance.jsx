@@ -7,20 +7,29 @@ import db from "../db.server";
 
 export const action = async ({ request }) => {
   const { shop, topic } = await authenticate.webhook(request);
-  console.log(`Received ${topic} webhook for ${shop}`);
 
-  if (topic === "SHOP_REDACT") {
-    await db.$transaction([
-      db.scan.deleteMany({ where: { shop } }),
-      db.scanJob.deleteMany({ where: { shop } }),
-      db.fixLog.deleteMany({ where: { shop } }),
-      db.ignore.deleteMany({ where: { shop } }),
-      db.dictionaryWord.deleteMany({ where: { shop } }),
-      db.setting.deleteMany({ where: { shop } }),
-      db.supportMessage.deleteMany({ where: { shop } }),
-      db.session.deleteMany({ where: { shop } }),
-    ]);
-  }
+  if (topic === "SHOP_REDACT") await redactShop(shop);
 
   return new Response();
 };
+
+// Every row that carries the shop, in one transaction. The Early Bird claim keeps its seat (the
+// offer counts fifty stores, and a store claims once) but loses the shop domain.
+async function redactShop(shop) {
+  await db.$transaction(async (tx) => {
+    await tx.scan.deleteMany({ where: { shop } });
+    await tx.scanJob.deleteMany({ where: { shop } });
+    await tx.fixLog.deleteMany({ where: { shop } });
+    await tx.ignore.deleteMany({ where: { shop } });
+    await tx.dictionaryWord.deleteMany({ where: { shop } });
+    await tx.setting.deleteMany({ where: { shop } });
+    await tx.supportMessage.deleteMany({ where: { shop } });
+    await tx.pendingProduct.deleteMany({ where: { shop } });
+    await tx.dailySnapshot.deleteMany({ where: { shop } });
+    await tx.digestSettings.deleteMany({ where: { shop } });
+    await tx.trackedMetafield.deleteMany({ where: { shop } });
+    await tx.session.deleteMany({ where: { shop } });
+    const claim = await tx.earlyBirdClaim.findUnique({ where: { shop } });
+    if (claim) await tx.earlyBirdClaim.update({ where: { id: claim.id }, data: { shop: `redacted-${claim.id}`, subscriptionId: "", status: "lapsed" } });
+  });
+}

@@ -65,7 +65,7 @@ export function describeError(err) {
     if (err.status === 429) return "Shopify is rate limiting the app right now. Try again in a moment.";
     return `Shopify answered ${err.status}${err.statusText ? ` ${err.statusText}` : ""}. Try again in a moment.`;
   }
-  const messages = graphQLErrors(err).map((e) => e?.message).filter(Boolean);
+  const messages = graphQLErrors(err).map((e) => (typeof e === "string" ? e : e?.message)).filter(Boolean);
   if (messages.length) return messages.join("; ");
   if (err?.name === "HttpMaxRetriesError") return "Shopify is rate limiting the app right now. Try again in a moment.";
   if (err?.name === "PrismaClientKnownRequestError" || err?.name === "PrismaClientValidationError") return "The app database could not save that. Try again.";

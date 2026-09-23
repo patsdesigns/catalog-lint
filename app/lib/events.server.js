@@ -5,26 +5,29 @@ import { recheckProducts } from "./scan.server";
 import { planForShop } from "./billing.server";
 import { withShopLock } from "./lock.server";
 
-// The products/create and products/update routes: verify the webhook, work out the plan from the
-// shop's subscription and apply the event. Always answers 200, so Shopify does not retry.
+// The products/create and products/update routes: verify the webhook, answer 200 at once (Shopify
+// expects an answer within five seconds and retries otherwise), then work out the plan from the
+// shop's subscription and apply the event. The work is safe to repeat: it re-reads the product.
 export async function productWebhook(request, { created }) {
   const { shop, topic, payload, admin } = await authenticate.webhook(request);
   const productId = payload?.admin_graphql_api_id;
   if (!admin || !productId) return new Response();
-  try {
-    let plan = null;
-    try {
-      plan = await planForShop(admin.graphql);
-    } catch (err) {
-      // The plan could not be read (a throttle, an outage): the product is queued rather than lost.
-      console.error(`${topic} for ${shop}: could not read the plan, queued ${productId}: ${err.message}`);
-    }
-    const outcome = plan ? await handleProductEvent(admin.graphql, shop, productId, { created, plan }) : await queueProduct(shop, productId, created);
-    console.log(`${topic} for ${shop}: ${productId} ${outcome.mode}`);
-  } catch (err) {
-    console.error(`${topic} for ${shop} failed: ${err.message || err}`);
-  }
+  void processProductEvent(admin.graphql, shop, productId, { created, topic }).catch((err) => {
+    console.error(`${topic} for ${shop} failed: ${err?.message || err}`);
+  });
   return new Response();
+}
+
+async function processProductEvent(graphql, shop, productId, { created, topic }) {
+  let plan = null;
+  try {
+    plan = await planForShop(graphql);
+  } catch (err) {
+    // The plan could not be read (a throttle, an outage): the product is queued rather than lost.
+    console.error(`${topic} for ${shop}: could not read the plan, queued ${productId}: ${err.message}`);
+  }
+  if (plan) await handleProductEvent(graphql, shop, productId, { created, plan });
+  else await queueProduct(shop, productId, created);
 }
 
 // Remembers a changed product for the Scan changed products button.

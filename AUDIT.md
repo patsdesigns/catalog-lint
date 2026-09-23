@@ -6,7 +6,7 @@ Method: one full read of every file, then seven independent review passes (one p
 
 Legend: `[ ]` open, `[x]` fixed. Severity: high (wrong data, lost undo, outage, security), medium (wrong behaviour in a real case), low (polish, robustness, consistency). Line numbers refer to the code before Phase 2. Product decisions are not changed; they are listed under Questions at the end.
 
-Totals: 136 items found; 68 fixed so far; 22 open questions.
+Totals: 136 items found; 72 fixed so far; 22 open questions.
 
 ## 1. Correctness of every check
 
@@ -93,11 +93,11 @@ Confirmed: every gated feature (inline edits, dictionary, ignores, tracked metaf
 
 Confirmed: every webhook route awaits `authenticate.webhook` (bad HMAC is a 401) before any work; handlers are idempotent at the database; products/create and products/update re-read only that product and run product rules only; the compliance route exists for all three topics and is registered in `shopify.app.production.toml` (the localhost dev config cannot register subscriptions); the cron route answers 503 without `CRON_SECRET` and 401 with a wrong one.
 
-- [ ] **5.1** high — `app/routes/webhooks.compliance.jsx:13` — shop/redact leaves PendingProduct, DailySnapshot, DigestSettings, TrackedMetafield and EarlyBirdClaim rows for the shop. Fix: delete the first four; anonymize the claim (the seat count survives, the shop domain does not).
-- [ ] **5.2** high — `app/routes/webhooks.app.uninstalled.jsx:12` — uninstall leaves the weekly email enabled and the queue and running job in place, so the digest keeps emailing the shop for up to 48 hours. Fix: turn the email off, clear pending products and fail the running job on uninstall.
-- [ ] **5.3** medium — `app/lib/events.server.js:9` — products/create and products/update read the plan, re-read the product, run the rules and save before answering; on a large catalog that passes the 5-second webhook timeout and Shopify retries the work. Fix: answer 200 at once and run the work detached under the per-shop lock.
+- [x] **5.1** high — `app/routes/webhooks.compliance.jsx:13` — shop/redact leaves PendingProduct, DailySnapshot, DigestSettings, TrackedMetafield and EarlyBirdClaim rows for the shop. Fix: delete the first four; anonymize the claim (the seat count survives, the shop domain does not).
+- [x] **5.2** high — `app/routes/webhooks.app.uninstalled.jsx:12` — uninstall leaves the weekly email enabled and the queue and running job in place, so the digest keeps emailing the shop for up to 48 hours. Fix: turn the email off, clear pending products and fail the running job on uninstall.
+- [x] **5.3** medium — `app/lib/events.server.js:9` — products/create and products/update read the plan, re-read the product, run the rules and save before answering; on a large catalog that passes the 5-second webhook timeout and Shopify retries the work. Fix: answer 200 at once and run the work detached under the per-shop lock.
 - [x] **5.4** medium — `app/routes/cron.digest.jsx:11` — the secret comparison is not constant-time. Fix: `crypto.timingSafeEqual` with a length check.
-- [ ] **5.5** low — `app/routes/webhooks.*.jsx` — the template "Received X webhook" logs are noise. Fix: log failures only.
+- [x] **5.5** low — `app/routes/webhooks.*.jsx` — the template "Received X webhook" logs are noise. Fix: log failures only.
 
 ## 6. Data and Prisma
 
