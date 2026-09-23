@@ -28,7 +28,7 @@ import { saveScan, latestScan } from "./scans.server";
 import { summarizeFindings, knownFindings, capFindings } from "./rules.server";
 import { ignoreKey } from "./ignores.server";
 import { getSettings } from "./settings.server";
-import { activeJob, createJob, updateJob, claimJob, jobView } from "./jobs.server";
+import { activeJob, createJob, updateJob, claimJob, jobView, jobTracked } from "./jobs.server";
 
 // Starts a full scan. Returns the running job for a large catalog, or null when the scan already
 // completed inline.
@@ -42,8 +42,9 @@ export async function startScan(graphql, shop, limit = null) {
     await saveScan(shop, await scanCatalog(graphql, shop, limit));
     return null;
   }
-  const operationId = await startBulkScan(graphql, (await getSettings(shop)).trackedMetafields || []);
-  return jobView(await createJob(shop, operationId, count));
+  const tracked = (await getSettings(shop)).trackedMetafields || [];
+  const operationId = await startBulkScan(graphql, tracked);
+  return jobView(await createJob(shop, operationId, count, tracked));
 }
 
 // Called from the page loader: moves the running job along. Finishes it (downloads the export,
@@ -109,7 +110,8 @@ export async function advanceJob(graphql, shop, limit = null) {
 // MAX_JOB_ERRORS).
 async function finishJob(graphql, shop, job, op, limit) {
   try {
-    const all = op.url ? await downloadBulkCatalog(op.url, (await getSettings(shop)).trackedMetafields || []) : [];
+    // The list the query was built with, not the settings of the moment (they may have changed).
+    const all = op.url ? await downloadBulkCatalog(op.url, jobTracked(job)) : [];
     const products = limit ? all.slice(0, limit) : all;
     const result = await scanProducts(products, graphql, shop, job.createdAt.getTime(), all.length);
     await saveScan(shop, result);

@@ -9,8 +9,19 @@ export async function activeJob(shop) {
   return prisma.scanJob.findFirst({ where: { shop, status: { in: OPEN_STATUSES } }, orderBy: { createdAt: "desc" } });
 }
 
-export async function createJob(shop, operationId, expected) {
-  return prisma.scanJob.create({ data: { shop, operationId, expected } });
+// The tracked metafields the export query was built with are kept with the job: the export is
+// read with the same list, whatever the settings say by the time it finishes.
+export async function createJob(shop, operationId, expected, tracked = []) {
+  return prisma.scanJob.create({ data: { shop, operationId, expected, tracked: JSON.stringify(tracked) } });
+}
+
+export function jobTracked(job) {
+  try {
+    const list = JSON.parse(job.tracked || "[]");
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
 }
 
 export async function updateJob(id, data) {

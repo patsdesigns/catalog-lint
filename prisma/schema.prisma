@@ -111,6 +111,7 @@ model ScanJob {
   errors      Int      @default(0)
   error       String?
   finishingAt DateTime?
+  tracked     String   @default("[]")
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

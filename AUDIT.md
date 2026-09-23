@@ -6,7 +6,7 @@ Method: one full read of every file, then seven independent review passes (one p
 
 Legend: `[ ]` open, `[x]` fixed. Severity: high (wrong data, lost undo, outage, security), medium (wrong behaviour in a real case), low (polish, robustness, consistency). Line numbers refer to the code before Phase 2. Product decisions are not changed; they are listed under Questions at the end.
 
-Totals: 136 items found; 135 fixed; 1 left open on purpose (2.4, see Question 22); 22 questions asked, 21 decided (see Decisions).
+Totals: 136 items found; 135 fixed; 1 left open on purpose (2.4, see Question 22); 22 questions asked, 21 decided (see Decisions); the review of the decisions found 7 more defects, all fixed (see Review of the decisions).
 
 ## 1. Correctness of every check
 
@@ -249,3 +249,14 @@ Answers given on 2026-09-23 and what was done with them.
 - **14 and 15, colors and typography.** Removed for Polaris compliance: no area colors, card stripes or dots; the summary tiles use the Polaris metrics card layout (heading and text); the trend is a line of numbers.
 - **16 to 21.** Unchanged as designed: the first-run page, the home heading, the 250-product inline limit, the retention of twenty rows and twelve full scans, the 24-hour job timeout, and the owner-only stats module stay.
 - **22, alt text mutation.** Still open: `fileUpdate` needs `write_files`; `productUpdateMedia` validates on 2026-10 and stays until you decide.
+
+## Review of the decisions
+
+An adversarial review of the changes above (twenty agents over the rules, the edit pipeline, billing, the bulk scan and the upgrade) confirmed seven defects, all fixed the same day:
+
+- **Casing suggestions** (`title_casing_outlier`) left words next to punctuation alone ("warm jacket, blue" became "Warm jacket, Blue") and did not know typographic apostrophes, so Quick apply could write a mixed-case title that was flagged again. The conversion now recases the letters of every word and leaves the punctuation around them, treats ’ and ʼ as part of a word, and counts words rather than characters to find the first one. `test/rules.test.mjs` section 7 covers both directions.
+- **thin_margin** compared a floating-point ratio, so a price exactly on the 10% line could be reported as thin. Margins are judged in cents, and the price ending helper works in cents too, so the `price_below_cost` suggestion always clears the margin check (tested for four endings).
+- **few_images** said "1 image" for a product whose one media item is a video or a 3D model; it now says "1 media item, no image".
+- **Bulk scans** built the export query with the tracked metafields of the moment but read the export with the settings at finish time, so a plan change or a tracked-list edit during a long export could put values under the wrong metafield. The list is stored on the `ScanJob` row (migration `20260923170500_add_scan_job_tracked`) and the finish reads it from there.
+- **`customShopDomains`** no longer exists in `@shopify/shopify-api` 15; the `SHOP_CUSTOM_DOMAIN` option was dead and is removed.
+- **Library noise, not fixable here.** `@shopify/shopify-app-react-router` 3.0.0 logs `config.future.expiringOfflineAccessTokens` to the console during token exchange. Nothing in this repo triggers it on purpose; it goes away with the next library release.
