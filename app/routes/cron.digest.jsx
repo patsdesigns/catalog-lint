@@ -35,7 +35,7 @@ async function run(request) {
         skipped.push({ shop, reason: "not installed" });
         continue;
       }
-      const plan = await planForShop(admin.graphql);
+      const plan = await planForShop(admin.graphql, shop);
       if (!plan.features.weeklyDigest) {
         skipped.push({ shop, reason: `not in the ${plan.name} plan` });
         continue;

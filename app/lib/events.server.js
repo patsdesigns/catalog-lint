@@ -21,7 +21,7 @@ export async function productWebhook(request, { created }) {
 async function processProductEvent(graphql, shop, productId, { created, topic }) {
   let plan = null;
   try {
-    plan = await planForShop(graphql);
+    plan = await planForShop(graphql, shop);
   } catch (err) {
     // The plan could not be read (a throttle, an outage): the product is queued rather than lost.
     console.error(`${topic} for ${shop}: could not read the plan, queued ${productId}: ${err.message}`);

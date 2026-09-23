@@ -34,8 +34,8 @@ export async function loader({ request, params }) {
   if (category && areaLocked(plan, category)) throw redirect("/app/plans");
   const findings = rule ? result.findings.filter((f) => f.ruleId === rule.ruleId) : [];
   const label = rule?.label || known?.label || "Check";
-  // Tracked metafields show as columns on every check.
-  const tracked = (settings.trackedMetafields || []).map((t) => ({ key: t.fullKey, name: t.name }));
+  // Tracked metafields show as columns on every check, on the plans that include them.
+  const tracked = plan.features.customRules ? (settings.trackedMetafields || []).map((t) => ({ key: t.fullKey, name: t.name })) : [];
   return { rule, findings, plan, planUnknown, label, tracked, locale: info.locale };
 }
 

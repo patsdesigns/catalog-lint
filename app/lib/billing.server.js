@@ -16,6 +16,17 @@ export const BILLING_TEST = TEST_FLAG ? ["1", "true", "yes"].includes(TEST_FLAG)
 
 export const PLAN_UNKNOWN = "Could not confirm your plan with Shopify. Try again in a moment.";
 
+// The features of the plan each shop was last seen on, for code that runs without a request (a
+// scan started from a page, a webhook): what a downgrade pauses (tracked metafields) is decided
+// from this. Unknown until the shop's first request; then it never expires.
+const lastFeatures = new Map();
+export function rememberFeatures(shop, plan) {
+  if (shop && plan?.features) lastFeatures.set(shop, plan.features);
+}
+export function planFeatures(shop) {
+  return lastFeatures.get(shop) || null;
+}
+
 // The plan is read from Shopify on every request; a minute of memory per shop spares the billing
 // call on every click. The Plans page reads fresh, and a plan change forgets the entry.
 const PLAN_TTL = 60 * 1000;
@@ -56,6 +67,7 @@ export async function currentPlan(billing, shop = null, { fresh = false } = {}) 
     return { plan: DEFAULT_PLAN, subscription: null, planUnknown: true };
   }
   if (shop) planCache.set(shop, { value, until: Date.now() + PLAN_TTL });
+  rememberFeatures(shop, value.plan);
   return value;
 }
 
@@ -64,13 +76,15 @@ export async function currentPlan(billing, shop = null, { fresh = false } = {}) 
 const SUBSCRIPTIONS_QUERY = `#graphql
   query ActiveSubscriptions { currentAppInstallation { activeSubscriptions { name status test } } }
 `;
-export async function planForShop(graphql) {
+export async function planForShop(graphql, shop = null) {
   const data = await request(graphql, SUBSCRIPTIONS_QUERY);
   // No installation in the answer means the read failed, not that the shop is on the free plan.
   if (!data?.currentAppInstallation) throw new Error("Could not read the subscription.");
   const active = (data.currentAppInstallation.activeSubscriptions || []).filter((s) => s.status === "ACTIVE" && (BILLING_TEST || !s.test));
   const sub = active.find((s) => PAID_PLANS.some((p) => p.name === s.name));
-  return (sub && PAID_PLANS.find((p) => p.name === sub.name)) || DEFAULT_PLAN;
+  const plan = (sub && PAID_PLANS.find((p) => p.name === sub.name)) || DEFAULT_PLAN;
+  rememberFeatures(shop, plan);
+  return plan;
 }
 
 // The shop's plan for a request: a paid plan with an active subscription, or Dust Off.
