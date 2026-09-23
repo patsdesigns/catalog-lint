@@ -12,9 +12,15 @@ import {
   scanProducts,
   startBulkScan,
   bulkScanStatus,
+  cancelBulkScan,
   downloadBulkCatalog,
   recheckProducts,
 } from "./scan.server";
+
+// A background job is given up after this long, whatever Shopify says about the export.
+const STALE_JOB_MS = 24 * 60 * 60 * 1000;
+// Polls and downloads that fail this many times in a row fail the job; fewer are retried next load.
+const MAX_JOB_ERRORS = 5;
 import { saveScan, latestScan } from "./scans.server";
 import { summarizeFindings, knownFindings } from "./rules.server";
 import { ignoreKey } from "./ignores.server";
@@ -44,12 +50,29 @@ export async function advanceJob(graphql, shop, limit = null) {
   if (!job) return null;
 
   const fail = (error) => updateJob(job.id, { status: "failed", error }).then(jobView);
+  // A passing error (a throttled poll, a download that did not finish) is kept and retried on the
+  // next page load; only a run of them fails the job.
+  const stumble = async (err) => {
+    const errors = (job.errors || 0) + 1;
+    const error = err.message || String(err);
+    if (errors >= MAX_JOB_ERRORS) return fail(error);
+    return jobView(await updateJob(job.id, { errors, error }));
+  };
+
+  if (Date.now() - job.createdAt.getTime() > STALE_JOB_MS) {
+    try {
+      await cancelBulkScan(graphql, job.operationId);
+    } catch {
+      // The export may already be gone; the job is given up either way.
+    }
+    return fail("The export took more than a day and was stopped. Run the scan again.");
+  }
 
   let op;
   try {
     op = await bulkScanStatus(graphql, job.operationId);
   } catch (err) {
-    return fail(err.message || String(err));
+    return stumble(err);
   }
   if (!op) return fail("Shopify no longer has this export.");
 
@@ -62,7 +85,7 @@ export async function advanceJob(graphql, shop, limit = null) {
       await updateJob(job.id, { status: "done", objects: Number(op.objectCount || 0) });
       return null;
     } catch (err) {
-      return fail(err.message || String(err));
+      return stumble(err);
     }
   }
   if (op.status === "FAILED" || op.status === "CANCELED" || op.status === "EXPIRED") {

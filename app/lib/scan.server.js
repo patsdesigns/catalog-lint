@@ -10,10 +10,14 @@ import { loadSpeller, seedWords, catalogNames } from "./spelling.server";
 import { getWords } from "./dictionary.server";
 import { getIgnoreKeys, ignoreKey } from "./ignores.server";
 import { getSettings } from "./settings.server";
+import { request } from "./graphql.server";
 
 export const SYNC_LIMIT = Number(process.env.CATALOG_LINT_SYNC_LIMIT ?? 250);
 const PAGE_SIZE = 8; // keeps one paginated query under the Admin API cost limit
-const IDS_PER_QUERY = 10;
+const IDS_PER_QUERY = 5; // by-id reads stay under the limit with every tracked metafield the app allows
+// A paged read stops after this many pages whatever Shopify says: the inline path is only used up
+// to SYNC_LIMIT products, and a cursor that never advances must not loop forever.
+const MAX_PAGES = Math.ceil(SYNC_LIMIT / PAGE_SIZE) + 1;
 
 // One product's fields, shared by the paginated, by-id and bulk queries. Regular queries page
 // their connections; a bulk query takes no pagination arguments and returns every node, each on
@@ -101,18 +105,28 @@ const RUNNING_BULK = `#graphql
   }
 `;
 
+const CANCEL_BULK = `#graphql
+  mutation CancelBulkScan($id: ID!) {
+    bulkOperationCancel(id: $id) {
+      bulkOperation { id status }
+      userErrors { field message }
+    }
+  }
+`;
+
 const LOCALE_QUERY = `#graphql
   query PrimaryLocale {
     shopLocales(published: true) { locale primary }
   }
 `;
 
-async function graphqlJson(graphql, query, variables) {
-  const response = await graphql(query, { variables });
-  const { data, errors } = await response.json();
-  // GraphQL errors are an array; an auth failure comes back as a single string.
-  if (errors) throw new Error(Array.isArray(errors) ? errors.map((e) => e.message).join("; ") : String(errors?.message || errors));
-  return data;
+// Every read here goes through the shared helper: paced on the cost bucket, retried on throttling.
+const graphqlJson = (graphql, query, variables) => request(graphql, query, variables);
+
+// True when a connection has a next page the loop has not seen (a cursor that does not move would
+// otherwise loop forever).
+function nextPage(pageInfo, cursor) {
+  return Boolean(pageInfo?.hasNextPage && pageInfo.endCursor && pageInfo.endCursor !== cursor);
 }
 
 export function normalize(node, tracked = []) {
@@ -211,7 +225,7 @@ export async function fetchNewProductIds(graphql, since, cap = 2000) {
     const data = await graphqlJson(graphql, NEW_IDS_QUERY, { cursor, query });
     const conn = data.products;
     ids.push(...conn.nodes.map((n) => n.id));
-    if (ids.length >= cap || !conn.pageInfo.hasNextPage) break;
+    if (ids.length >= cap || !nextPage(conn.pageInfo, cursor)) break;
     cursor = conn.pageInfo.endCursor;
   }
   return ids.slice(0, cap);
@@ -223,12 +237,12 @@ export async function fetchCatalog(graphql, limit = null, tracked = []) {
   const products = [];
   let cursor = null;
   const query = catalogQuery(tracked);
-  for (;;) {
+  for (let page = 0; page < MAX_PAGES; page++) {
     const data = await graphqlJson(graphql, query, { cursor });
     const conn = data.products;
     products.push(...conn.nodes.map((n) => normalize(n, tracked)));
     if (limit && products.length >= limit) return products.slice(0, limit);
-    if (!conn.pageInfo.hasNextPage) break;
+    if (!nextPage(conn.pageInfo, cursor)) break;
     cursor = conn.pageInfo.endCursor;
   }
   return products;
@@ -269,6 +283,13 @@ export async function startBulkScan(graphql, tracked = []) {
 export async function bulkScanStatus(graphql, id) {
   const data = await graphqlJson(graphql, BULK_STATUS, { id });
   return data.bulkOperation;
+}
+
+// Stops an export the app no longer waits for (a job that timed out).
+export async function cancelBulkScan(graphql, id) {
+  const data = await graphqlJson(graphql, CANCEL_BULK, { id });
+  const errors = data.bulkOperationCancel?.userErrors || [];
+  if (errors.length) throw new Error(errors.map((e) => e.message).join("; "));
 }
 
 // Streams the finished JSONL export and rebuilds one object per product. Child nodes (variants,

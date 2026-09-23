@@ -1,5 +1,6 @@
 // The IANA time zone of the store, so dates and times read the way the merchant expects. Cached
 // per shop for an hour: it changes about never, and every page that shows a time would ask.
+import { request } from "./graphql.server";
 
 const QUERY = `#graphql
   query ShopTimeZone {
@@ -15,8 +16,7 @@ export async function shopTimeZone(graphql, shop) {
   const hit = cache.get(shop);
   if (hit && hit.until > Date.now()) return hit.zone;
   try {
-    const response = await graphql(QUERY);
-    const { data } = await response.json();
+    const data = await request(graphql, QUERY);
     const zone = data?.shop?.ianaTimezone || "UTC";
     cache.set(shop, { zone, until: Date.now() + TTL });
     return zone;

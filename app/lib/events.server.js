@@ -11,13 +11,29 @@ export async function productWebhook(request, { created }) {
   const productId = payload?.admin_graphql_api_id;
   if (!admin || !productId) return new Response();
   try {
-    const plan = await planForShop(admin.graphql);
-    const outcome = await handleProductEvent(admin.graphql, shop, productId, { created, plan });
+    let plan = null;
+    try {
+      plan = await planForShop(admin.graphql);
+    } catch (err) {
+      // The plan could not be read (a throttle, an outage): the product is queued rather than lost.
+      console.error(`${topic} for ${shop}: could not read the plan, queued ${productId}: ${err.message}`);
+    }
+    const outcome = plan ? await handleProductEvent(admin.graphql, shop, productId, { created, plan }) : await queueProduct(shop, productId, created);
     console.log(`${topic} for ${shop}: ${productId} ${outcome.mode}`);
   } catch (err) {
-    console.error(`${topic} for ${shop} failed`, err);
+    console.error(`${topic} for ${shop} failed: ${err.message || err}`);
   }
   return new Response();
+}
+
+// Remembers a changed product for the Scan changed products button.
+async function queueProduct(shop, productId, created) {
+  await prisma.pendingProduct.upsert({
+    where: { shop_productId: { shop, productId } },
+    update: { created: created || undefined },
+    create: { shop, productId, created },
+  });
+  return { mode: "pending" };
 }
 
 // Product webhooks (products/create, products/update) keep the stored scan current one product at a
@@ -40,14 +56,7 @@ export function withShopLock(shop, fn) {
 // A product was created or updated. Returns what happened: processed (the scan was updated),
 // pending (queued for the button), or no-scan (nothing to update yet).
 export async function handleProductEvent(graphql, shop, productId, { created = false, plan }) {
-  if (!plan.features.autoRescan) {
-    await prisma.pendingProduct.upsert({
-      where: { shop_productId: { shop, productId } },
-      update: { created: created || undefined },
-      create: { shop, productId, created },
-    });
-    return { mode: "pending" };
-  }
+  if (!plan.features.autoRescan) return queueProduct(shop, productId, created);
   return withShopLock(shop, async () => {
     const latest = await latestScan(shop);
     if (!latest) return { mode: "no-scan" };

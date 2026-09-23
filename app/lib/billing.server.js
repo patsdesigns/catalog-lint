@@ -1,6 +1,7 @@
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
 import { DEFAULT_PLAN, PAID_PLANS, EARLY_BIRD, EARLY_BIRD_SEATS } from "./plans";
+import { request } from "./graphql.server";
 
 // Test charges (the only kind a development store accepts) unless BILLING_TEST=false, which a
 // production deployment sets once real billing is wanted. Without the variable, production means
@@ -32,9 +33,10 @@ const SUBSCRIPTIONS_QUERY = `#graphql
   query ActiveSubscriptions { currentAppInstallation { activeSubscriptions { name status test } } }
 `;
 export async function planForShop(graphql) {
-  const response = await graphql(SUBSCRIPTIONS_QUERY);
-  const { data } = await response.json();
-  const active = (data?.currentAppInstallation?.activeSubscriptions || []).filter((s) => s.status === "ACTIVE" && (BILLING_TEST || !s.test));
+  const data = await request(graphql, SUBSCRIPTIONS_QUERY);
+  // No installation in the answer means the read failed, not that the shop is on the free plan.
+  if (!data?.currentAppInstallation) throw new Error("Could not read the subscription.");
+  const active = (data.currentAppInstallation.activeSubscriptions || []).filter((s) => s.status === "ACTIVE" && (BILLING_TEST || !s.test));
   const sub = active.find((s) => PAID_PLANS.some((p) => p.name === s.name));
   return (sub && PAID_PLANS.find((p) => p.name === sub.name)) || DEFAULT_PLAN;
 }

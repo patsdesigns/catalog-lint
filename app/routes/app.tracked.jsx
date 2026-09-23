@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
-import { listTracked, trackMetafield, updateTracked, untrackMetafield, fetchDefinitions } from "../lib/metafields.server";
+import { listTracked, trackMetafield, updateTracked, untrackMetafield, fetchDefinitions, MAX_TRACKED } from "../lib/metafields.server";
 import { refreshAfter } from "../lib/rescan.server";
 import { currentPlan } from "../lib/billing.server";
 import { planFor } from "../lib/plans";
@@ -14,9 +14,17 @@ import { planFor } from "../lib/plans";
 export async function loader({ request }) {
   const { admin, session, billing } = await authenticate.admin(request);
   const { plan } = await currentPlan(billing);
-  if (!plan.features.customRules) return { tracked: [], definitions: [], plan };
-  const [tracked, definitions] = await Promise.all([listTracked(session.shop), fetchDefinitions(admin.graphql).catch(() => [])]);
-  return { tracked, definitions, plan };
+  if (!plan.features.customRules) return { tracked: [], definitions: [], definitionsError: null, plan, max: MAX_TRACKED };
+  const tracked = await listTracked(session.shop);
+  // The dropdown needs the store's definitions; when Shopify cannot answer, the page says so.
+  let definitions = [];
+  let definitionsError = null;
+  try {
+    definitions = await fetchDefinitions(admin.graphql);
+  } catch (err) {
+    definitionsError = err.message || String(err);
+  }
+  return { tracked, definitions, definitionsError, plan, max: MAX_TRACKED };
 }
 
 export async function action({ request }) {
@@ -92,7 +100,7 @@ function TrackedRow({ t, busy, onSave, onRemove }) {
 }
 
 export default function TrackedPage() {
-  const { tracked, definitions, plan } = useLoaderData();
+  const { tracked, definitions, definitionsError, plan, max } = useLoaderData();
   const fetcher = useFetcher();
   const busy = fetcher.state !== "idle";
   const outcome = fetcher.data;
@@ -133,14 +141,21 @@ export default function TrackedPage() {
           <s-paragraph>Its values are read on the next scan; the Metafields checks cover it from then on.</s-paragraph>
         </s-banner>
       ) : null}
+      {definitionsError ? (
+        <s-banner tone="warning" heading="Could not load the metafield definitions">
+          <s-paragraph>{definitionsError} Reload the page to try again.</s-paragraph>
+        </s-banner>
+      ) : null}
       <s-section heading="Add a metafield">
         <s-stack gap="base">
           <s-paragraph>
             A tracked metafield is read with every product. Required metafield missing flags products where it is empty,
             and Metafield does not match pattern flags values that fail its pattern. It also shows as a column on every
-            issue page.
+            issue page. You can track up to {max}.
           </s-paragraph>
-          {available.length ? (
+          {tracked.length >= max ? (
+            <s-text color="subdued">The limit of {max} tracked metafields is reached. Remove one to add another.</s-text>
+          ) : available.length ? (
             <s-stack direction="inline" gap="small" alignItems="end">
               <s-select
                 label="Product metafield"

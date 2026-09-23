@@ -1,8 +1,14 @@
 import prisma from "../db.server";
+import { request } from "./graphql.server";
 
 // Tracked metafields: product metafield definitions the merchant chose to watch. Each is fetched
 // with every product and covered by the Metafields checks (rules.server.js), and shows
 // as a column on every issue page.
+
+// Each tracked metafield adds a field to every product query; this many keeps the by-id and paged
+// reads under the single-request cost limit.
+export const MAX_TRACKED = 8;
+const MAX_DEFINITION_PAGES = 50;
 
 const DEFINITIONS_QUERY = `#graphql
   query ProductMetafieldDefinitions($cursor: String) {
@@ -37,6 +43,10 @@ export async function trackMetafield(shop, def) {
   const namespace = String(def.namespace || "").trim();
   const key = String(def.key || "").trim();
   if (!namespace || !key) throw new Error("A metafield needs a namespace and a key.");
+  const existing = await prisma.trackedMetafield.findMany({ where: { shop }, select: { namespace: true, key: true } });
+  if (existing.length >= MAX_TRACKED && !existing.some((t) => t.namespace === namespace && t.key === key)) {
+    throw new Error(`You can track up to ${MAX_TRACKED} metafields. Remove one to add another.`);
+  }
   const data = { name: String(def.name || key).trim() || key, type: String(def.type || "single_line_text_field") };
   const row = await prisma.trackedMetafield.upsert({
     where: { shop_namespace_key: { shop, namespace, key } },
@@ -89,14 +99,13 @@ export async function migrateMetafieldRules(shop, rules) {
 export async function fetchDefinitions(graphql) {
   const out = [];
   let cursor = null;
-  for (;;) {
-    const response = await graphql(DEFINITIONS_QUERY, { variables: { cursor } });
-    const { data, errors } = await response.json();
-    if (errors?.length) throw new Error(errors.map((e) => e.message).join("; "));
+  for (let page = 0; page < MAX_DEFINITION_PAGES; page++) {
+    const data = await request(graphql, DEFINITIONS_QUERY, { cursor });
     const conn = data?.metafieldDefinitions;
     for (const d of conn?.nodes || []) out.push({ id: d.id, name: d.name, namespace: d.namespace, key: d.key, type: d.type?.name || "single_line_text_field" });
-    if (!conn?.pageInfo?.hasNextPage) break;
-    cursor = conn.pageInfo.endCursor;
+    const info = conn?.pageInfo;
+    if (!(info?.hasNextPage && info.endCursor && info.endCursor !== cursor)) break;
+    cursor = info.endCursor;
   }
   return out;
 }

@@ -1,19 +1,22 @@
-// Every write to Shopify goes through here so fixes, edits, and undo share one path.
+// Every write to Shopify goes through here so fixes, edits, and undo share one path. Reads and
+// writes use the shared helper (graphql.server.js): paced on the cost bucket, retried on throttling.
 
+import { request } from "./graphql.server";
+
+// Runs a mutation and returns its error messages, empty on success. A throttle that does not
+// clear, or any other failure, is an error message too, so a loop of writes carries on.
 async function mutate(graphql, query, variables, pickErrors) {
-  const response = await graphql(query, { variables });
-  const { data, errors } = await response.json();
-  if (errors?.length) return errors.map((e) => e.message);
+  let data;
+  try {
+    data = await request(graphql, query, variables);
+  } catch (err) {
+    return [err.message];
+  }
   const userErrors = pickErrors(data) || [];
   return userErrors.map((e) => e.message);
 }
 
-async function read(graphql, query, variables) {
-  const response = await graphql(query, { variables });
-  const { data, errors } = await response.json();
-  if (errors?.length) throw new Error(errors.map((e) => e.message).join("; "));
-  return data;
-}
+const read = (graphql, query, variables) => request(graphql, query, variables);
 
 const PRODUCT_UPDATE = `#graphql
   mutation ProductUpdate($product: ProductUpdateInput!) {
@@ -78,7 +81,7 @@ const UNPUBLISH = `#graphql
 
 const PUBLICATIONS = `#graphql
   query Publications {
-    publications(first: 25) { nodes { id name } }
+    publications(first: 25) { nodes { id catalog { title } } }
   }
 `;
 
@@ -159,8 +162,7 @@ export const PRODUCT_ENUM_FIELDS = ["status"];
 export const VARIANT_FIELDS = ["sku", "barcode", "price", "compareAt", "inventoryPolicy"];
 
 export async function readProduct(graphql, productId) {
-  const response = await graphql(PRODUCT_READ, { variables: { id: productId } });
-  const { data } = await response.json();
+  const data = await read(graphql, PRODUCT_READ, { id: productId });
   const p = data?.product;
   if (!p) return null;
   return {
@@ -241,7 +243,8 @@ export async function renameOptionValue(graphql, productId, optionId, valueId, n
 export async function onlineStorePublicationId(graphql) {
   const data = await read(graphql, PUBLICATIONS);
   const nodes = data?.publications?.nodes || [];
-  const hit = nodes.find((n) => n.name === "Online Store") || nodes.find((n) => /online store/i.test(n.name || ""));
+  const title = (n) => n.catalog?.title || "";
+  const hit = nodes.find((n) => title(n) === "Online Store") || nodes.find((n) => /online store/i.test(title(n)));
   return hit ? hit.id : null;
 }
 

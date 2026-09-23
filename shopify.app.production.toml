@@ -8,34 +8,13 @@ name = "TidyUp"
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "write_metaobject_definitions,write_metaobjects,write_products,read_inventory,write_inventory,read_publications,write_publications"
-
-[product.metafields.app.demo_info]
-type = "single_line_text_field"
-name = "Demo Source Info"
-description = "Tracks products created by the Shopify app template for development"
-
-  [product.metafields.app.demo_info.access]
-  admin = "merchant_read_write"
-
-[metaobjects.app.example]
-name = "Example"
-description = "An example metaobject definition created by this template"
-
-  [metaobjects.app.example.access]
-  admin = "merchant_read_write"
-
-[metaobjects.app.example.fields.title]
-name = "Title"
-type = "single_line_text_field"
-required = true
-
-[metaobjects.app.example.fields.description]
-name = "Description"
-type = "multi_line_text_field"
+# Products and their variants, media and metafields (write_products), costs, weights and stock
+# (inventory), sales channels (publications) and the store language (read_locales).
+scopes = "write_products,read_inventory,write_inventory,read_publications,write_publications,read_locales"
 
 [webhooks]
-api_version = "2026-10"
+# The same version the Admin API client uses (app/shopify.server.js).
+api_version = "2026-07"
 
   [[webhooks.subscriptions]]
   uri = "/webhooks/app/uninstalled"
