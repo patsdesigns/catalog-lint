@@ -1,11 +1,11 @@
 import prisma from "../db.server";
-import { authenticate } from "../shopify.server";
 import { DEFAULT_PLAN, PAID_PLANS, EARLY_BIRD, EARLY_BIRD_SEATS } from "./plans";
 import { request } from "./graphql.server";
 
-// Test charges (the only kind a development store accepts) unless BILLING_TEST=false, which a
-// production deployment sets once real billing is wanted. Without the variable, production means
-// real charges and everything else means test charges. Any other value is a mistake, not a choice.
+// Test charges everywhere unless BILLING_TEST=false, which a production deployment sets once real
+// billing is wanted. Without the variable, production means real charges and everything else means
+// test charges. Any other value is a mistake, not a choice. Development stores get test charges
+// whatever this says (see testCharges below).
 // eslint-disable-next-line no-undef
 const env = process.env;
 const TEST_FLAG = String(env.BILLING_TEST || "").trim().toLowerCase();
@@ -15,6 +15,49 @@ if (TEST_FLAG && !["1", "true", "yes", "0", "false", "no"].includes(TEST_FLAG)) 
 export const BILLING_TEST = TEST_FLAG ? ["1", "true", "yes"].includes(TEST_FLAG) : env.NODE_ENV !== "production";
 
 export const PLAN_UNKNOWN = "Could not confirm your plan with Shopify. Try again in a moment.";
+
+// ---------- test charges ----------
+// A development store accepts only test charges, and development stores are where Shopify's
+// reviewers and other Partners try the app. So a charge is a test charge when BILLING_TEST says so
+// or when the store is a development store, and a test subscription counts on exactly those
+// stores. A development store transferred to a merchant stops being one once it moves to a paid
+// plan (the answer is kept for an hour); its test subscription then stops counting.
+const DEV_STORE_QUERY = `#graphql
+  query DevelopmentStore { shop { plan { partnerDevelopment } } }
+`;
+const DEV_STORE_TTL = 60 * 60 * 1000;
+const devStores = new Map();
+
+export async function isDevelopmentStore(graphql, shop = null) {
+  const hit = shop ? devStores.get(shop) : null;
+  if (hit && hit.until > Date.now()) return hit.value;
+  let data;
+  try {
+    data = await request(graphql, DEV_STORE_QUERY);
+  } catch (err) {
+    // An expired token surfaces as a Response, which must reach the router: it re-authenticates.
+    if (err?.cause instanceof Response) throw err.cause;
+    throw err;
+  }
+  const value = data?.shop?.plan?.partnerDevelopment;
+  if (typeof value !== "boolean") throw new Error("Could not tell whether this is a development store.");
+  if (shop) devStores.set(shop, { value, until: Date.now() + DEV_STORE_TTL });
+  return value;
+}
+
+// Whether a charge created for this store is a test charge.
+export async function testCharges(graphql, shop) {
+  if (BILLING_TEST) return true;
+  return isDevelopmentStore(graphql, shop);
+}
+
+// The active paid subscription that counts for this store, or null. A test subscription counts
+// only where charges are test charges; the store is only looked up when there is one to judge.
+async function countingSubscription(subscriptions, graphql, shop) {
+  const paid = (subscriptions || []).filter((s) => PAID_PLANS.some((p) => p.name === s.name));
+  const allowTest = paid.some((s) => s.test) && (await testCharges(graphql, shop));
+  return paid.find((s) => allowTest || !s.test) || null;
+}
 
 // The features of the plan each shop was last seen on, for code that runs without a request (a
 // scan started from a page, a webhook): what a downgrade pauses (tracked metafields) is decided
@@ -35,24 +78,21 @@ export function forgetPlan(shop) {
   planCache.delete(shop);
 }
 
-// The shop's plan and its subscription, for code that has already authenticated the request.
-// A paid plan needs an active subscription named after it; anything else is Dust Off. When
-// Shopify cannot answer, the result is Dust Off with `planUnknown` set, so pages can say so and
-// actions that write or scan can wait rather than run on the wrong plan.
-export async function currentPlan(billing, shop = null, { fresh = false } = {}) {
+// The shop's plan and its subscription, for code that has already authenticated the request
+// (billing and graphql come from authenticate.admin). A paid plan needs an active subscription
+// named after it that counts for this store; anything else is Dust Off. When Shopify cannot
+// answer, the result is Dust Off with `planUnknown` set, so pages can say so and actions that
+// write or scan can wait rather than run on the wrong plan.
+export async function currentPlan(billing, graphql, shop = null, { fresh = false } = {}) {
   if (shop && !fresh) {
     const hit = planCache.get(shop);
     if (hit && hit.until > Date.now()) return hit.value;
   }
   let value;
   try {
-    const { hasActivePayment, appSubscriptions } = await billing.check({
-      plans: PAID_PLANS.map((p) => p.name),
-      isTest: BILLING_TEST,
-    });
-    const subscription = hasActivePayment
-      ? (appSubscriptions || []).find((s) => PAID_PLANS.some((p) => p.name === s.name)) || null
-      : null;
+    // Every active subscription, test or not: which ones count depends on the store.
+    const { appSubscriptions } = await billing.check({ plans: PAID_PLANS.map((p) => p.name), isTest: true });
+    const subscription = await countingSubscription(appSubscriptions, graphql, shop);
     const plan = (subscription && PAID_PLANS.find((p) => p.name === subscription.name)) || DEFAULT_PLAN;
     value = {
       plan,
@@ -80,17 +120,11 @@ export async function planForShop(graphql, shop = null) {
   const data = await request(graphql, SUBSCRIPTIONS_QUERY);
   // No installation in the answer means the read failed, not that the shop is on the free plan.
   if (!data?.currentAppInstallation) throw new Error("Could not read the subscription.");
-  const active = (data.currentAppInstallation.activeSubscriptions || []).filter((s) => s.status === "ACTIVE" && (BILLING_TEST || !s.test));
-  const sub = active.find((s) => PAID_PLANS.some((p) => p.name === s.name));
+  const active = (data.currentAppInstallation.activeSubscriptions || []).filter((s) => s.status === "ACTIVE");
+  const sub = await countingSubscription(active, graphql, shop);
   const plan = (sub && PAID_PLANS.find((p) => p.name === sub.name)) || DEFAULT_PLAN;
   rememberFeatures(shop, plan);
   return plan;
-}
-
-// The shop's plan for a request: a paid plan with an active subscription, or Dust Off.
-export async function getCurrentPlan(request) {
-  const { billing, session } = await authenticate.admin(request);
-  return (await currentPlan(billing, session.shop)).plan;
 }
 
 // ---------- Early Bird ----------

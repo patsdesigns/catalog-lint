@@ -12,6 +12,11 @@ Versions follow [semantic versioning](https://semver.org): the first number chan
 - The Potential problems and Problems fixed numbers are large again and take a color by state (red while something high is open, orange otherwise, green when there is nothing to fix or when fixes have been made).
 - The trend is a bar graph of the last twelve scans again.
 
+### Fixed
+
+- Development stores always get test charges, the only kind they accept. In production, a development store (where Shopify reviews apps) could not subscribe to a paid plan, and its test subscription was ignored. Real stores are still charged for real.
+- The Plans page said charges were test charges on every store, including real ones in production. It now says so only where it is true.
+
 ## 0.9.0 - 2026-09-23
 
 The first named version: the app as it stands after the full audit, ready to be submitted to the App Store.

@@ -2,7 +2,7 @@ import { useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { PLANS, DEFAULT_PLAN, EARLY_BIRD, EARLY_BIRD_SEATS, FEATURE_LABELS, COMING_SOON, ALL_AREAS } from "../lib/plans";
-import { BILLING_TEST, PLAN_UNKNOWN, currentPlan, forgetPlan, earlyBirdSeatsLeft, earlyBirdClaim, claimEarlyBird, lapseEarlyBird, isEarlyBirdSubscription } from "../lib/billing.server";
+import { PLAN_UNKNOWN, currentPlan, forgetPlan, testCharges, earlyBirdSeatsLeft, earlyBirdClaim, claimEarlyBird, lapseEarlyBird, isEarlyBirdSubscription } from "../lib/billing.server";
 import { shopInfo } from "../lib/shop.server";
 
 // The three plans, plus the Early Bird offer while seats remain. Choosing a paid plan sends the
@@ -12,7 +12,7 @@ export async function loader({ request }) {
   const { admin, billing, session } = await authenticate.admin(request);
   const shop = session.shop;
   // Read fresh: this page is where the merchant comes back after approving a change.
-  const { plan, subscription, planUnknown } = await currentPlan(billing, shop, { fresh: true });
+  const { plan, subscription, planUnknown } = await currentPlan(billing, admin.graphql, shop, { fresh: true });
   let claim = await earlyBirdClaim(shop);
   let notice = planUnknown ? { tone: "warning", heading: "Could not confirm your plan", text: PLAN_UNKNOWN } : null;
   let currentId = plan.id;
@@ -24,7 +24,7 @@ export async function loader({ request }) {
       claim = await claimEarlyBird(shop, subscription.id);
     } catch (err) {
       try {
-        await billing.cancel({ subscriptionId: subscription.id, isTest: BILLING_TEST, prorate: false });
+        await billing.cancel({ subscriptionId: subscription.id, isTest: subscription.test, prorate: false });
         forgetPlan(shop);
         currentId = DEFAULT_PLAN.id;
         notice = { tone: "critical", heading: "The Early Bird offer is no longer available", text: `${err.message} The subscription was canceled and nothing is charged.` };
@@ -49,23 +49,25 @@ export async function loader({ request }) {
     plan: EARLY_BIRD,
   };
   const { locale } = await shopInfo(admin.graphql, shop);
-  return { currentId, plans: PLANS, earlyBird, notice, planUnknown, locale };
+  // Said on the page only where it is true: a development store, or a deployment without real billing.
+  const testMode = await testCharges(admin.graphql, shop).catch(() => false);
+  return { currentId, plans: PLANS, earlyBird, notice, planUnknown, locale, testMode };
 }
 
 export async function action({ request }) {
-  const { billing, session } = await authenticate.admin(request);
+  const { admin, billing, session } = await authenticate.admin(request);
   const shop = session.shop;
   const form = await request.formData();
   const wanted = form.get("plan");
   const target = wanted === EARLY_BIRD.id ? EARLY_BIRD : PLANS.find((p) => p.id === wanted);
   if (!target) return { ok: false, error: "That plan does not exist." };
-  const { plan, subscription, planUnknown } = await currentPlan(billing, shop, { fresh: true });
+  const { plan, subscription, planUnknown } = await currentPlan(billing, admin.graphql, shop, { fresh: true });
   if (planUnknown) return { ok: false, error: PLAN_UNKNOWN };
   if (target.id === plan.id) return { ok: true, plan: plan.id };
   try {
     forgetPlan(shop);
     if (target.price === 0) {
-      if (subscription) await billing.cancel({ subscriptionId: subscription.id, isTest: BILLING_TEST, prorate: false });
+      if (subscription) await billing.cancel({ subscriptionId: subscription.id, isTest: subscription.test, prorate: false });
       if (isEarlyBirdSubscription(subscription)) await lapseEarlyBird(shop);
       return { ok: true, plan: target.id };
     }
@@ -78,7 +80,8 @@ export async function action({ request }) {
     // The app URL (https) is the base: the request URL behind the dev proxy is plain http.
     // eslint-disable-next-line no-undef
     const base = process.env.SHOPIFY_APP_URL || new URL(request.url).origin;
-    await billing.request({ plan: target.name, isTest: BILLING_TEST, returnUrl: `${base}/app/plans` });
+    // Development stores (Shopify's reviewers, other Partners) get a test charge; see billing.server.js.
+    await billing.request({ plan: target.name, isTest: await testCharges(admin.graphql, shop), returnUrl: `${base}/app/plans` });
     return { ok: true };
   } catch (err) {
     // The redirect itself is thrown as a Response; anything else is a billing error to show.
@@ -137,7 +140,7 @@ function PlanCard({ plan, current, note, claimed, footnote, busy, choosing, loca
 }
 
 export default function PlansPage() {
-  const { currentId, plans, earlyBird, notice, locale } = useLoaderData();
+  const { currentId, plans, earlyBird, notice, locale, testMode } = useLoaderData();
   const fetcher = useFetcher();
   const busy = fetcher.state !== "idle";
   const outcome = fetcher.data;
@@ -170,8 +173,8 @@ export default function PlansPage() {
       <s-section>
         <s-stack gap="base">
           <s-paragraph>
-            Every plan is billed in USD every 30 days, with no one-time charges and no trial. While TidyUp is in
-            development, charges are test charges.
+            Every plan is billed in USD every 30 days, with no one-time charges and no trial.
+            {testMode ? " Charges on this store are test charges, so nothing is billed." : ""}
           </s-paragraph>
           <s-query-container>
             <s-grid gridTemplateColumns={cards.length > 3 ? FOUR_COLUMNS : THREE_COLUMNS} gap="base">

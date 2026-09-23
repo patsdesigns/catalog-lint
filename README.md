@@ -50,7 +50,7 @@ npm run lint
 2. Set the environment:
    - `SHOPIFY_API_KEY`, `SHOPIFY_API_SECRET`, `SHOPIFY_APP_URL`, `SCOPES` (the CLI provides these in development).
    - `NODE_ENV=production`.
-   - `BILLING_TEST`: `false` for real charges. Unset, production means real charges and anything else means test charges, which are the only kind a development store accepts. Any other value stops the app at startup.
+   - `BILLING_TEST`: `false` for real charges. Unset, production means real charges and anything else means test charges. Development stores get test charges whatever this says: they accept no other kind, and they are where Shopify's reviewers and other Partners try the app. Any other value stops the app at startup.
    - `SUPPORT_WEBHOOK_URL` (optional): support form messages are also posted here as JSON with a `text` field, which suits a Slack incoming webhook, Zapier or Make.
    - `RESEND_API_KEY`: the weekly email is sent with [Resend](https://resend.com). Without a key, Send test email in Settings reports that the key is missing and nothing is sent.
    - `DIGEST_FROM` (optional): the sender, such as `TidyUp <hello@yourdomain.com>`, once that domain is verified in Resend. Unset, the Resend onboarding sender is used, which only delivers to the address of the Resend account.

@@ -15,7 +15,7 @@ import { PlanUnknown } from "../lib/ui";
 
 export async function loader({ request }) {
   const { admin, session, billing } = await authenticate.admin(request);
-  const { plan, planUnknown } = await currentPlan(billing, session.shop);
+  const { plan, planUnknown } = await currentPlan(billing, admin.graphql, session.shop);
   if (planUnknown || !plan.features.customRules) return { tracked: [], definitions: [], definitionsError: null, plan, planUnknown, max: MAX_TRACKED };
   const tracked = await listTracked(session.shop);
   // The dropdown needs the store's definitions; when Shopify cannot answer, the page says so.
@@ -31,7 +31,7 @@ export async function loader({ request }) {
 
 export async function action({ request }) {
   const { admin, session, billing } = await authenticate.admin(request);
-  const { plan, planUnknown } = await currentPlan(billing, session.shop);
+  const { plan, planUnknown } = await currentPlan(billing, admin.graphql, session.shop);
   if (planUnknown) return { ok: false, error: PLAN_UNKNOWN };
   if (!plan.features.customRules) {
     return { ok: false, error: `Tracked metafields are part of the ${planFor("customRules").name} plan and up.` };

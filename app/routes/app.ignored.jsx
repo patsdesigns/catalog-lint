@@ -20,7 +20,7 @@ const MAX_ROWS = 200;
 
 export async function loader({ request }) {
   const { admin, session, billing } = await authenticate.admin(request);
-  const { plan, planUnknown } = await currentPlan(billing, session.shop);
+  const { plan, planUnknown } = await currentPlan(billing, admin.graphql, session.shop);
   // The rows are only sent to a plan that includes them.
   if (planUnknown || !plan.features.ignores) return { ignores: [], plan, planUnknown, timeZone: "UTC", locale: "en" };
   const [rows, info] = await Promise.all([getIgnores(session.shop), shopInfo(admin.graphql, session.shop)]);
@@ -39,7 +39,7 @@ export async function loader({ request }) {
 
 export async function action({ request }) {
   const { admin, session, billing } = await authenticate.admin(request);
-  const { plan, planUnknown } = await currentPlan(billing, session.shop);
+  const { plan, planUnknown } = await currentPlan(billing, admin.graphql, session.shop);
   if (planUnknown) return { ok: false, error: PLAN_UNKNOWN };
   if (!plan.features.ignores) {
     return { ok: false, error: `Ignored findings are part of the ${planFor("ignores").name} plan and up.` };

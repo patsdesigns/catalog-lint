@@ -20,7 +20,7 @@ export async function loader({ request, params }) {
 // Undo one product's changes (productId) or every change in the batch.
 export async function action({ request, params }) {
   const { admin, session, billing } = await authenticate.admin(request);
-  const { plan, planUnknown } = await currentPlan(billing, session.shop);
+  const { plan, planUnknown } = await currentPlan(billing, admin.graphql, session.shop);
   if (planUnknown) return { ok: false, error: PLAN_UNKNOWN };
   const form = await request.formData();
   try {

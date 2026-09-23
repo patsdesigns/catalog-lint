@@ -36,7 +36,7 @@ async function loadState(shop) {
 
 export async function loader({ request }) {
   const { admin, session, billing } = await authenticate.admin(request);
-  const { plan, subscription, planUnknown } = await currentPlan(billing, session.shop);
+  const { plan, subscription, planUnknown } = await currentPlan(billing, admin.graphql, session.shop);
   // The Early Bird seat follows the live subscription, whichever page the merchant lands on.
   if (!planUnknown) await syncEarlyBird(session.shop, plan, subscription);
   // Moves a background scan along (and finishes it) every time the page loads or polls.
@@ -66,7 +66,7 @@ async function countNewProducts(graphql, since) {
 
 export async function action({ request }) {
   const { admin, session, billing } = await authenticate.admin(request);
-  const { plan, planUnknown } = await currentPlan(billing, session.shop);
+  const { plan, planUnknown } = await currentPlan(billing, admin.graphql, session.shop);
   const form = await request.formData();
   const intent = form.get("intent") || "scan";
   // Nothing scans or writes on a plan Shopify did not confirm.

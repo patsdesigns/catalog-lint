@@ -16,8 +16,8 @@ import { describeError } from "../lib/graphql.server";
 import { planFor } from "../lib/plans";
 
 export async function loader({ request }) {
-  const { session, billing } = await authenticate.admin(request);
-  const { plan, planUnknown } = await currentPlan(billing, session.shop);
+  const { admin, session, billing } = await authenticate.admin(request);
+  const { plan, planUnknown } = await currentPlan(billing, admin.graphql, session.shop);
   const [words, ignores, settings, digest] = await Promise.all([
     listWords(session.shop),
     getIgnores(session.shop),
@@ -31,7 +31,7 @@ export async function loader({ request }) {
 
 export async function action({ request }) {
   const { admin, session, billing } = await authenticate.admin(request);
-  const { plan, planUnknown } = await currentPlan(billing, session.shop);
+  const { plan, planUnknown } = await currentPlan(billing, admin.graphql, session.shop);
   const allowed = plan.features;
   const form = await request.formData();
   const intent = form.get("intent");

@@ -12,16 +12,16 @@ import { PlanUnknown } from "../lib/ui";
 // not crowd Settings.
 
 export async function loader({ request }) {
-  const { session, billing } = await authenticate.admin(request);
-  const { plan, planUnknown } = await currentPlan(billing, session.shop);
+  const { admin, session, billing } = await authenticate.admin(request);
+  const { plan, planUnknown } = await currentPlan(billing, admin.graphql, session.shop);
   // The words are only sent to a plan that includes them.
   const words = !planUnknown && plan.features.dictionary ? await listWords(session.shop) : [];
   return { words, plan, planUnknown };
 }
 
 export async function action({ request }) {
-  const { session, billing } = await authenticate.admin(request);
-  const { plan, planUnknown } = await currentPlan(billing, session.shop);
+  const { admin, session, billing } = await authenticate.admin(request);
+  const { plan, planUnknown } = await currentPlan(billing, admin.graphql, session.shop);
   if (planUnknown) return { ok: false, error: PLAN_UNKNOWN };
   if (!plan.features.dictionary) {
     return { ok: false, error: `The spelling dictionary is part of the ${planFor("dictionary").name} plan and up.` };

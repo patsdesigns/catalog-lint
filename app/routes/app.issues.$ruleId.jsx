@@ -25,7 +25,7 @@ import { TONE, CategoryChip, Notices, passesWhen } from "../lib/ui";
 
 export async function loader({ request, params }) {
   const { admin, session, billing } = await authenticate.admin(request);
-  const { plan, planUnknown } = await currentPlan(billing, session.shop);
+  const { plan, planUnknown } = await currentPlan(billing, admin.graphql, session.shop);
   const [result, settings, info] = await Promise.all([latestScan(session.shop), getSettings(session.shop), shopInfo(admin.graphql, session.shop)]);
   const rule = result?.rules.find((r) => r.ruleId === params.ruleId) || null;
   const known = RULE_CATALOG.find((r) => r.id === params.ruleId) || null;
@@ -57,7 +57,7 @@ function parseKey(raw) {
 
 export async function action({ request, params }) {
   const { admin, session, billing } = await authenticate.admin(request);
-  const { plan, planUnknown } = await currentPlan(billing, session.shop);
+  const { plan, planUnknown } = await currentPlan(billing, admin.graphql, session.shop);
   const form = await request.formData();
   const intent = form.get("intent");
   const ruleId = params.ruleId;
