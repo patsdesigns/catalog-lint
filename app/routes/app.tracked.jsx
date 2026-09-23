@@ -4,8 +4,9 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { listTracked, trackMetafield, updateTracked, untrackMetafield, fetchDefinitions, MAX_TRACKED } from "../lib/metafields.server";
 import { refreshAfter } from "../lib/rescan.server";
-import { currentPlan } from "../lib/billing.server";
+import { currentPlan, PLAN_UNKNOWN } from "../lib/billing.server";
 import { planFor } from "../lib/plans";
+import { PlanUnknown } from "../lib/ui";
 
 // Tracked metafields: product metafield definitions read with every product and covered by the
 // Required metafield missing and Metafield does not match pattern checks. Its own page, so the list
@@ -13,8 +14,8 @@ import { planFor } from "../lib/plans";
 
 export async function loader({ request }) {
   const { admin, session, billing } = await authenticate.admin(request);
-  const { plan } = await currentPlan(billing);
-  if (!plan.features.customRules) return { tracked: [], definitions: [], definitionsError: null, plan, max: MAX_TRACKED };
+  const { plan, planUnknown } = await currentPlan(billing, session.shop);
+  if (planUnknown || !plan.features.customRules) return { tracked: [], definitions: [], definitionsError: null, plan, planUnknown, max: MAX_TRACKED };
   const tracked = await listTracked(session.shop);
   // The dropdown needs the store's definitions; when Shopify cannot answer, the page says so.
   let definitions = [];
@@ -24,12 +25,13 @@ export async function loader({ request }) {
   } catch (err) {
     definitionsError = err.message || String(err);
   }
-  return { tracked, definitions, definitionsError, plan, max: MAX_TRACKED };
+  return { tracked, definitions, definitionsError, plan, planUnknown, max: MAX_TRACKED };
 }
 
 export async function action({ request }) {
   const { admin, session, billing } = await authenticate.admin(request);
-  const { plan } = await currentPlan(billing);
+  const { plan, planUnknown } = await currentPlan(billing, session.shop);
+  if (planUnknown) return { ok: false, error: PLAN_UNKNOWN };
   if (!plan.features.customRules) {
     return { ok: false, error: `Tracked metafields are part of the ${planFor("customRules").name} plan and up.` };
   }
@@ -100,7 +102,7 @@ function TrackedRow({ t, busy, onSave, onRemove }) {
 }
 
 export default function TrackedPage() {
-  const { tracked, definitions, definitionsError, plan, max } = useLoaderData();
+  const { tracked, definitions, definitionsError, plan, planUnknown, max } = useLoaderData();
   const fetcher = useFetcher();
   const busy = fetcher.state !== "idle";
   const outcome = fetcher.data;
@@ -114,6 +116,7 @@ export default function TrackedPage() {
     setPick("");
   };
 
+  if (planUnknown) return <PlanUnknown heading="Tracked metafields" />;
   if (!plan.features.customRules) {
     const needed = planFor("customRules");
     return (

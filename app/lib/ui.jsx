@@ -37,6 +37,19 @@ export function Dot({ color, size = 10 }) {
   );
 }
 
+// A settings sub-page while Shopify has not confirmed the plan: neither the feature nor an
+// upgrade notice can be shown truthfully.
+export function PlanUnknown({ heading }) {
+  return (
+    <s-page heading={heading}>
+      <s-link slot="breadcrumb-actions" href="/app/settings">Settings</s-link>
+      <s-banner tone="warning" heading="Could not confirm your plan">
+        <s-paragraph>Shopify did not answer the plan check. Reload the page in a moment.</s-paragraph>
+      </s-banner>
+    </s-page>
+  );
+}
+
 export function CategoryChip({ id, color = "base" }) {
   const cat = categoryOf(id);
   return (

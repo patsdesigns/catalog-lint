@@ -2,7 +2,7 @@ import { useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { PLANS, DEFAULT_PLAN, EARLY_BIRD, EARLY_BIRD_SEATS, FEATURE_LABELS, COMING_SOON, ALL_AREAS } from "../lib/plans";
-import { BILLING_TEST, currentPlan, earlyBirdSeatsLeft, earlyBirdClaim, claimEarlyBird, lapseEarlyBird, isEarlyBirdSubscription } from "../lib/billing.server";
+import { BILLING_TEST, PLAN_UNKNOWN, currentPlan, forgetPlan, earlyBirdSeatsLeft, earlyBirdClaim, claimEarlyBird, lapseEarlyBird, isEarlyBirdSubscription } from "../lib/billing.server";
 
 // The three plans, plus the Early Bird offer while seats remain. Choosing a paid plan sends the
 // merchant to Shopify's approval screen and back here; choosing Dust Off cancels the subscription.
@@ -10,21 +10,31 @@ import { BILLING_TEST, currentPlan, earlyBirdSeatsLeft, earlyBirdClaim, claimEar
 export async function loader({ request }) {
   const { billing, session } = await authenticate.admin(request);
   const shop = session.shop;
-  const { plan, subscription } = await currentPlan(billing);
+  // Read fresh: this page is where the merchant comes back after approving a change.
+  const { plan, subscription, planUnknown } = await currentPlan(billing, shop, { fresh: true });
   let claim = await earlyBirdClaim(shop);
-  let notice = null;
+  let notice = planUnknown ? { tone: "warning", heading: "Could not confirm your plan", text: PLAN_UNKNOWN } : null;
   let currentId = plan.id;
 
   // Back from approving the Early Bird subscription: the seat is claimed now. If the seats ran out
-  // between the request and the approval, the subscription is cancelled again and nothing is charged.
+  // between the request and the approval, the subscription is canceled again and nothing is charged.
   if (plan.id === EARLY_BIRD.id && subscription && !claim) {
     try {
       claim = await claimEarlyBird(shop, subscription.id);
     } catch (err) {
-      await billing.cancel({ subscriptionId: subscription.id, isTest: BILLING_TEST, prorate: false });
-      currentId = DEFAULT_PLAN.id;
-      notice = { heading: "The Early Bird offer is no longer available", text: `${err.message} The subscription was cancelled and nothing is charged.` };
+      try {
+        await billing.cancel({ subscriptionId: subscription.id, isTest: BILLING_TEST, prorate: false });
+        forgetPlan(shop);
+        currentId = DEFAULT_PLAN.id;
+        notice = { tone: "critical", heading: "The Early Bird offer is no longer available", text: `${err.message} The subscription was canceled and nothing is charged.` };
+      } catch (cancelErr) {
+        notice = { tone: "critical", heading: "The Early Bird offer is no longer available", text: `${err.message} The subscription could not be canceled automatically (${cancelErr.message}); choose Dust Off below.` };
+      }
     }
+  } else if (claim?.status === "active" && plan.id !== EARLY_BIRD.id && !planUnknown) {
+    // The subscription is no longer Early Bird (a plan change replaced it): the seat lapses.
+    await lapseEarlyBird(shop);
+    claim = await earlyBirdClaim(shop);
   }
 
   const seatsLeft = await earlyBirdSeatsLeft();
@@ -33,11 +43,11 @@ export async function loader({ request }) {
     seatsLeft,
     claimed: EARLY_BIRD_SEATS - seatsLeft,
     status: claim?.status || null,
-    // Offered while seats remain and the store never claimed; shown as current while its claim is active.
-    show: claim?.status === "active" || (!claim && seatsLeft > 0),
+    // Offered while seats remain and the store never claimed; shown as current while it is the plan.
+    show: plan.id === EARLY_BIRD.id || claim?.status === "active" || (!claim && seatsLeft > 0),
     plan: EARLY_BIRD,
   };
-  return { currentId, plans: PLANS, earlyBird, notice };
+  return { currentId, plans: PLANS, earlyBird, notice, planUnknown };
 }
 
 export async function action({ request }) {
@@ -47,9 +57,11 @@ export async function action({ request }) {
   const wanted = form.get("plan");
   const target = wanted === EARLY_BIRD.id ? EARLY_BIRD : PLANS.find((p) => p.id === wanted);
   if (!target) return { ok: false, error: "That plan does not exist." };
-  const { plan, subscription } = await currentPlan(billing);
+  const { plan, subscription, planUnknown } = await currentPlan(billing, shop, { fresh: true });
+  if (planUnknown) return { ok: false, error: PLAN_UNKNOWN };
   if (target.id === plan.id) return { ok: true, plan: plan.id };
   try {
+    forgetPlan(shop);
     if (target.price === 0) {
       if (subscription) await billing.cancel({ subscriptionId: subscription.id, isTest: BILLING_TEST, prorate: false });
       if (isEarlyBirdSubscription(subscription)) await lapseEarlyBird(shop);
@@ -136,7 +148,7 @@ export default function PlansPage() {
     <s-page heading="Plans" inlineSize="large">
       <s-link slot="breadcrumb-actions" href="/app">Home</s-link>
       {notice ? (
-        <s-banner tone="critical" heading={notice.heading}>
+        <s-banner tone={notice.tone || "critical"} heading={notice.heading}>
           <s-paragraph>{notice.text}</s-paragraph>
         </s-banner>
       ) : null}
@@ -147,7 +159,7 @@ export default function PlansPage() {
       ) : null}
       {outcome?.ok && outcome.plan === "dust_off" ? (
         <s-banner tone="success" heading="You are on Dust Off">
-          <s-paragraph>The paid subscription has been cancelled.</s-paragraph>
+          <s-paragraph>The paid subscription has been canceled.</s-paragraph>
         </s-banner>
       ) : null}
       <s-section>

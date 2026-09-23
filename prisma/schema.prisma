@@ -160,6 +160,7 @@ model DigestSettings {
 model EarlyBirdClaim {
   id             Int      @id @default(autoincrement())
   shop           String   @unique
+  seat           Int?     @unique
   claimedAt      DateTime @default(now())
   subscriptionId String
   status         String   @default("active")

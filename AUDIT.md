@@ -6,7 +6,7 @@ Method: one full read of every file, then seven independent review passes (one p
 
 Legend: `[ ]` open, `[x]` fixed. Severity: high (wrong data, lost undo, outage, security), medium (wrong behaviour in a real case), low (polish, robustness, consistency). Line numbers refer to the code before Phase 2. Product decisions are not changed; they are listed under Questions at the end.
 
-Totals: 136 items found; 58 fixed so far; 22 open questions.
+Totals: 136 items found; 68 fixed so far; 22 open questions.
 
 ## 1. Correctness of every check
 
@@ -79,15 +79,15 @@ Confirmed: every catalog write goes through `writes.server.js` (the only other m
 
 Confirmed: every gated feature (inline edits, dictionary, ignores, tracked metafields, weekly email, new-product scans) is refused in the action as well as hidden; the product limit is applied on every scan path (inline, bulk slice, pending queue, rechecks); Early Bird carries the Deep Clean areas and features everywhere and is matched by name in billing; cancel and uninstall lapse the claim. Export is "coming soon" and has no route.
 
-- [ ] **4.1** medium — `app/lib/billing.server.js:14`, every loader and action — `currentPlan` has no error handling, so a transient billing failure throws before the route's own try/catch and the whole app becomes an error page. Fix: catch, fall back to Dust Off with a `planUnknown` flag, show a warning banner, and refuse scans and writes while the plan is unknown (a paid shop must not save a 20-product truncated scan by accident).
-- [ ] **4.2** medium — `app/routes/app.plans.jsx:20` — the Early Bird seat is claimed only when the merchant returns to the Plans page, and an Early Bird to paid-plan change never lapses the claim without the webhook. Fix: claim and lapse from the home loader too, so the claim follows the live subscription.
-- [ ] **4.3** medium — `app/routes/cron.digest.jsx:15`, `app/lib/digest.server.js:111` — the weekly email ignores the plan: a shop downgraded to Dust Off, or uninstalled, keeps getting it. Fix: skip shops with no session and shops whose current plan lacks the feature.
+- [x] **4.1** medium — `app/lib/billing.server.js:14`, every loader and action — `currentPlan` has no error handling, so a transient billing failure throws before the route's own try/catch and the whole app becomes an error page. Fix: catch, fall back to Dust Off with a `planUnknown` flag, show a warning banner, and refuse scans and writes while the plan is unknown (a paid shop must not save a 20-product truncated scan by accident).
+- [x] **4.2** medium — `app/routes/app.plans.jsx:20` — the Early Bird seat is claimed only when the merchant returns to the Plans page, and an Early Bird to paid-plan change never lapses the claim without the webhook. Fix: claim and lapse from the home loader too, so the claim follows the live subscription.
+- [x] **4.3** medium — `app/routes/cron.digest.jsx:15`, `app/lib/digest.server.js:111` — the weekly email ignores the plan: a shop downgraded to Dust Off, or uninstalled, keeps getting it. Fix: skip shops with no session and shops whose current plan lacks the feature.
 - [x] **4.4** low — `app/routes/app.issues.$ruleId.jsx:52`, `app/routes/app._index.jsx:98` — in a locked area, `ignore` and `refresh` (and Home ignore/restore) are still accepted. Fix: refuse `ignore` and `refresh` for locked areas like `fix` and `edit`; the check switches stay ungated as in Settings.
-- [ ] **4.5** low — `app/routes/app.ignored.jsx:20`, `app/routes/app.dictionary.jsx:15` — the loaders return every row to plans without the feature (the page shows only the upgrade notice). Fix: return empty lists when the feature is off.
-- [ ] **4.6** low — `app/lib/rescan.server.js:122` — after a downgrade the stored scan keeps every product until Scan again. Fix: a banner on Home when the stored scan exceeds the plan limit.
-- [ ] **4.7** low — `app/lib/billing.server.js:10` — `BILLING_TEST` is test only for the exact string "true"; "1" or "yes" silently means real charges. Fix: accept 1/true/yes case-insensitively and refuse any other non-empty value at startup.
-- [ ] **4.8** low — `app/routes/app.plans.jsx:37` — with an active Early Bird subscription and a lapsed claim no card shows "Current plan". Fix: show the offer card when the current plan is Early Bird.
-- [ ] **4.9** low — `app/lib/billing.server.js:63`, `prisma/schema.prisma:158` — nothing in the schema forbids a 51st claim; the transaction count is the only guard. Fix: a unique `seat` number assigned inside the transaction.
+- [x] **4.5** low — `app/routes/app.ignored.jsx:20`, `app/routes/app.dictionary.jsx:15` — the loaders return every row to plans without the feature (the page shows only the upgrade notice). Fix: return empty lists when the feature is off.
+- [x] **4.6** low — `app/lib/rescan.server.js:122` — after a downgrade the stored scan keeps every product until Scan again. Fix: a banner on Home when the stored scan exceeds the plan limit.
+- [x] **4.7** low — `app/lib/billing.server.js:10` — `BILLING_TEST` is test only for the exact string "true"; "1" or "yes" silently means real charges. Fix: accept 1/true/yes case-insensitively and refuse any other non-empty value at startup.
+- [x] **4.8** low — `app/routes/app.plans.jsx:37` — with an active Early Bird subscription and a lapsed claim no card shows "Current plan". Fix: show the offer card when the current plan is Early Bird.
+- [x] **4.9** low — `app/lib/billing.server.js:63`, `prisma/schema.prisma:158` — nothing in the schema forbids a 51st claim; the transaction count is the only guard. Fix: a unique `seat` number assigned inside the transaction.
 
 ## 5. Webhooks and background work
 
@@ -96,7 +96,7 @@ Confirmed: every webhook route awaits `authenticate.webhook` (bad HMAC is a 401)
 - [ ] **5.1** high — `app/routes/webhooks.compliance.jsx:13` — shop/redact leaves PendingProduct, DailySnapshot, DigestSettings, TrackedMetafield and EarlyBirdClaim rows for the shop. Fix: delete the first four; anonymize the claim (the seat count survives, the shop domain does not).
 - [ ] **5.2** high — `app/routes/webhooks.app.uninstalled.jsx:12` — uninstall leaves the weekly email enabled and the queue and running job in place, so the digest keeps emailing the shop for up to 48 hours. Fix: turn the email off, clear pending products and fail the running job on uninstall.
 - [ ] **5.3** medium — `app/lib/events.server.js:9` — products/create and products/update read the plan, re-read the product, run the rules and save before answering; on a large catalog that passes the 5-second webhook timeout and Shopify retries the work. Fix: answer 200 at once and run the work detached under the per-shop lock.
-- [ ] **5.4** medium — `app/routes/cron.digest.jsx:11` — the secret comparison is not constant-time. Fix: `crypto.timingSafeEqual` with a length check.
+- [x] **5.4** medium — `app/routes/cron.digest.jsx:11` — the secret comparison is not constant-time. Fix: `crypto.timingSafeEqual` with a length check.
 - [ ] **5.5** low — `app/routes/webhooks.*.jsx` — the template "Received X webhook" logs are noise. Fix: log failures only.
 
 ## 6. Data and Prisma
@@ -185,7 +185,7 @@ Confirmed: rules run in one pass per product over the enabled product rules; the
 - [ ] **11.1** low — see 1.8 — quadratic casing rules. Fix: single pass.
 - [ ] **11.2** low — `app/lib/rules.server.js:241`, `app/lib/spelling.server.js:54` — suggestions are computed for every unknown word before the 8-per-product cut. Fix: stop at 8.
 - [x] **11.3** low — see 3.15 and 3.16 — needless full rescan on an empty undo; bulk fix reads before the budget.
-- [ ] **11.4** low — `app/lib/billing.server.js:14` — `billing.check` runs on every loader and action of every page. Fix: cache the plan per shop for 60 seconds, bypassed on the Plans page and cleared by the Plans action and the subscription webhook.
+- [x] **11.4** low — `app/lib/billing.server.js:14` — `billing.check` runs on every loader and action of every page. Fix: cache the plan per shop for 60 seconds, bypassed on the Plans page and cleared by the Plans action and the subscription webhook.
 - [ ] **11.5** low — `app/lib/rules.server.js:657` — `closest` recomputes the edit distance for every off-list product. Fix: memoize per vendor string within a run.
 
 ## 12. Repo hygiene

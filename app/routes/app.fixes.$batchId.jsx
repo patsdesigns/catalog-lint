@@ -4,7 +4,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { fixBatch, undoFix } from "../lib/fixes.server";
 import { refreshAfter } from "../lib/rescan.server";
-import { currentPlan } from "../lib/billing.server";
+import { currentPlan, PLAN_UNKNOWN } from "../lib/billing.server";
 import { withShopLock } from "../lib/lock.server";
 import { adminUrl, timeAgo } from "../lib/format";
 
@@ -18,7 +18,8 @@ export async function loader({ request, params }) {
 // Undo one product's changes (productId) or every change in the batch.
 export async function action({ request, params }) {
   const { admin, session, billing } = await authenticate.admin(request);
-  const { plan } = await currentPlan(billing);
+  const { plan, planUnknown } = await currentPlan(billing, session.shop);
+  if (planUnknown) return { ok: false, error: PLAN_UNKNOWN };
   const form = await request.formData();
   try {
     return await withShopLock(session.shop, async () => {

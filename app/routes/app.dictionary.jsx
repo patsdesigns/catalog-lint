@@ -3,21 +3,25 @@ import { useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { listWords, removeWord, addWord } from "../lib/dictionary.server";
-import { currentPlan } from "../lib/billing.server";
+import { currentPlan, PLAN_UNKNOWN } from "../lib/billing.server";
 import { planFor } from "../lib/plans";
+import { PlanUnknown } from "../lib/ui";
 
 // The spelling dictionary: words the spelling check never flags. Its own page, so a long list does
 // not crowd Settings.
 
 export async function loader({ request }) {
   const { session, billing } = await authenticate.admin(request);
-  const { plan } = await currentPlan(billing);
-  return { words: await listWords(session.shop), plan };
+  const { plan, planUnknown } = await currentPlan(billing, session.shop);
+  // The words are only sent to a plan that includes them.
+  const words = !planUnknown && plan.features.dictionary ? await listWords(session.shop) : [];
+  return { words, plan, planUnknown };
 }
 
 export async function action({ request }) {
   const { session, billing } = await authenticate.admin(request);
-  const { plan } = await currentPlan(billing);
+  const { plan, planUnknown } = await currentPlan(billing, session.shop);
+  if (planUnknown) return { ok: false, error: PLAN_UNKNOWN };
   if (!plan.features.dictionary) {
     return { ok: false, error: `The spelling dictionary is part of the ${planFor("dictionary").name} plan and up.` };
   }
@@ -31,7 +35,7 @@ export async function action({ request }) {
 const MAX_ROWS = 200;
 
 export default function DictionaryPage() {
-  const { words, plan } = useLoaderData();
+  const { words, plan, planUnknown } = useLoaderData();
   const fetcher = useFetcher();
   const busy = fetcher.state !== "idle";
   const outcome = fetcher.data;
@@ -46,6 +50,7 @@ export default function DictionaryPage() {
     setWord("");
   }
 
+  if (planUnknown) return <PlanUnknown heading="Dictionary" />;
   if (!plan.features.dictionary) {
     const needed = planFor("dictionary");
     return (

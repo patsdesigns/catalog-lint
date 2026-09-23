@@ -3,7 +3,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { undoFix, recentFixes, fixedCount } from "../lib/fixes.server";
 import { refreshAfter } from "../lib/rescan.server";
-import { currentPlan } from "../lib/billing.server";
+import { currentPlan, PLAN_UNKNOWN } from "../lib/billing.server";
 import { withShopLock } from "../lib/lock.server";
 import { formatWhen, timeAgo, truncate } from "../lib/format";
 import { shopTimeZone } from "../lib/shop.server";
@@ -28,7 +28,8 @@ export async function loader({ request }) {
 
 export async function action({ request }) {
   const { admin, session, billing } = await authenticate.admin(request);
-  const { plan } = await currentPlan(billing);
+  const { plan, planUnknown } = await currentPlan(billing, session.shop);
+  if (planUnknown) return { ok: false, error: PLAN_UNKNOWN };
   const form = await request.formData();
   try {
     // One write at a time per shop, so a double click cannot revert twice.

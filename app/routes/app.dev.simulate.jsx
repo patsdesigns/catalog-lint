@@ -16,7 +16,7 @@ export async function loader({ request }) {
   if (!raw) return Response.json({ ok: false, error: "Add ?product=<numeric id or gid> to the URL." }, { status: 400 });
   const productId = raw.startsWith("gid://") ? raw : `gid://shopify/Product/${raw}`;
   const created = url.searchParams.get("event") === "create";
-  const { plan } = await currentPlan(billing);
+  const { plan } = await currentPlan(billing, session.shop);
   const started = Date.now();
   const outcome = await handleProductEvent(admin.graphql, session.shop, productId, { created, plan });
   return Response.json({ ok: true, shop: session.shop, plan: plan.name, productId, event: created ? "products/create" : "products/update", ...outcome, ms: Date.now() - started });

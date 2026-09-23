@@ -6,9 +6,10 @@ import { getIgnores, removeIgnore } from "../lib/ignores.server";
 import { refreshAfter } from "../lib/rescan.server";
 import { shopTimeZone } from "../lib/shop.server";
 import { RULE_CATALOG } from "../lib/rules.server";
-import { currentPlan } from "../lib/billing.server";
+import { currentPlan, PLAN_UNKNOWN } from "../lib/billing.server";
 import { planFor } from "../lib/plans";
 import { adminUrl, formatWhen, timeAgo, truncate } from "../lib/format";
+import { PlanUnknown } from "../lib/ui";
 
 // Ignored findings: the single findings that Ignore on an issue page hid. Its own page, so a long
 // list does not crowd Settings. Restore removes the ignore and re-checks the product, so the
@@ -18,7 +19,9 @@ const MAX_ROWS = 200;
 
 export async function loader({ request }) {
   const { admin, session, billing } = await authenticate.admin(request);
-  const { plan } = await currentPlan(billing);
+  const { plan, planUnknown } = await currentPlan(billing, session.shop);
+  // The rows are only sent to a plan that includes them.
+  if (planUnknown || !plan.features.ignores) return { ignores: [], plan, planUnknown, timeZone: "UTC" };
   const [rows, timeZone] = await Promise.all([getIgnores(session.shop), shopTimeZone(admin.graphql, session.shop)]);
   const labels = new Map(RULE_CATALOG.map((r) => [r.id, r.label]));
   const ignores = rows.map((i) => ({
@@ -29,12 +32,13 @@ export async function loader({ request }) {
     detail: i.detail,
     at: i.createdAt.toISOString(),
   }));
-  return { ignores, plan, timeZone };
+  return { ignores, plan, planUnknown, timeZone };
 }
 
 export async function action({ request }) {
   const { admin, session, billing } = await authenticate.admin(request);
-  const { plan } = await currentPlan(billing);
+  const { plan, planUnknown } = await currentPlan(billing, session.shop);
+  if (planUnknown) return { ok: false, error: PLAN_UNKNOWN };
   if (!plan.features.ignores) {
     return { ok: false, error: `Ignored findings are part of the ${planFor("ignores").name} plan and up.` };
   }
@@ -55,13 +59,14 @@ export async function action({ request }) {
 }
 
 export default function IgnoredPage() {
-  const { ignores, plan, timeZone } = useLoaderData();
+  const { ignores, plan, planUnknown, timeZone } = useLoaderData();
   const fetcher = useFetcher();
   const busy = fetcher.state !== "idle";
   const outcome = fetcher.data;
   const [query, setQuery] = useState("");
   const restore = (id) => fetcher.submit({ intent: "restore", id }, { method: "post" });
 
+  if (planUnknown) return <PlanUnknown heading="Ignored findings" />;
   if (!plan.features.ignores) {
     const needed = planFor("ignores");
     return (

@@ -9,13 +9,13 @@ import { RULE_CATALOG } from "../lib/rules.server";
 import { refreshAfter } from "../lib/rescan.server";
 import { PASS_LABELS } from "../lib/checkLabels";
 import { FAMILIES, TIERS } from "../lib/checkGroups";
-import { currentPlan } from "../lib/billing.server";
+import { currentPlan, PLAN_UNKNOWN } from "../lib/billing.server";
 import { getDigestSettings, saveDigestSettings, sendDigest } from "../lib/digest.server";
 import { planFor } from "../lib/plans";
 
 export async function loader({ request }) {
   const { session, billing } = await authenticate.admin(request);
-  const { plan } = await currentPlan(billing);
+  const { plan, planUnknown } = await currentPlan(billing, session.shop);
   const [words, ignores, settings, digest] = await Promise.all([
     listWords(session.shop),
     getIgnores(session.shop),
@@ -24,18 +24,19 @@ export async function loader({ request }) {
   ]);
   // Only counts: the ignored findings and the tracked metafields have pages of their own
   // (app.ignored.jsx, app.tracked.jsx).
-  return { words, ignoreCount: ignores.length, trackedCount: settings.trackedMetafields.length, settings, rules: RULE_CATALOG, plan, digest };
+  return { words, ignoreCount: ignores.length, trackedCount: settings.trackedMetafields.length, settings, rules: RULE_CATALOG, plan, planUnknown, digest };
 }
 
 export async function action({ request }) {
   const { admin, session, billing } = await authenticate.admin(request);
-  const { plan } = await currentPlan(billing);
+  const { plan, planUnknown } = await currentPlan(billing, session.shop);
   const allowed = plan.features;
   const form = await request.formData();
   const intent = form.get("intent");
   // Settings the plan does not include are refused here as well as hidden in the page. The
   // dictionary and the ignored findings have pages of their own (app.dictionary.jsx, app.ignored.jsx).
   if (intent === "saveDigest" || intent === "sendTestDigest") {
+    if (planUnknown) return { ok: false, digest: intent === "saveDigest" ? "save" : "test", error: PLAN_UNKNOWN };
     if (!allowed.weeklyDigest) return { ok: false, error: `The weekly email is part of the ${planFor("weeklyDigest").name} plan and up.` };
     const email = String(form.get("email") || "").trim();
     const valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -88,7 +89,7 @@ function UpgradeSection({ heading, feature, what, slot }) {
 }
 
 export default function Settings() {
-  const { words, ignoreCount, trackedCount, settings, rules: checks, plan, digest } = useLoaderData();
+  const { words, ignoreCount, trackedCount, settings, rules: checks, plan, planUnknown, digest } = useLoaderData();
   const features = plan.features;
   const fetcher = useFetcher();
   const busy = fetcher.state !== "idle";
@@ -139,6 +140,11 @@ export default function Settings() {
 
   return (
     <s-page heading="Settings">
+      {planUnknown ? (
+        <s-banner tone="warning" heading="Could not confirm your plan">
+          <s-paragraph>Shopify did not answer the plan check. The free plan features show for now; reload in a moment.</s-paragraph>
+        </s-banner>
+      ) : null}
       {fetcher.data && !fetcher.data.ok && !fetcher.data.digest ? (
         <s-banner tone="critical" heading="Something went wrong">
           <s-paragraph>{fetcher.data.error}</s-paragraph>

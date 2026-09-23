@@ -9,7 +9,7 @@ import { cleanStreak } from "../lib/snapshots.server";
 import { applyFix, undoFix, fixedCount } from "../lib/fixes.server";
 import { ignoreCheck, restoreCheck } from "../lib/checks.server";
 import { latestScan, scanHistory, saveScan } from "../lib/scans.server";
-import { currentPlan } from "../lib/billing.server";
+import { currentPlan, syncEarlyBird, PLAN_UNKNOWN } from "../lib/billing.server";
 import { withShopLock } from "../lib/lock.server";
 import { planFor, lockedAreas, areaLocked, allAreasPlan } from "../lib/plans";
 import { RULE_CATALOG } from "../lib/rules.server";
@@ -37,18 +37,22 @@ async function loadState(shop) {
 
 export async function loader({ request }) {
   const { admin, session, billing } = await authenticate.admin(request);
-  const { plan } = await currentPlan(billing);
+  const { plan, subscription, planUnknown } = await currentPlan(billing, session.shop);
+  // The Early Bird seat follows the live subscription, whichever page the merchant lands on.
+  if (!planUnknown) await syncEarlyBird(session.shop, plan, subscription);
   // Moves a background scan along (and finishes it) every time the page loads or polls.
   const job = await advanceJob(admin.graphql, session.shop, plan.productLimit);
   const state = await loadState(session.shop);
-  // Products added since the catalog was last read, for the Scan New Products button and its hint.
+  // Products added since the catalog was last read, for the Scan new products button and its hint.
   const newProducts = state.result && !job ? await countNewProducts(admin.graphql, state.result.readAt) : 0;
   // Products webhooks queued (Dust Off), and the clean streak when nothing high is open.
   const pending = state.result ? await pendingCount(session.shop) : 0;
   const streak = state.result && state.result.high === 0 ? await cleanStreak(session.shop) : 0;
   // Areas the plan does not cover: their counts stay real, their findings stay behind the plan.
   const locked = lockedAreas(plan);
-  return { ...state, job, plan, newProducts, pending, streak, locked };
+  // A stored scan bigger than the plan allows (after a downgrade) stays until Scan again.
+  const overLimit = Boolean(!planUnknown && plan.productLimit && state.result && state.result.total > plan.productLimit);
+  return { ...state, job, plan, planUnknown, overLimit, newProducts, pending, streak, locked };
 }
 
 async function countNewProducts(graphql, since) {
@@ -61,9 +65,11 @@ async function countNewProducts(graphql, since) {
 
 export async function action({ request }) {
   const { admin, session, billing } = await authenticate.admin(request);
-  const { plan } = await currentPlan(billing);
+  const { plan, planUnknown } = await currentPlan(billing, session.shop);
   const form = await request.formData();
   const intent = form.get("intent") || "scan";
+  // Nothing scans or writes on a plan Shopify did not confirm.
+  if (planUnknown) return { ok: false, error: PLAN_UNKNOWN };
 
   // Intents that write to Shopify run one at a time per shop (lock.server.js).
   const run = async () => {
@@ -827,7 +833,7 @@ export default function Index() {
   const data = fetcher.data;
   // The loader is revalidated after every action and while a background scan runs, so it is the
   // source of truth for the page; the fetcher's data only carries the action's notices.
-  const { result, history, fixedWeek, fixedTotal, job, checkCount, plan, newProducts, pending, streak, locked } = initial;
+  const { result, history, fixedWeek, fixedTotal, job, checkCount, plan, planUnknown, overLimit, newProducts, pending, streak, locked } = initial;
   const revalidator = useRevalidator();
   const scanning = job?.status === "running";
 
@@ -884,6 +890,17 @@ export default function Index() {
       ) : null}
 
       <Notices data={data} onUndo={runUndo} onRestore={runRestore} busy={busy} />
+      {planUnknown ? (
+        // Shopify did not answer the plan check: the free plan shows until it does, and nothing runs.
+        <s-banner tone="warning" heading="Could not confirm your plan">
+          <s-paragraph>Shopify did not answer the plan check. The free plan features show for now; reload in a moment.</s-paragraph>
+        </s-banner>
+      ) : null}
+      {overLimit && result ? (
+        <s-banner tone="warning" heading={`The ${plan.name} plan scans up to ${plan.productLimit.toLocaleString("en-US")} products`}>
+          <s-paragraph>The last scan covered {result.total.toLocaleString("en-US")}. Run a full scan to apply the limit.</s-paragraph>
+        </s-banner>
+      ) : null}
       <ScanProgress job={job} />
 
       {!result ? (

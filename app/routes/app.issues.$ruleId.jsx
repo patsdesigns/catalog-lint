@@ -11,7 +11,7 @@ import { applyEdit } from "../lib/edits.server";
 import { ignoreCheck } from "../lib/checks.server";
 import { RULE_CATALOG } from "../lib/rules.server";
 import { getSettings } from "../lib/settings.server";
-import { currentPlan } from "../lib/billing.server";
+import { currentPlan, PLAN_UNKNOWN } from "../lib/billing.server";
 import { withShopLock } from "../lib/lock.server";
 import { findingKey } from "../lib/validate.server";
 import { planFor, areaLocked, allAreasPlan } from "../lib/plans";
@@ -24,7 +24,7 @@ import { TONE, CategoryChip, Notices, passesWhen } from "../lib/ui";
 
 export async function loader({ request, params }) {
   const { session, billing } = await authenticate.admin(request);
-  const { plan } = await currentPlan(billing);
+  const { plan, planUnknown } = await currentPlan(billing, session.shop);
   const [result, settings] = await Promise.all([latestScan(session.shop), getSettings(session.shop)]);
   const rule = result?.rules.find((r) => r.ruleId === params.ruleId) || null;
   const known = RULE_CATALOG.find((r) => r.id === params.ruleId) || null;
@@ -35,7 +35,7 @@ export async function loader({ request, params }) {
   const label = rule?.label || known?.label || "Check";
   // Tracked metafields show as columns on every check.
   const tracked = (settings.trackedMetafields || []).map((t) => ({ key: t.fullKey, name: t.name }));
-  return { rule, findings, plan, label, tracked };
+  return { rule, findings, plan, planUnknown, label, tracked };
 }
 
 // The browser names a finding by its key (rule, product, variant, word, field); everything else
@@ -56,11 +56,14 @@ function parseKey(raw) {
 
 export async function action({ request, params }) {
   const { admin, session, billing } = await authenticate.admin(request);
-  const { plan } = await currentPlan(billing);
+  const { plan, planUnknown } = await currentPlan(billing, session.shop);
   const form = await request.formData();
   const intent = form.get("intent");
   const ruleId = params.ruleId;
   const shop = session.shop;
+  // Every intent here writes, gates on the plan, or re-reads the catalog: none runs on a plan
+  // Shopify did not confirm.
+  if (planUnknown) return { ok: false, error: PLAN_UNKNOWN };
   // Features the plan does not include are refused here as well as hidden in the page.
   const gate = { edit: ["inlineEdits", "Inline edits are"], learn: ["dictionary", "The spelling dictionary is"], ignore: ["ignores", "Ignoring findings is"] }[intent];
   if (gate && !plan.features[gate[0]]) {
@@ -503,7 +506,7 @@ function AllClear({ onBack }) {
 const keyOf = (f) => ({ ruleId: f.ruleId, productId: f.productId, variantId: f.variantId || "", word: f.word || "", field: f.field || "" });
 
 export default function IssuePage() {
-  const { rule, findings, plan, label, tracked } = useLoaderData();
+  const { rule, findings, plan, planUnknown, label, tracked } = useLoaderData();
   const fetcher = useFetcher();
   const navigate = useNavigate();
   const busy = fetcher.state !== "idle";
@@ -553,6 +556,11 @@ export default function IssuePage() {
         </s-button>
       ) : null}
       <Notices data={data} onUndo={runUndo} busy={busy} />
+      {planUnknown ? (
+        <s-banner tone="warning" heading="Could not confirm your plan">
+          <s-paragraph>Shopify did not answer the plan check. The free plan features show for now; reload in a moment.</s-paragraph>
+        </s-banner>
+      ) : null}
       {data?.ok && data.disabledRule ? (
         <s-banner tone="success" heading="Check turned off">
           <s-paragraph>
