@@ -120,7 +120,6 @@ export const RULE_META = {
   // Vendor & product type
   missing_vendor: { family: "vendor_type", tier: E },
   vendor_casing: { family: "vendor_type", tier: C },
-  vendor_not_allowed: { family: "vendor_type", tier: R },
   missing_product_type: { family: "vendor_type", tier: E },
   product_type_casing: { family: "vendor_type", tier: C },
 

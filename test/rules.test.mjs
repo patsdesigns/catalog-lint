@@ -1,4 +1,4 @@
-// The 66 checks against a synthetic catalog (test/fixtures.mjs): the catalog itself (ids, labels,
+// The 65 checks against a synthetic catalog (test/fixtures.mjs): the catalog itself (ids, labels,
 // severities, categories), exact findings per product, coverage of every check, the shape of a
 // finding, the summary, and that empty and single-product catalogs do not throw.
 // Plain node: `npm run test:rules`. One line per assertion, exit code 1 on any failure.
@@ -16,7 +16,7 @@ const check = (name, ok, extra = "") => {
 const uniqueSorted = (list) => [...new Set(list)].sort();
 const minus = (a, b) => a.filter((x) => !b.includes(x));
 
-// ---------- 1. the catalog: 66 checks with these labels, severities and categories ----------
+// ---------- 1. the catalog: 65 checks with these labels, severities and categories ----------
 const FINAL = {
   description: {
     high: { missing_description: "No description", placeholder_text: "Placeholder text" },
@@ -45,7 +45,7 @@ const FINAL = {
   },
   organization: {
     medium: { category_missing: "No product category", missing_product_type: "No product type", missing_vendor: "No vendor", vendor_casing: "Vendor spelled two ways" },
-    low: { vendor_not_allowed: "Vendor not on your approved list", no_tags: "No tags", no_collection: "Not in any collection", product_type_casing: "Product type spelled two ways", tag_casing: "Tag spelled two ways" },
+    low: { no_tags: "No tags", no_collection: "Not in any collection", product_type_casing: "Product type spelled two ways", tag_casing: "Tag spelled two ways" },
   },
   shipping: {
     medium: { missing_weight: "No shipping weight" },
@@ -75,8 +75,8 @@ for (const [category, bySeverity] of Object.entries(FINAL)) {
 const RULE_IDS = [...FINAL_RULES.keys()].sort();
 
 console.log("---- catalog");
-check("the final list has 66 checks", FINAL_RULES.size === 66, String(FINAL_RULES.size));
-check("RULE_CATALOG has 66 checks", RULE_CATALOG.length === 66, String(RULE_CATALOG.length));
+check("the final list has 65 checks", FINAL_RULES.size === 65, String(FINAL_RULES.size));
+check("RULE_CATALOG has 65 checks", RULE_CATALOG.length === 65, String(RULE_CATALOG.length));
 const catalogIds = RULE_CATALOG.map((r) => r.id).sort();
 check("RULE_CATALOG ids are unique", new Set(catalogIds).size === RULE_CATALOG.length);
 check("RULE_CATALOG has exactly the final ids", catalogIds.join() === RULE_IDS.join(),
@@ -118,7 +118,7 @@ for (const p of products) {
 console.log("---- coverage");
 const fired = new Set(findings.map((f) => f.ruleId));
 const uncovered = RULE_IDS.filter((id) => !fired.has(id));
-check("every one of the 66 checks has at least one finding", uncovered.length === 0, uncovered.length ? `uncovered: ${uncovered.join(", ")}` : "");
+check("every one of the 65 checks has at least one finding", uncovered.length === 0, uncovered.length ? `uncovered: ${uncovered.join(", ")}` : "");
 check("no finding carries an unknown check", [...fired].every((id) => FINAL_RULES.has(id)), [...fired].filter((id) => !FINAL_RULES.has(id)).join(", "));
 
 // ---------- 4. the shape of a finding ----------
@@ -145,11 +145,11 @@ check("variant findings name their variant", findings.filter((f) => f.variantId)
 // ---------- 5. the summary ----------
 console.log("---- summary");
 const summary = summarizeFindings(products.length, findings, settings);
-check("summary lists a check for each of the 66", summary.checks.length === 66 && summary.checks.map((c) => c.ruleId).sort().join() === RULE_IDS.join());
+check("summary lists a check for each of the 65", summary.checks.length === 65 && summary.checks.map((c) => c.ruleId).sort().join() === RULE_IDS.join());
 const notFailed = summary.checks.filter((c) => fired.has(c.ruleId) && c.status !== "failed");
 check("every triggered check is failed", notFailed.length === 0, notFailed.map((c) => `${c.ruleId}=${c.status}`).join(", "));
 const skipped = summary.checks.filter((c) => c.status === "skipped" || c.status === "off");
-check("no check is skipped or off (a vendor list and a required tracked metafield with a pattern are set)", skipped.length === 0, skipped.map((c) => `${c.ruleId}=${c.status}`).join(", "));
+check("no check is skipped or off (a required tracked metafield with a pattern is set)", skipped.length === 0, skipped.map((c) => `${c.ruleId}=${c.status}`).join(", "));
 check("check counts add up to the findings", summary.checks.reduce((a, c) => a + c.count, 0) === findings.length);
 check(`summary counts ${cleanCount} clean products out of ${products.length}`, summary.total === products.length && summary.clean === cleanCount, `total=${summary.total} clean=${summary.clean}`);
 check("score is a whole number from 0 to 100", Number.isInteger(summary.score) && summary.score >= 0 && summary.score <= 100, String(summary.score));

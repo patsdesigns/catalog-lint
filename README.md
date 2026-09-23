@@ -4,11 +4,11 @@ TidyUp is a Shopify embedded app that scans a product catalog for missing, incon
 
 ## What it does
 
-- **66 checks** across the eleven sections of the product page: title and description, media, pricing, inventory, product organization, shipping, variants, search engine listing, status, sales channels and metafields. The list, with each check's severity, is in `app/lib/rules.server.js`; `npm run test:rules` prints and verifies it.
+- **65 checks** across the eleven sections of the product page: title and description, media, pricing, inventory, product organization, shipping, variants, search engine listing, status, sales channels and metafields. The list, with each check's severity, is in `app/lib/rules.server.js`; `npm run test:rules` prints and verifies it.
 - **One page per check** listing the products it flagged, each with its current value, a suggestion and a correction field. Quick apply saves the suggestion in one click. Three checks have a bulk fix (vendor spelling, alt text, sale prices). Every change is read before it is written, logged with its previous value, and can be undone from Recent fixes.
 - **Scans any catalog size**: up to 250 products inline, paced on the API rate limit; larger catalogs through a Shopify bulk operation in the background.
 - **Keeps the stored result current**: product webhooks re-check a product as it changes (paid plans) or queue it (free plan); ignoring a finding, learning a word or turning a check off updates the result at once.
-- **Settings**: which checks run (by family or one by one), an approved vendor list, a spelling dictionary, ignored findings, tracked metafields (up to seven, each with a required flag and a pattern) and a weekly email.
+- **Settings**: which checks run (by family or one by one), a spelling dictionary, ignored findings, tracked metafields (up to seven, each with a required flag and a pattern) and a weekly email.
 
 ## Plans
 
@@ -42,7 +42,7 @@ npm run test:rules
 npm run lint
 ```
 
-`test:rules` runs the 66 checks against `test/fixtures.mjs` (42 synthetic products: 36 that together trigger every check, 6 clean ones and 2 edge products with empty and missing fields) and asserts the exact findings per product, the check list with its labels, severities and areas, the summary counts and that empty and single-product catalogs do not throw. The runner needs no framework; `test/register.mjs` lets plain Node import the app's extensionless modules.
+`test:rules` runs the 65 checks against `test/fixtures.mjs` (42 synthetic products: 36 that together trigger every check, 6 clean ones and 2 edge products with empty and missing fields) and asserts the exact findings per product, the check list with its labels, severities and areas, the summary counts and that empty and single-product catalogs do not throw. The runner needs no framework; `test/register.mjs` lets plain Node import the app's extensionless modules.
 
 ## Deploying
 

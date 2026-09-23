@@ -85,7 +85,6 @@ export const PASS_LABELS = {
   vendor_casing: "Vendors are spelled consistently",
   tag_casing: "Tags are spelled consistently",
   product_type_casing: "Product types are spelled consistently",
-  vendor_not_allowed: "All vendors are on your approved list",
   category_missing: "Every product has a product category",
 
   // Metafields
@@ -95,7 +94,6 @@ export const PASS_LABELS = {
 
 // What a settings-gated check needs before it can run.
 export const SETUP_LABELS = {
-  vendor_not_allowed: "an approved vendor list",
   metafield_required: "a required tracked metafield",
   metafield_pattern: "a tracked metafield with a pattern",
 };

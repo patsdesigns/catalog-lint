@@ -7,13 +7,12 @@ import { planFeatures } from "./billing.server";
 // list, stored in disabledRules. getSettings resolves that into `disabledRules`, the effective set,
 // which is what the rules and the scan summary read. It also carries the tracked metafields, which
 // the Metafields checks cover (rules.server.js).
-const DEFAULTS = { vendorWhitelist: [], preset: DEFAULT_PRESET, customDisabled: [] };
+const DEFAULTS = { preset: DEFAULT_PRESET, customDisabled: [] };
 
 export async function getSettings(shop) {
   const row = await prisma.setting.findUnique({ where: { shop } });
   const base = row
     ? {
-        vendorWhitelist: safeParse(row.vendorWhitelist, []),
         preset: PRESET_IDS.has(row.preset) ? row.preset : DEFAULT_PRESET,
         customDisabled: safeParse(row.disabledRules, []),
       }
@@ -35,7 +34,6 @@ export async function getSettings(shop) {
 
 export async function saveSettings(shop, settings) {
   const data = {
-    vendorWhitelist: JSON.stringify(settings.vendorWhitelist || []),
     preset: PRESET_IDS.has(settings.preset) ? settings.preset : DEFAULT_PRESET,
     disabledRules: JSON.stringify(settings.customDisabled || []),
   };

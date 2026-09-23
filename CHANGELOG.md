@@ -6,7 +6,9 @@ Versions follow [semantic versioning](https://semver.org): the first number chan
 
 ## Unreleased
 
-Nothing yet.
+### Removed
+
+- The "Vendor not on your approved list" check and the Approved vendors box in Settings. TidyUp now runs 65 checks.
 
 ## 0.10.0 - 2026-09-23
 

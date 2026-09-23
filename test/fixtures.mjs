@@ -23,7 +23,6 @@ export function gtin13(i) {
 }
 
 export const settings = {
-  vendorWhitelist: ["Porsche", "Bosch"],
   trackedMetafields: [
     { id: 1, namespace: "custom", key: "mpn", fullKey: "custom.mpn", name: "MPN", type: "single_line_text_field", required: true, pattern: "^[A-Z]{3}-\\d{4}$", productType: "" },
   ],
@@ -182,7 +181,7 @@ add("channel-error", "Leather Bag Brown", ["channel_feedback", "missing_vendor"]
 
 // ---- organization ----
 add("no-type", "Wool Hat Green", ["missing_product_type", "no_tags"], { productType: "", tags: [] });
-add("vendor-off-list", "Cotton Cap Red", ["vendor_not_allowed", "category_missing"], { vendor: "Ferrari", category: null });
+add("no-category", "Cotton Cap Red", ["category_missing"], { category: null });
 // Three Bosch products spell the vendor two ways: only the odd one out ("BOSCH") is reported, the
 // two on the most common spelling are not. Each also carries one other casing outlier.
 add("bosch-a", "Warm winter jacket for cold days", ["title_casing_outlier"], { vendor: "Bosch" });

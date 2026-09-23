@@ -331,7 +331,7 @@ async function scanContext(graphql, shop) {
     loadSpeller(),
     shop ? getWords(shop) : [],
     shop ? getIgnoreKeys(shop) : new Set(),
-    shop ? getSettings(shop) : { vendorWhitelist: [], trackedMetafields: [] },
+    shop ? getSettings(shop) : { trackedMetafields: [] },
     shopInfo(graphql, shop),
     // A store with no Online Store channel (headless, POS only) has nothing to publish to.
     onlineStorePublicationId(graphql).then(Boolean).catch(() => true),

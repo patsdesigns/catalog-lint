@@ -63,9 +63,6 @@ export async function action({ request }) {
     try {
       const current = await getSettings(session.shop);
       const next = { ...current };
-      if (form.has("vendorWhitelist")) {
-        next.vendorWhitelist = String(form.get("vendorWhitelist")).split("\n").map((v) => v.trim().slice(0, 255)).filter(Boolean).slice(0, 1000);
-      }
       if (form.has("preset")) next.preset = form.get("preset");
       // Flipping any single check means the merchant has their own list: an array of known check ids.
       if (form.has("disabledRules")) {
@@ -77,7 +74,7 @@ export async function action({ request }) {
       await saveSettings(session.shop, next);
       // Findings of checks that were just turned off disappear from the stored scan right away.
       if (form.has("preset") || form.has("disabledRules")) await refreshAfter(admin.graphql, session.shop, { kind: "settings" });
-      return { ok: true, saved: form.has("vendorWhitelist") ? "vendors" : "checks" };
+      return { ok: true, saved: "checks" };
     } catch (err) {
       return { ok: false, error: describeError(err) };
     }
@@ -132,9 +129,6 @@ export default function Settings() {
   function submit(payload) {
     fetcher.submit(payload, { method: "post" });
   }
-  function saveWhitelist() {
-    submit({ intent: "saveSettings", vendorWhitelist: whitelist });
-  }
 
   // Which checks run. `off` is the set of disabled ids; kept locally so switches respond at once,
   // and every change is saved.
@@ -168,7 +162,6 @@ export default function Settings() {
   }
   const runningCount = checks.length - off.size;
 
-  const [whitelist, setWhitelist] = useState((settings.vendorWhitelist || []).join("\n"));
   const [digestEnabled, setDigestEnabled] = useState(digest.enabled);
   const [digestEmail, setDigestEmail] = useState(digest.email);
 
@@ -260,26 +253,6 @@ export default function Settings() {
         </s-stack>
       </s-section>
 
-
-      <s-section slot="aside" heading="Approved vendors">
-        <s-stack gap="base">
-          <s-paragraph>
-            One vendor per line. Leave empty to skip this check. Products whose vendor is not on this list get flagged under
-            Product organization.
-          </s-paragraph>
-          <s-text-area
-            label="Approved vendors"
-            labelAccessibilityVisibility="exclusive"
-            placeholder={"Porsche\nBosch\nBilstein"}
-            value={whitelist}
-            onInput={(e) => setWhitelist(e.target.value)}
-          ></s-text-area>
-          <s-stack direction="inline" gap="small">
-            <s-button variant="primary" onClick={saveWhitelist} disabled={busy || undefined} loading={(busy && fetcher.formData?.has("vendorWhitelist")) || undefined}>Save vendors</s-button>
-            {fetcher.data?.ok && fetcher.data.saved === "vendors" && !busy ? <s-text color="subdued">Saved.</s-text> : null}
-          </s-stack>
-        </s-stack>
-      </s-section>
 
       {features.customRules ? (
       <s-section slot="aside" heading={`Tracked metafields (${trackedCount})`}>
