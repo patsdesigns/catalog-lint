@@ -1,5 +1,6 @@
 import prisma from "../db.server";
 import { request } from "./graphql.server";
+import { patternError } from "./regex.server";
 
 // Tracked metafields: product metafield definitions the merchant chose to watch. Each is fetched
 // with every product and covered by the Metafields checks (rules.server.js), and shows
@@ -61,10 +62,12 @@ export async function updateTracked(shop, id, fields) {
   if (fields.required !== undefined) data.required = Boolean(fields.required);
   if (fields.pattern !== undefined) {
     const pattern = String(fields.pattern || "").trim();
-    if (pattern) new RegExp(pattern); // throws on an invalid pattern
+    const problem = await patternError(pattern);
+    if (problem) throw new Error(problem);
     data.pattern = pattern;
   }
-  if (fields.productType !== undefined) data.productType = String(fields.productType || "").trim();
+  if (fields.productType !== undefined) data.productType = String(fields.productType || "").trim().slice(0, 255);
+  if (!Number.isInteger(Number(id))) throw new Error("That metafield was not understood. Reload the page and try again.");
   await prisma.trackedMetafield.updateMany({ where: { shop, id: Number(id) }, data });
 }
 
@@ -85,10 +88,12 @@ export async function migrateMetafieldRules(shop, rules) {
     const key = full.slice(dot + 1);
     if (!key) continue;
     const name = key.replace(/[_-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+    // An old pattern that would not pass today is dropped rather than carried over.
+    const pattern = String(r.pattern || "").trim();
     await prisma.trackedMetafield.upsert({
       where: { shop_namespace_key: { shop, namespace, key } },
       update: {},
-      create: { shop, namespace, key, name, type: "single_line_text_field", required: true, pattern: String(r.pattern || "").trim(), productType: String(r.productType || "").trim() },
+      create: { shop, namespace, key, name, type: "single_line_text_field", required: true, pattern: (await patternError(pattern)) ? "" : pattern, productType: String(r.productType || "").trim().slice(0, 255) },
     });
     migrated += 1;
   }

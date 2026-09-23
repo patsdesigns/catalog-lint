@@ -6,7 +6,7 @@ Method: one full read of every file, then seven independent review passes (one p
 
 Legend: `[ ]` open, `[x]` fixed. Severity: high (wrong data, lost undo, outage, security), medium (wrong behaviour in a real case), low (polish, robustness, consistency). Line numbers refer to the code before Phase 2. Product decisions are not changed; they are listed under Questions at the end.
 
-Totals: 136 items found; 93 fixed so far; 22 open questions.
+Totals: 136 items found; 125 fixed so far; 22 open questions.
 
 ## 1. Correctness of every check
 
@@ -129,40 +129,40 @@ Confirmed: zero-product and one-product stores scan without throwing (score 100,
 
 Confirmed: every page uses Polaris web components; every input has a label (visible or exclusive); every table has a header row; the five tables use the `loading` attribute; no exclamation marks or emoji; every external link says it opens in a new tab; every banner tone and icon name is valid.
 
-- [ ] **8.1** high — `app/routes/app._index.jsx:450`, `:637` — `s-badge size="small"` is not a valid value (base, large, large-100). Fix: drop `size`.
-- [ ] **8.2** high — `app/routes/app.settings.jsx:291`, `app/routes/app.support.jsx:90` — `s-text-field type="email"` is not a prop. Fix: `s-email-field`.
-- [ ] **8.3** medium — `app/routes/app._index.jsx:401` — the overview row has `clickDelegate` and two buttons, so a click on Ignore can also open the issue page. Fix: remove `clickDelegate` (the row keeps its link and Review button).
-- [ ] **8.4** medium — `app/routes/app.issues.$ruleId.jsx:411` — row keys include the array index, so filtering remounts rows and drops typed corrections. Fix: key on product, variant, word and field only.
-- [ ] **8.5** medium — `app/routes/app.issues.$ruleId.jsx:490`, `app/routes/app._index.jsx:553`, `app/routes/app.plans.jsx:110`, `app/routes/app.settings.jsx:177`, `:231`, `:296`, `app/routes/app.tracked.jsx:82` — the bulk fix, Fix all, Choose plan, Save vendors, Send test email, and tracked Save/Remove/Add buttons give no loading feedback, and the check switches save silently. Fix: `loading` on the pressed button and a "Saved." line after the switches, vendors and tracked saves.
-- [ ] **8.6** medium — `app/routes/app._index.jsx:135` — the overview tables carry fixed grid tracks adding up to about 840px, so between ~1000px and the list breakpoint the table scrolls sideways inside the card. Fix: responsive tracks (fixed widths only above 900px of container width).
-- [ ] **8.7** medium — `app/routes/app.issues.$ruleId.jsx:121`, `:257` — the Fix cell is a 160px input plus one `auto` track per button (about 480px), which overflows a phone-width list item. Fix: a full-width track below 600px with the buttons wrapping under the field.
-- [ ] **8.8** low — `app/routes/app.dictionary.jsx:86` — `onKeyDown` on `s-text-field` is outside the component API. Fix: a form with a submit button.
-- [ ] **8.9** low — `app/routes/app._index.jsx:396`, `:544`, `:562` — `s-link` with `onClick` and no `href` is not a real link (no URL, no new tab). Fix: `href` to the issue page.
-- [ ] **8.10** low — `app/routes/app._index.jsx:269` — trend bars keyed by index. Fix: key by scan time.
-- [ ] **8.11** low — `app/routes/app.tracked.jsx:114`, `app/routes/app.dictionary.jsx:54`, `app/routes/app.ignored.jsx:70` — the no-plan pages repeat the page heading as the section heading. Fix: "Not included in your plan".
-- [ ] **8.12** low — `app/routes/app.fixes._index.jsx:72` — the empty state is two sentences. Fix: "No fixes yet."
-- [ ] **8.13** low — `app/routes/app.issues.$ruleId.jsx:478`, `app/routes/app.fixes._index.jsx:55`, `app/routes/app.fixes.$batchId.jsx:82` — "Back to issues" is not a verb and duplicates the breadcrumb. Fix: keep the breadcrumb and the link under the list only.
-- [ ] **8.14** medium — `app/routes/app.settings.jsx:217`, `:237`, `:249`, `:269`, `:281`, `:285`, `app/routes/app.tracked.jsx:112`, `app/routes/app.ignored.jsx:68`, `app/routes/app.fixes._index.jsx:53`, `app/routes/app.support.jsx:86`, `app/routes/app._index.jsx:603` — headings and chips in Title Case ("Approved Vendors", "Tracked Metafields", "Ignored Findings", "Weekly Email", "Recent Fixes", "Contact Support", "All Areas"). Fix: sentence case.
-- [ ] **8.15** medium — `app/lib/checkGroups.js:20-32`, `app/lib/categories.js:5-14` — family and area labels in Title Case with ampersands ("SKUs & Barcodes", "Product Organization", "Search Engine Listing"). Fix: sentence case with "and" ("SKUs and barcodes", "Product organization", "Search engine listing").
-- [ ] **8.16** medium — `app/routes/app._index.jsx:793`, `:851`, `:865`, `app/routes/app.issues.$ruleId.jsx:338`, `app/routes/app.support.jsx:100` — buttons in Title Case ("Run Full Scan", "Scan Again", "Scan New Products", "View Product", "Send Message"). Fix: sentence case.
-- [ ] **8.17** low — `app/lib/rules.server.js:585`, `app/routes/app.support.jsx:10`, `:89` — "Set to Draft" beside "Set active"; support options and labels in Title Case. Fix: "Set to draft", "Set to active", "General question", "Your name".
-- [ ] **8.18** low — `app/routes/app._index.jsx:161`, `:163` — the trend bar color and the passed-checks tint are custom hex/rgba colors. Fix: bars use `currentColor` inside subdued text; the panel uses `s-box background="subdued"`.
+- [x] **8.1** high — `app/routes/app._index.jsx:450`, `:637` — `s-badge size="small"` is not a valid value (base, large, large-100). Fix: drop `size`.
+- [x] **8.2** high — `app/routes/app.settings.jsx:291`, `app/routes/app.support.jsx:90` — `s-text-field type="email"` is not a prop. Fix: `s-email-field`.
+- [x] **8.3** medium — `app/routes/app._index.jsx:401` — the overview row has `clickDelegate` and two buttons, so a click on Ignore can also open the issue page. Fix: remove `clickDelegate` (the row keeps its link and Review button).
+- [x] **8.4** medium — `app/routes/app.issues.$ruleId.jsx:411` — row keys include the array index, so filtering remounts rows and drops typed corrections. Fix: key on product, variant, word and field only.
+- [x] **8.5** medium — `app/routes/app.issues.$ruleId.jsx:490`, `app/routes/app._index.jsx:553`, `app/routes/app.plans.jsx:110`, `app/routes/app.settings.jsx:177`, `:231`, `:296`, `app/routes/app.tracked.jsx:82` — the bulk fix, Fix all, Choose plan, Save vendors, Send test email, and tracked Save/Remove/Add buttons give no loading feedback, and the check switches save silently. Fix: `loading` on the pressed button and a "Saved." line after the switches, vendors and tracked saves.
+- [x] **8.6** medium — `app/routes/app._index.jsx:135` — the overview tables carry fixed grid tracks adding up to about 840px, so between ~1000px and the list breakpoint the table scrolls sideways inside the card. Fix: responsive tracks (fixed widths only above 900px of container width).
+- [x] **8.7** medium — `app/routes/app.issues.$ruleId.jsx:121`, `:257` — the Fix cell is a 160px input plus one `auto` track per button (about 480px), which overflows a phone-width list item. Fix: a full-width track below 600px with the buttons wrapping under the field.
+- [x] **8.8** low — `app/routes/app.dictionary.jsx:86` — `onKeyDown` on `s-text-field` is outside the component API. Fix: a form with a submit button.
+- [x] **8.9** low — `app/routes/app._index.jsx:396`, `:544`, `:562` — `s-link` with `onClick` and no `href` is not a real link (no URL, no new tab). Fix: `href` to the issue page.
+- [x] **8.10** low — `app/routes/app._index.jsx:269` — trend bars keyed by index. Fix: key by scan time.
+- [x] **8.11** low — `app/routes/app.tracked.jsx:114`, `app/routes/app.dictionary.jsx:54`, `app/routes/app.ignored.jsx:70` — the no-plan pages repeat the page heading as the section heading. Fix: "Not included in your plan".
+- [x] **8.12** low — `app/routes/app.fixes._index.jsx:72` — the empty state is two sentences. Fix: "No fixes yet."
+- [x] **8.13** low — `app/routes/app.issues.$ruleId.jsx:478`, `app/routes/app.fixes._index.jsx:55`, `app/routes/app.fixes.$batchId.jsx:82` — "Back to issues" is not a verb and duplicates the breadcrumb. Fix: keep the breadcrumb and the link under the list only.
+- [x] **8.14** medium — `app/routes/app.settings.jsx:217`, `:237`, `:249`, `:269`, `:281`, `:285`, `app/routes/app.tracked.jsx:112`, `app/routes/app.ignored.jsx:68`, `app/routes/app.fixes._index.jsx:53`, `app/routes/app.support.jsx:86`, `app/routes/app._index.jsx:603` — headings and chips in Title Case ("Approved Vendors", "Tracked Metafields", "Ignored Findings", "Weekly Email", "Recent Fixes", "Contact Support", "All Areas"). Fix: sentence case.
+- [x] **8.15** medium — `app/lib/checkGroups.js:20-32`, `app/lib/categories.js:5-14` — family and area labels in Title Case with ampersands ("SKUs & Barcodes", "Product Organization", "Search Engine Listing"). Fix: sentence case with "and" ("SKUs and barcodes", "Product organization", "Search engine listing").
+- [x] **8.16** medium — `app/routes/app._index.jsx:793`, `:851`, `:865`, `app/routes/app.issues.$ruleId.jsx:338`, `app/routes/app.support.jsx:100` — buttons in Title Case ("Run Full Scan", "Scan Again", "Scan New Products", "View Product", "Send Message"). Fix: sentence case.
+- [x] **8.17** low — `app/lib/rules.server.js:585`, `app/routes/app.support.jsx:10`, `:89` — "Set to Draft" beside "Set active"; support options and labels in Title Case. Fix: "Set to draft", "Set to active", "General question", "Your name".
+- [x] **8.18** low — `app/routes/app._index.jsx:161`, `:163` — the trend bar color and the passed-checks tint are custom hex/rgba colors. Fix: bars use `currentColor` inside subdued text; the panel uses `s-box background="subdued"`.
 
 ## 9. Copy
 
 - [x] **9.1** high — `app/lib/ui.jsx:82` — "1 changes reverted". Fix: pluralize.
-- [ ] **9.2** medium — `app/routes/app.plans.jsx:26`, `:150` — "cancelled" (British). Fix: "canceled".
+- [x] **9.2** medium — `app/routes/app.plans.jsx:26`, `:150` — "cancelled" (British). Fix: "canceled".
 - [x] **9.3** medium — `app/lib/rules.server.js:485`, `:488`, `app/routes/app.fixes.$batchId.jsx:35` — compare-at is written three ways. Fix: "compare-at price" everywhere.
 - [x] **9.4** medium — `app/lib/format.js:41` — "3 min ago", "2 h ago", "5 d ago". Fix: spelled-out units.
-- [ ] **9.5** medium — `app/lib/checkLabels.js:9`, `:10`, `:11`, `:19`, `:44`, `:55`, `:57`, `:64`, `:82`, `:87`, `app/lib/ui.jsx:22` — ten "No X" pass labels read as non-sentences after "Passes when" ("Passes when no misspellings found."). Fix: reword them as clauses ("There are no misspellings").
-- [ ] **9.6** medium — `app/routes/app.plans.jsx:92`, `:132`, `:156` — "$10 / month" beside "billed every 30 days". Fix: say both once: "$10 every 30 days".
-- [ ] **9.7** medium — `app/routes/app.plans.jsx:99` — "fix-all buttons" but the button is "Fix all". Fix: "Full scans, Fix all and undo".
-- [ ] **9.8** medium — `app/routes/app.issues.$ruleId.jsx:368` — "part of the Quick Clean plan" while every other gate says "plan and up". Fix: "plan and up".
-- [ ] **9.9** low — `app/lib/checkLabels.js:68`, `:16`, `:18` — "Every product is in a collection" (rule checks active products), "under 2,000 words" (rule allows 2,000), "aren't" (only contraction). Fix: "Every active product...", "2,000 words or fewer", "are not".
-- [ ] **9.10** low — `app/lib/format.js:9`, `app/routes/app.support.jsx:97`, `:90`, `app/routes/app.dictionary.jsx:83`, `app/routes/app.tracked.jsx:165` — "..." versus "…", "Please describe...", "your@email.com" versus "you@example.com", "e.g." versus "for example", "Settings, Custom data, Products". Fix: one form each.
-- [ ] **9.11** low — `app/lib/ui.jsx:117`, `app/routes/app._index.jsx:331`, `:531` — "the product limit of your plan is reached", "high severity problems", a missing period. Fix: reword.
-- [ ] **9.12** low — `app/routes/app.settings.jsx:285`, `app/lib/plans.js:84`, `app/lib/digest.server.js:57`, `:78` — "Weekly Email", "Weekly email digest", "weekly digest". Fix: "Weekly email" everywhere.
-- [ ] **9.13** low — `app/lib/ui.jsx:8`, `app/lib/fixes.server.js:216` — the short fix names exist in two files. Fix: one map in `checkLabels.js`.
+- [x] **9.5** medium — `app/lib/checkLabels.js:9`, `:10`, `:11`, `:19`, `:44`, `:55`, `:57`, `:64`, `:82`, `:87`, `app/lib/ui.jsx:22` — ten "No X" pass labels read as non-sentences after "Passes when" ("Passes when no misspellings found."). Fix: reword them as clauses ("There are no misspellings").
+- [x] **9.6** medium — `app/routes/app.plans.jsx:92`, `:132`, `:156` — "$10 / month" beside "billed every 30 days". Fix: say both once: "$10 every 30 days".
+- [x] **9.7** medium — `app/routes/app.plans.jsx:99` — "fix-all buttons" but the button is "Fix all". Fix: "Full scans, Fix all and undo".
+- [x] **9.8** medium — `app/routes/app.issues.$ruleId.jsx:368` — "part of the Quick Clean plan" while every other gate says "plan and up". Fix: "plan and up".
+- [x] **9.9** low — `app/lib/checkLabels.js:68`, `:16`, `:18` — "Every product is in a collection" (rule checks active products), "under 2,000 words" (rule allows 2,000), "aren't" (only contraction). Fix: "Every active product...", "2,000 words or fewer", "are not".
+- [x] **9.10** low — `app/lib/format.js:9`, `app/routes/app.support.jsx:97`, `:90`, `app/routes/app.dictionary.jsx:83`, `app/routes/app.tracked.jsx:165` — "..." versus "…", "Please describe...", "your@email.com" versus "you@example.com", "e.g." versus "for example", "Settings, Custom data, Products". Fix: one form each.
+- [x] **9.11** low — `app/lib/ui.jsx:117`, `app/routes/app._index.jsx:331`, `:531` — "the product limit of your plan is reached", "high severity problems", a missing period. Fix: reword.
+- [x] **9.12** low — `app/routes/app.settings.jsx:285`, `app/lib/plans.js:84`, `app/lib/digest.server.js:57`, `:78` — "Weekly Email", "Weekly email digest", "weekly digest". Fix: "Weekly email" everywhere.
+- [x] **9.13** low — `app/lib/ui.jsx:8`, `app/lib/fixes.server.js:216` — the short fix names exist in two files. Fix: one map in `checkLabels.js`.
 - [ ] **9.14** low — `README.md:50` — the layout list omits the Tracked metafields and Ignored findings pages. Fix: list them.
 
 ## 10. Security
@@ -170,7 +170,7 @@ Confirmed: every page uses Polaris web components; every input has a label (visi
 Confirmed: no secrets in tracked files; `.env` is gitignored and untracked; every `/app` route calls `authenticate.admin` in loader and action; no route reads a shop from the client; every by-id write is scoped by `session.shop`; the dev simulate route is a 404 in production; no stack trace reaches a response.
 
 - [x] **10.1** high — see 3.1 — the client-supplied edit descriptor is trusted. Fix: resolve the descriptor server-side from the stored finding and whitelist fields per kind.
-- [ ] **10.2** high — `app/lib/metafields.server.js:54`, `app/lib/rules.server.js:1016` — merchant regex patterns are only syntax-checked: no length cap, no rejection of nested quantifiers, no timeout, compiled per product and run on unbounded values in the shared process. Fix: cap the pattern at 200 characters, reject nested quantifiers and backreferences, probe the pattern in a worker with a 200 ms timeout at save time, compile once per scan and test at most 1,000 characters.
+- [x] **10.2** high — `app/lib/metafields.server.js:54`, `app/lib/rules.server.js:1016` — merchant regex patterns are only syntax-checked: no length cap, no rejection of nested quantifiers, no timeout, compiled per product and run on unbounded values in the shared process. Fix: cap the pattern at 200 characters, reject nested quantifiers and backreferences, probe the pattern in a worker with a 200 ms timeout at save time, compile once per scan and test at most 1,000 characters.
 - [x] **10.3** medium — `app/routes/app.settings.jsx:66` — `disabledRules` is parsed outside any try and any JSON shape is stored. Fix: parse safely, require an array of known rule ids.
 - [x] **10.4** low — `app/routes/app.issues.$ruleId.jsx:86` — the `finding` JSON feeds the ignore key and the Ignore row unbounded. Fix: validate the shape (known rule id, gid product id, capped strings) and store the server's copy of the finding.
 - [x] **10.5** low — `app/routes/app.support.jsx:22` — no length caps and no rate limit on the support form. Fix: caps (100/254/200/5,000) and at most 10 messages per shop per hour.
@@ -182,11 +182,11 @@ Confirmed: no secrets in tracked files; `.env` is gitignored and untracked; ever
 
 Confirmed: rules run in one pass per product over the enabled product rules; the dictionary loads once per process and unknown words are cached per scan; the overview reads stored rows and makes one GraphQL call (a product count) per load, plus one status poll while a bulk job runs. A 1,000-product store uses the bulk path (Shopify exports in the background; the app downloads once), so the inline path only matters up to 250 products, where the risk is throttling (2.7), not time.
 
-- [ ] **11.1** low — see 1.8 — quadratic casing rules. Fix: single pass.
-- [ ] **11.2** low — `app/lib/rules.server.js:241`, `app/lib/spelling.server.js:54` — suggestions are computed for every unknown word before the 8-per-product cut. Fix: stop at 8.
+- [x] **11.1** low — see 1.8 — quadratic casing rules. Fix: single pass.
+- [x] **11.2** low — `app/lib/rules.server.js:241`, `app/lib/spelling.server.js:54` — suggestions are computed for every unknown word before the 8-per-product cut. Fix: stop at 8.
 - [x] **11.3** low — see 3.15 and 3.16 — needless full rescan on an empty undo; bulk fix reads before the budget.
 - [x] **11.4** low — `app/lib/billing.server.js:14` — `billing.check` runs on every loader and action of every page. Fix: cache the plan per shop for 60 seconds, bypassed on the Plans page and cleared by the Plans action and the subscription webhook.
-- [ ] **11.5** low — `app/lib/rules.server.js:657` — `closest` recomputes the edit distance for every off-list product. Fix: memoize per vendor string within a run.
+- [x] **11.5** low — `app/lib/rules.server.js:657` — `closest` recomputes the edit distance for every off-list product. Fix: memoize per vendor string within a run.
 
 ## 12. Repo hygiene
 

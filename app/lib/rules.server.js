@@ -707,8 +707,11 @@ export const PRODUCT_RULES = [
       if (!v) return [];
       const ok = list.some((w) => norm(w) === norm(v));
       if (ok) return [];
-      // The closest approved vendor, ready to apply when one is close enough.
-      const near = closest(v, list);
+      // The closest approved vendor, ready to apply when one is close enough; remembered per run,
+      // since the same off-list vendor tends to sit on many products.
+      const cache = ctx?.closest || (ctx.closest = new Map());
+      if (!cache.has(v)) cache.set(v, closest(v, list));
+      const near = cache.get(v);
       return [finding(this, p, { detail: v, edit: productEdit("vendor", v, near, { apply: Boolean(near) }) })];
     },
   },
