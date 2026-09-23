@@ -17,7 +17,7 @@ import { CATEGORIES, categoryOf } from "../lib/categories";
 import { PASS_LABELS, SETUP_LABELS } from "../lib/checkLabels";
 import { shopInfo } from "../lib/shop.server";
 import { timeAgo } from "../lib/format";
-import { TONE, Notices } from "../lib/ui";
+import { TONE, Notices, SeverityIcon, worstSeverity } from "../lib/ui";
 
 // ---------- server ----------
 
@@ -201,12 +201,13 @@ function ScanProgress({ job, locale }) {
   );
 }
 
-// A card header: heading and optional badges on the left; anything on the right.
-function CardHeader({ heading, badges, aside }) {
+// A card header: a status icon, the heading and optional badges on the left; anything on the right.
+function CardHeader({ icon, heading, badges, aside }) {
   return (
     <s-box padding="base" paddingBlockEnd="small">
       <s-stack direction="inline" gap="base" alignItems="center" justifyContent="space-between">
         <s-stack direction="inline" gap="small" alignItems="center">
+          {icon}
           <s-heading>{heading}</s-heading>
           {badges}
         </s-stack>
@@ -218,18 +219,22 @@ function CardHeader({ heading, badges, aside }) {
 
 // ---------- summary ----------
 
-// A summary tile, as the Polaris metrics card composition lays it out: the label as a heading over
-// the number with an optional badge, and its supporting lines beside them.
+// A summary tile: the label as a heading over a display-size number with an optional badge, and its
+// supporting lines beside them. Polaris has no text that large, so the number is a styled span; it
+// sits inside an s-text so that its color, when the state calls for one, is a Polaris tone.
 // The summary column fills its card (a plain div: the card box has a definite height once the header
 // grid stretches it), so the footer sits at the bottom whatever height Start here needs.
 const FILL_COLUMN = { height: "100%", display: "flex", flexDirection: "column", justifyContent: "space-between", gap: "16px" };
-function Stat({ label, value, text, badge, locale, children }) {
+const STAT_STYLE = { fontSize: "32px", lineHeight: 1, fontWeight: 650, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" };
+function Stat({ label, value, text, tone, badge, locale, children }) {
   return (
     <s-grid gridTemplateColumns={STAT_COLUMNS} gap="base" alignItems="start">
       <s-stack gap="small-200">
         <s-heading>{label}</s-heading>
         <s-stack direction="inline" gap="small" alignItems="center">
-          <s-text type="strong" fontVariantNumeric="tabular-nums">{text ?? (value || 0).toLocaleString(locale)}</s-text>
+          <s-text tone={tone}>
+            <span style={STAT_STYLE}>{text ?? (value || 0).toLocaleString(locale)}</span>
+          </s-text>
           {badge}
         </s-stack>
       </s-stack>
@@ -238,15 +243,47 @@ function Stat({ label, value, text, badge, locale, children }) {
   );
 }
 
-// Open problems per full scan, oldest first, as a line of numbers: Polaris has no chart
-// primitive, and a drawn one would be custom styling.
+// Open problems per full scan (the last twelve are kept), oldest first, as bars. The tallest bar is
+// the most any of them found, so the direction shows even when the counts are close: 4px for none,
+// 40px for the most. Polaris has no chart primitive, so the bars are plain boxes on a divider
+// baseline; they take the color of the info-tone text around them (currentColor), so the color is
+// Polaris's own.
 function Trend({ history, locale }) {
   if (!history || history.length < 2) return <s-text color="subdued">Scan again to start a trend.</s-text>;
-  const counts = history.map((h) => (h.open || 0).toLocaleString(locale));
+  const most = history.reduce((m, h) => Math.max(m, h.open || 0), 0);
+  const barHeight = (open) => 4 + (most ? Math.round(((open || 0) / most) * 36) : 0);
+  // Bar width 12px + 4px gap, sized to the results on record, so no bare baseline trails the bars.
+  const trackWidth = history.length * 16 - 4;
+  // ISO date, not toLocaleString(): the server and the browser must render the same markup.
+  const dateOf = (iso) => (iso ? String(iso).slice(0, 10) : "");
+  const describe = (h) => `${(h.open || 0).toLocaleString(locale)}${h.at ? ` on ${dateOf(h.at)}` : ""}`;
   return (
-    <s-text color="subdued" fontVariantNumeric="tabular-nums">
-      Last {history.length} scans: {counts.join(" · ")}
-    </s-text>
+    <s-stack direction="inline" gap="small" alignItems="end">
+      <s-stack gap="small-500">
+        <s-text tone="info">
+          <div aria-hidden="true" style={{ display: "flex", alignItems: "flex-end", gap: "4px", height: "40px", width: `${trackWidth}px` }}>
+            {history.map((h, i) => (
+              // The latest bar is solid, the earlier ones lighter.
+              <div
+                key={h.at || i}
+                title={describe(h)}
+                style={{
+                  width: "12px",
+                  height: `${barHeight(h.open)}px`,
+                  borderRadius: "2px 2px 0 0",
+                  background: "currentColor",
+                  opacity: i === history.length - 1 ? 1 : 0.4,
+                }}
+              />
+            ))}
+          </div>
+        </s-text>
+        <s-divider></s-divider>
+      </s-stack>
+      <s-text color="subdued">Last {history.length} scans</s-text>
+      {/* The same count-and-date detail the bar tooltips carry, for readers who cannot hover. */}
+      <s-text accessibilityVisibility="exclusive">Problems per scan, oldest first: {history.map(describe).join(", ")}</s-text>
+    </s-stack>
   );
 }
 
@@ -271,6 +308,8 @@ function Summary({ result, history, fixedWeek, fixedTotal, checksOn, checksTotal
           <Stat
             label="Potential problems"
             value={open}
+            // Red while anything high is open, orange for the rest, green for nothing at all.
+            tone={result.high > 0 ? "critical" : open > 0 ? "warning" : "success"}
             locale={locale}
             badge={
               delta !== 0 ? (
@@ -297,7 +336,7 @@ function Summary({ result, history, fixedWeek, fixedTotal, checksOn, checksTotal
             <Trend history={history} locale={locale} />
           </Stat>
           <s-divider></s-divider>
-          <Stat label="Problems fixed" value={fixedTotal} locale={locale}>
+          <Stat label="Problems fixed" value={fixedTotal} tone={fixedTotal > 0 ? "success" : undefined} locale={locale}>
             <s-text color="subdued">{fixedWeek ? `${n(fixedWeek)} this week` : fixedTotal ? "None this week" : "Fixes you apply or save are counted here"}</s-text>
             <s-text color="subdued">
               <s-link href="/app/fixes">Recent fixes</s-link>
@@ -646,6 +685,7 @@ function CategoryCard({ cat, rules, checks, showChecks, showPassed, locked, onSe
   return (
     <s-section padding="none">
       <CardHeader
+        icon={<SeverityIcon severity={worstSeverity(rules)} />}
         heading={cat.label}
         badges={rules.length ? <SeverityBadges rules={rules} /> : null}
         aside={<s-text color="subdued" fontVariantNumeric="tabular-nums">{rules.length ? `${total} findings` : "No findings"}</s-text>}

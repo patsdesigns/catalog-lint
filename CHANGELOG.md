@@ -6,7 +6,11 @@ Versions follow [semantic versioning](https://semver.org): the first number chan
 
 ## Unreleased
 
-Nothing yet.
+### Changed
+
+- Color is back on the home page, from the Polaris palette only: each area card shows an icon and badges in the tone of its worst open severity (red, orange, yellow) or a green check when it is clean; low severity is yellow instead of grey everywhere.
+- The Potential problems and Problems fixed numbers are large again and take a color by state (red while something high is open, orange otherwise, green when there is nothing to fix or when fixes have been made).
+- The trend is a bar graph of the last twelve scans again.
 
 ## 0.9.0 - 2026-09-23
 

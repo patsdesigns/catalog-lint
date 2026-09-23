@@ -2,7 +2,21 @@
 import { categoryOf } from "./categories";
 import { PASS_LABELS, FIX_NAMES } from "./checkLabels";
 
-export const TONE = { high: "critical", medium: "warning", low: "neutral" };
+// Severity as a Polaris tone: red, orange, yellow. Color in the app comes only from these tones
+// (the palette Shopify approves), never from a color of our own.
+export const TONE = { high: "critical", medium: "warning", low: "caution" };
+const SEVERITY_ICON = { high: "alert-circle", medium: "alert-triangle", low: "info" };
+
+// The icon that stands for the worst severity in a set of findings, or for a clean state.
+export function SeverityIcon({ severity }) {
+  if (!severity) return <s-icon type="check-circle" tone="success" />;
+  return <s-icon type={SEVERITY_ICON[severity]} tone={TONE[severity]} />;
+}
+
+// The worst severity among some rules: "high", "medium", "low", or null when there are none.
+export function worstSeverity(rules) {
+  return ["high", "medium", "low"].find((s) => rules.some((r) => r.severity === s)) || null;
+}
 
 // Short names for the bulk fixes (checkLabels.js), used in notices and the Recent fixes card.
 export function ruleLabel(id) {

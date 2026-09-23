@@ -246,7 +246,7 @@ Answers given on 2026-09-23 and what was done with them.
 - **11, duplicate_sku and duplicate_barcode.** Grouped without regard to case (and spacing for barcodes).
 - **12, barcode_invalid.** Eight-digit codes are no longer judged; only 12, 13 and 14 digits are checked.
 - **13, few_images and missing_image.** Every media item counts (videos and 3D models included); alt text checks still look at images only.
-- **14 and 15, colors and typography.** Removed for Polaris compliance: no area colors, card stripes or dots; the summary tiles use the Polaris metrics card layout (heading and text); the trend is a line of numbers.
+- **14 and 15, colors and typography.** First removed for Polaris compliance, then revisited the same day at your request: color is back, but only from the Polaris palette. Each home card carries an icon and badges in the tone of its worst open severity (critical, warning, caution) or a green check when clean; the summary numbers are display-size again and take a tone by state; the trend bars are back in the info tone. The per-area colors, stripes and dots stay gone: Polaris has six meaning-bearing tones, not eleven decorative hues.
 - **16 to 21.** Unchanged as designed: the first-run page, the home heading, the 250-product inline limit, the retention of twenty rows and twelve full scans, the 24-hour job timeout, and the owner-only stats module stay.
 - **22, alt text mutation.** Decided: request `write_files` and write alt text with `fileUpdate`. Both tomls carry the scope; existing installs are asked to approve it the next time they open the app.
 
