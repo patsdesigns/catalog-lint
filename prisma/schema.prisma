@@ -31,6 +31,8 @@ model Session {
   emailVerified Boolean?  @default(false)
   refreshToken        String?
   refreshTokenExpires DateTime?
+
+  @@index([shop])
 }
 model Scan {
   id         Int      @id @default(autoincrement())
@@ -44,12 +46,14 @@ model Scan {
   checks     String   @default("[]")
   names      String   @default("[]")
   context    String   @default("{}")
+  full       Boolean  @default(false)
   catalogTotal Int    @default(0)
   readAt     DateTime?
   productIds String   @default("[]")
   createdAt  DateTime @default(now())
 
   @@index([shop, createdAt])
+  @@index([shop, full, createdAt])
 }
 model DictionaryWord {
   id        Int      @id @default(autoincrement())
@@ -74,6 +78,7 @@ model FixLog {
   createdAt DateTime @default(now())
 
   @@index([shop, batchId])
+  @@index([shop, undone, createdAt])
 }
 model Ignore {
   id        Int      @id @default(autoincrement())
@@ -92,7 +97,7 @@ model Setting {
   vendorWhitelist String   @default("[]")
   metafieldRules  String   @default("[]")
   disabledRules   String   @default("[]")
-  preset          String   @default("recommended")
+  preset          String   @default("everything")
   updatedAt       DateTime @updatedAt
 }
 

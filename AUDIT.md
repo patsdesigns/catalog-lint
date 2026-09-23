@@ -6,7 +6,7 @@ Method: one full read of every file, then seven independent review passes (one p
 
 Legend: `[ ]` open, `[x]` fixed. Severity: high (wrong data, lost undo, outage, security), medium (wrong behaviour in a real case), low (polish, robustness, consistency). Line numbers refer to the code before Phase 2. Product decisions are not changed; they are listed under Questions at the end.
 
-Totals: 136 items found; 72 fixed so far; 22 open questions.
+Totals: 136 items found; 81 fixed so far; 22 open questions.
 
 ## 1. Correctness of every check
 
@@ -103,14 +103,14 @@ Confirmed: every webhook route awaits `authenticate.webhook` (bad HMAC is a 401)
 
 Confirmed: the migrations apply from empty to exactly the current schema (`prisma migrate diff` reports no difference; `prisma migrate reset --force` is the non-interactive form); the Session model matches `@shopify/shopify-app-session-storage-prisma` 9; no loader runs per-row queries in a loop; `setup` runs `prisma migrate deploy`.
 
-- [ ] **6.1** high — `app/lib/scans.server.js:7` — every save (scan, ignore, learn, edit, settings toggle, webhook) inserts a new Scan row with the full findings JSON and nothing ever deletes rows: the dev store already has 100 rows and 7.9 MB for 18 products; a 5,000-product store would add megabytes per click. Fix: prune to the last 20 rows and the last 12 full scans per shop after every save; cap stored findings at 5,000 per rule (counts stay exact, the issue page says "Showing the first 5,000 of N"); drop the duplicated description text from edit descriptors.
-- [ ] **6.2** high — `app/routes/app._index.jsx:22` — the home loader parses the whole findings JSON on every load and every 3-second poll only to count open and high findings. Fix: derive both from the small per-rule summary and read the row without `findings`.
-- [ ] **6.3** low — `prisma/schema.prisma:75` — FixLog is indexed on (shop, batchId) only; Recent fixes and the fixed counts filter on shop, undone and createdAt. Fix: add `@@index([shop, undone, createdAt])`.
-- [ ] **6.4** low — `prisma/schema.prisma:16` — Session has no index on `shop`, which uninstall and the session storage query by. Fix: add `@@index([shop])`.
-- [ ] **6.5** low — `prisma/schema.prisma:94` — `Setting.preset` defaults to "recommended" while the app default is "everything". Fix: align the schema default.
-- [ ] **6.6** medium — `prisma/schema.prisma:13`, `.dockerignore` — the SQLite file path is fixed and `COPY . .` bakes a local `prisma/dev.sqlite` (with access tokens) and `.env` into the image. Fix: exclude `.env*`, `prisma/*.sqlite*` and `.shopify` from the image and document the volume for `prisma/`.
-- [ ] **6.7** low — `app/lib/scan.server.js:372` — a recheck keeps catalog-rule findings for products Shopify no longer returns, so a deleted product stays on an issue page until the next full scan. Fix: drop findings of deleted products.
-- [ ] **6.8** low — `app/lib/scans.server.js:67` — `toResult` parses every JSON column bare; one corrupt row takes down every page for that shop. Fix: parse with fallbacks and a `corrupt` flag.
+- [x] **6.1** high — `app/lib/scans.server.js:7` — every save (scan, ignore, learn, edit, settings toggle, webhook) inserts a new Scan row with the full findings JSON and nothing ever deletes rows: the dev store already has 100 rows and 7.9 MB for 18 products; a 5,000-product store would add megabytes per click. Fix: prune to the last 20 rows and the last 12 full scans per shop after every save; cap stored findings at 5,000 per rule (counts stay exact, the issue page says "Showing the first 5,000 of N"); drop the duplicated description text from edit descriptors.
+- [x] **6.2** high — `app/routes/app._index.jsx:22` — the home loader parses the whole findings JSON on every load and every 3-second poll only to count open and high findings. Fix: derive both from the small per-rule summary and read the row without `findings`.
+- [x] **6.3** low — `prisma/schema.prisma:75` — FixLog is indexed on (shop, batchId) only; Recent fixes and the fixed counts filter on shop, undone and createdAt. Fix: add `@@index([shop, undone, createdAt])`.
+- [x] **6.4** low — `prisma/schema.prisma:16` — Session has no index on `shop`, which uninstall and the session storage query by. Fix: add `@@index([shop])`.
+- [x] **6.5** low — `prisma/schema.prisma:94` — `Setting.preset` defaults to "recommended" while the app default is "everything". Fix: align the schema default.
+- [x] **6.6** medium — `prisma/schema.prisma:13`, `.dockerignore` — the SQLite file path is fixed and `COPY . .` bakes a local `prisma/dev.sqlite` (with access tokens) and `.env` into the image. Fix: exclude `.env*`, `prisma/*.sqlite*` and `.shopify` from the image and document the volume for `prisma/`.
+- [x] **6.7** low — `app/lib/scan.server.js:372` — a recheck keeps catalog-rule findings for products Shopify no longer returns, so a deleted product stays on an issue page until the next full scan. Fix: drop findings of deleted products.
+- [x] **6.8** low — `app/lib/scans.server.js:67` — `toResult` parses every JSON column bare; one corrupt row takes down every page for that shop. Fix: parse with fallbacks and a `corrupt` flag.
 
 ## 7. Errors and edge cases
 
@@ -175,7 +175,7 @@ Confirmed: no secrets in tracked files; `.env` is gitignored and untracked; ever
 - [x] **10.4** low — `app/routes/app.issues.$ruleId.jsx:86` — the `finding` JSON feeds the ignore key and the Ignore row unbounded. Fix: validate the shape (known rule id, gid product id, capped strings) and store the server's copy of the finding.
 - [ ] **10.5** low — `app/routes/app.support.jsx:22` — no length caps and no rate limit on the support form. Fix: caps (100/254/200/5,000) and at most 10 messages per shop per hour.
 - [ ] **10.6** low — `app/routes/app.settings.jsx:40` — "Send test email" is unlimited, so the app can be used to mail third parties. Fix: at most 3 test emails per shop per hour.
-- [ ] **10.7** low — `.dockerignore` — see 6.6 (local `.env`, SQLite file and `.shopify/` can end up in the image). Fix: exclude them.
+- [x] **10.7** low — `.dockerignore` — see 6.6 (local `.env`, SQLite file and `.shopify/` can end up in the image). Fix: exclude them.
 - [ ] **10.8** low — `app/routes/app.support.jsx:54` — the failed forward logs the error object, which can contain the webhook URL. Fix: log the message only.
 
 ## 11. Performance

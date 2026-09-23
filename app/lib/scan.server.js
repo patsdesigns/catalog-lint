@@ -5,7 +5,7 @@
 // file in the background, the page loader polls it (rescan.server.js) and the rules run once the
 // file is ready, so a 50k-product catalog scans without request timeouts or API rate limits.
 
-import { runRules, runProductRules, catalogContext, CATALOG_RULE_IDS, summarize, summarizeFindings, knownFindings } from "./rules.server";
+import { runRules, runProductRules, catalogContext, CATALOG_RULE_IDS, summarize, summarizeFindings, knownFindings, capFindings } from "./rules.server";
 import { loadSpeller, seedWords, catalogNames } from "./spelling.server";
 import { getWords } from "./dictionary.server";
 import { getIgnoreKeys, ignoreKey } from "./ignores.server";
@@ -356,12 +356,14 @@ export async function scanProducts(products, graphql, shop, startedAt = Date.now
   const ctx = { speller, customWords: seedWords(products, storeWords), nameWords: new Set(names), settings, locale, catalog };
   const all = runRules(products, ctx);
   const findings = all.filter((f) => !ignored.has(ignoreKey(f)));
+  // Counts come from every finding; the stored list is capped per check.
   const summary = summarize(products, findings, settings);
   return {
     ...summary,
-    findings,
+    findings: capFindings(findings),
     names,
     context: catalog,
+    full: true,
     catalogTotal: Math.max(catalogTotal, products.length),
     truncated: catalogTotal > products.length,
     readAt: new Date(startedAt).toISOString(),
@@ -393,10 +395,6 @@ export async function recheckProducts(graphql, shop, latest, ids, dropRuleId = n
   const ctx = { speller, customWords: seedWords(products, storeWords), nameWords: new Set(names), settings, locale, catalog: latest.context || undefined };
   const fresh = runProductRules(products, ctx).filter((f) => !ignored.has(ignoreKey(f)));
   const touched = new Set(ids);
-  const kept = knownFindings(latest.findings).filter(
-    (f) => !touched.has(f.productId) || (CATALOG_RULE_IDS.has(f.ruleId) && f.ruleId !== dropRuleId),
-  );
-  const findings = [...kept, ...fresh];
   // Products the scan covers: an id it did not know is an addition (a webhook, a queued product),
   // an id it knew that Shopify no longer returns is a deletion. Scans saved before ids were recorded
   // treat every id as known.
@@ -405,6 +403,11 @@ export async function recheckProducts(graphql, shop, latest, ids, dropRuleId = n
   const deleted = ids.filter((id) => (known ? known.has(id) : true) && !fetched.has(id));
   const added = known ? products.filter((p) => !known.has(p.id)).map((p) => p.id) : [];
   const gone = new Set(deleted);
+  // A deleted product keeps nothing, not even its catalog-wide findings.
+  const kept = knownFindings(latest.findings).filter(
+    (f) => !gone.has(f.productId) && (!touched.has(f.productId) || (CATALOG_RULE_IDS.has(f.ruleId) && f.ruleId !== dropRuleId)),
+  );
+  const findings = capFindings([...kept, ...fresh]);
   const productIds = known ? [...latest.productIds.filter((id) => !gone.has(id)), ...added] : latest.productIds || [];
   const total = Math.max(0, latest.total - deleted.length + added.length);
   const summary = summarizeFindings(total, findings, settings);
@@ -436,7 +439,7 @@ export async function scanNewProducts(graphql, shop, latest) {
   const ctx = { speller, customWords: seedWords(products, storeWords), nameWords: new Set(names), settings, locale, catalog: latest.context || undefined };
   const fresh = runProductRules(products, ctx).filter((f) => !ignored.has(ignoreKey(f)));
   const added = new Set(ids);
-  const findings = [...knownFindings(latest.findings).filter((f) => !added.has(f.productId)), ...fresh];
+  const findings = capFindings([...knownFindings(latest.findings).filter((f) => !added.has(f.productId)), ...fresh]);
   const total = latest.total + products.length;
   const summary = summarizeFindings(total, findings, settings);
   return {

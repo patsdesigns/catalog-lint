@@ -22,7 +22,7 @@ const STALE_JOB_MS = 24 * 60 * 60 * 1000;
 // Polls and downloads that fail this many times in a row fail the job; fewer are retried next load.
 const MAX_JOB_ERRORS = 5;
 import { saveScan, latestScan } from "./scans.server";
-import { summarizeFindings, knownFindings } from "./rules.server";
+import { summarizeFindings, knownFindings, capFindings } from "./rules.server";
 import { ignoreKey } from "./ignores.server";
 import { getSettings } from "./settings.server";
 import { activeJob, createJob, updateJob, jobView } from "./jobs.server";
@@ -164,7 +164,7 @@ export async function refreshAfter(graphql, shop, change, limit = null) {
 }
 
 export function withFindings(latest, findings, settings, ignoredDelta = 0) {
-  const kept = knownFindings(findings);
+  const kept = capFindings(knownFindings(findings));
   const summary = summarizeFindings(latest.total, kept, settings);
   return {
     ...summary,

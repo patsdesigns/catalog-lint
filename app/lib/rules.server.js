@@ -210,10 +210,29 @@ function finding(rule, product, extra = {}) {
   } else {
     f.variantCount = variants.length;
   }
-  if (f.edit) f.edit = { ruleId: rule.id, productId: product.id, title: product.title, ...f.edit };
+  if (f.edit) {
+    f.edit = { ruleId: rule.id, productId: product.id, title: product.title, ...f.edit };
+    // A suggestion that only repeats the stored value (a description offered for editing) is not
+    // stored twice: the page prefills the field from `raw` when `suggested` is absent.
+    if (f.edit.suggested !== undefined && f.edit.raw !== undefined && f.edit.suggested === f.edit.raw) delete f.edit.suggested;
+  }
   // Tracked metafield values ride along, for the columns on the issue pages.
   if (product.metafields?.length) f.meta = Object.fromEntries(product.metafields.map((m) => [m.key, m.value ?? ""]));
   return f;
+}
+
+// The most findings one check keeps per scan. Counts stay exact (they are taken before the cap);
+// the issue page says when it shows the first of many.
+export const MAX_FINDINGS_PER_RULE = 5000;
+export function capFindings(findings) {
+  const seen = new Map();
+  const kept = [];
+  for (const f of findings) {
+    const n = (seen.get(f.ruleId) || 0) + 1;
+    seen.set(f.ruleId, n);
+    if (n <= MAX_FINDINGS_PER_RULE) kept.push(f);
+  }
+  return kept;
 }
 
 // ---------------- product rules ----------------

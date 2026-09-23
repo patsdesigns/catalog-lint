@@ -8,7 +8,7 @@ import { pendingCount, scanPendingProducts } from "../lib/events.server";
 import { cleanStreak } from "../lib/snapshots.server";
 import { applyFix, undoFix, fixedCount } from "../lib/fixes.server";
 import { ignoreCheck, restoreCheck } from "../lib/checks.server";
-import { latestScan, scanHistory, saveScan } from "../lib/scans.server";
+import { latestScan, latestScanSummary, scanHistory, saveScan } from "../lib/scans.server";
 import { currentPlan, syncEarlyBird, PLAN_UNKNOWN } from "../lib/billing.server";
 import { withShopLock } from "../lib/lock.server";
 import { planFor, lockedAreas, areaLocked, allAreasPlan } from "../lib/plans";
@@ -21,18 +21,16 @@ import { TONE, Dot, Notices } from "../lib/ui";
 // ---------- server ----------
 
 async function loadState(shop) {
+  // The home page shows counts, never findings: those can run to megabytes on a big catalog and
+  // belong to the issue pages, so the row is read without them. checkCount is for the first-run
+  // page before any scan is stored.
   const [result, history, fixedWeek, fixedTotal] = await Promise.all([
-    latestScan(shop),
+    latestScanSummary(shop),
     scanHistory(shop),
     fixedCount(shop, 7),
     fixedCount(shop),
   ]);
-  // The home page shows counts, never findings: those can run to megabytes on a big catalog and
-  // belong to the issue pages. checkCount is for the first-run page before any scan is stored.
-  const summary = result
-    ? { ...result, findings: undefined, productIds: undefined, open: result.findings.length, high: result.findings.filter((f) => f.severity === "high").length }
-    : null;
-  return { result: summary, history, fixedWeek, fixedTotal, checkCount: RULE_CATALOG.length };
+  return { result, history, fixedWeek, fixedTotal, checkCount: RULE_CATALOG.length };
 }
 
 export async function loader({ request }) {

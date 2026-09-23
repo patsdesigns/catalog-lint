@@ -233,7 +233,8 @@ function SkuCell({ f }) {
 // here; then Trust word and Ignore when the plan includes them.
 function FindingRow({ f, columns, tracked, features, onSave, onLearn, onIgnore, onUndo, busy }) {
   const edit = f.edit;
-  const [value, setValue] = useState(edit?.suggested ?? "");
+  // The field starts with the suggestion, or with the stored value when the suggestion is only that.
+  const [value, setValue] = useState(edit?.suggested ?? edit?.raw ?? "");
   const [choice, setChoice] = useState(0);
   const current = currentValue(f);
   const fieldLabel = `Corrected value for ${f.productTitle}`;
@@ -479,7 +480,12 @@ function Detail({ rule, findings, tracked, features, onSave, onLearn, onIgnore, 
       <s-box padding="base">
         <s-stack direction="inline" gap="base" alignItems="center" justifyContent="space-between">
           <s-button variant="tertiary" icon="arrow-left" onClick={onBack}>Back to issues</s-button>
-          {hidden > 0 ? <s-text color="subdued">Showing {rows.length} of {filtered.length}. Use search to narrow down.</s-text> : null}
+          {hidden > 0 ? (
+            <s-text color="subdued">Showing {rows.length} of {filtered.length}. Use search to narrow down.</s-text>
+          ) : rule.count > findings.length ? (
+            // The stored list is capped per check; the count is not.
+            <s-text color="subdued">Showing the first {findings.length.toLocaleString("en-US")} of {rule.count.toLocaleString("en-US")}. Fix some and scan again for the rest.</s-text>
+          ) : null}
         </s-stack>
       </s-box>
     </s-section>
