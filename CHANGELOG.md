@@ -16,6 +16,7 @@ Versions follow [semantic versioning](https://semver.org): the first number chan
 
 - Development stores always get test charges, the only kind they accept. In production, a development store (where Shopify reviews apps) could not subscribe to a paid plan, and its test subscription was ignored. Real stores are still charged for real.
 - The Plans page said charges were test charges on every store, including real ones in production. It now says so only where it is true.
+- Opening the app's address directly showed a form asking for a store address, which Shopify's review rules forbid. The page now says to open TidyUp from Apps in the Shopify admin or find it in the Shopify App Store. A link that names the store still goes straight to the install.
 
 ## 0.9.0 - 2026-09-23
 
