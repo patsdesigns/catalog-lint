@@ -63,23 +63,12 @@
     "typescript": "^5.9.3",
     "vite": "^6.3.6"
   },
-  "workspaces": [
-    "extensions/*"
-  ],
   "trustedDependencies": [
     "@shopify/plugin-cloudflare"
   ],
   "overrides": {
     "p-map": "^4.0.0",
     "qs": "^6.16.0"
-  },
-  "resolutions": {
-    "qs": "^6.16.0"
-  },
-  "pnpm": {
-    "overrides": {
-      "qs": "^6.16.0"
-    }
   },
   "author": "pabra"
 }

@@ -279,7 +279,8 @@ export async function cancelBulkScan(graphql, id) {
 }
 
 // Streams the finished JSONL export and rebuilds one object per product. Child nodes (variants,
-// media, metafields, collections) arrive as their own lines pointing at the product via __parentId.
+// media, collections) arrive as their own lines pointing at the product via __parentId; the
+// tracked metafields come inline with the product (they are aliased fields, not a connection).
 export async function downloadBulkCatalog(url, tracked = []) {
   const response = await fetch(url);
   if (!response.ok) throw new Error(`Could not download the catalog export (${response.status})`);
@@ -289,7 +290,6 @@ export async function downloadBulkCatalog(url, tracked = []) {
     const parent = products.get(child.__parentId);
     if (!parent) return false;
     if (child.__typename === "ProductVariant") parent.variants.nodes.push(child);
-    else if (child.__typename === "Metafield") parent.metafields.nodes.push(child);
     else if (child.__typename === "Collection") parent.collections.nodes.push(child);
     else parent.media.nodes.push(child); // MediaImage, Video, Model3d, ExternalVideo
     return true;
@@ -300,7 +300,7 @@ export async function downloadBulkCatalog(url, tracked = []) {
     if (obj.__parentId) {
       if (!attach(obj)) orphans.push(obj);
     } else {
-      products.set(obj.id, { ...obj, variants: { nodes: [] }, media: { nodes: [] }, metafields: { nodes: [] }, collections: { nodes: [] } });
+      products.set(obj.id, { ...obj, variants: { nodes: [] }, media: { nodes: [] }, collections: { nodes: [] } });
     }
   };
   const decoder = new TextDecoder();

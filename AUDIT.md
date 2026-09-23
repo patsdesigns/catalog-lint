@@ -6,7 +6,7 @@ Method: one full read of every file, then seven independent review passes (one p
 
 Legend: `[ ]` open, `[x]` fixed. Severity: high (wrong data, lost undo, outage, security), medium (wrong behaviour in a real case), low (polish, robustness, consistency). Line numbers refer to the code before Phase 2. Product decisions are not changed; they are listed under Questions at the end.
 
-Totals: 136 items found; 125 fixed so far; 22 open questions.
+Totals: 136 items found; 134 fixed so far; 22 open questions.
 
 ## 1. Correctness of every check
 
@@ -163,7 +163,7 @@ Confirmed: every page uses Polaris web components; every input has a label (visi
 - [x] **9.11** low — `app/lib/ui.jsx:117`, `app/routes/app._index.jsx:331`, `:531` — "the product limit of your plan is reached", "high severity problems", a missing period. Fix: reword.
 - [x] **9.12** low — `app/routes/app.settings.jsx:285`, `app/lib/plans.js:84`, `app/lib/digest.server.js:57`, `:78` — "Weekly Email", "Weekly email digest", "weekly digest". Fix: "Weekly email" everywhere.
 - [x] **9.13** low — `app/lib/ui.jsx:8`, `app/lib/fixes.server.js:216` — the short fix names exist in two files. Fix: one map in `checkLabels.js`.
-- [ ] **9.14** low — `README.md:50` — the layout list omits the Tracked metafields and Ignored findings pages. Fix: list them.
+- [x] **9.14** low — `README.md:50` — the layout list omits the Tracked metafields and Ignored findings pages. Fix: list them.
 
 ## 10. Security
 
@@ -192,14 +192,14 @@ Confirmed: rules run in one pass per product over the enabled product rules; the
 
 Confirmed: no `app.additional.jsx`, no demo product generation, no unused imports (lint is clean), `typecheck` passes, `.DS_Store` files are ignored (two untracked ones were on disk).
 
-- [ ] **12.1** medium — `Dockerfile:10` — `npm ci --omit=dev` then `npm run build`, but `vite` is a devDependency, so the image build fails. Fix: install everything, build, then prune dev dependencies.
-- [ ] **12.2** low — `CHANGELOG.md` — the template's own changelog. Fix: delete.
-- [ ] **12.3** low — `extensions/.gitkeep`, `pnpm-workspace.yaml`, `package.json` `workspaces` — an empty extensions workspace. Fix: remove.
-- [ ] **12.4** low — `app/.DS_Store`, `app/routes/.DS_Store` — on disk, untracked. Fix: delete.
-- [ ] **12.5** low — see 5.5 and 9.13 — console noise and the duplicated label map.
-- [ ] **12.6** low — `app/lib/scan.server.js:285` — the `Metafield` branch in the bulk parser is dead (tracked metafields arrive inline). Fix: remove.
-- [ ] **12.7** medium — `package.json` — no `test:rules` script and no test folder. Fix: `test/` with the fixtures, the test and a small loader hook for extensionless imports; `npm run test:rules`.
-- [ ] **12.8** medium — `README.md`, `AGENTS.md`, `CLAUDE.md` — the README lists only some webhooks, has no test section and no data volume note; AGENTS.md (which CLAUDE.md includes) is the template's two lines and says nothing about the app. Fix: describe what the app does, the plans and areas, how to run, test and deploy.
+- [x] **12.1** medium — `Dockerfile:10` — `npm ci --omit=dev` then `npm run build`, but `vite` is a devDependency, so the image build fails. Fix: install everything, build, then prune dev dependencies.
+- [x] **12.2** low — `CHANGELOG.md` — the template's own changelog. Fix: delete.
+- [x] **12.3** low — `extensions/.gitkeep`, `pnpm-workspace.yaml`, `package.json` `workspaces` — an empty extensions workspace. Fix: remove.
+- [x] **12.4** low — `app/.DS_Store`, `app/routes/.DS_Store` — on disk, untracked. Fix: delete.
+- [x] **12.5** low — see 5.5 and 9.13 — console noise and the duplicated label map.
+- [x] **12.6** low — `app/lib/scan.server.js:285` — the `Metafield` branch in the bulk parser is dead (tracked metafields arrive inline). Fix: remove.
+- [x] **12.7** medium — `package.json` — no `test:rules` script and no test folder. Fix: `test/` with the fixtures, the test and a small loader hook for extensionless imports; `npm run test:rules`.
+- [x] **12.8** medium — `README.md`, `AGENTS.md`, `CLAUDE.md` — the README lists only some webhooks, has no test section and no data volume note; AGENTS.md (which CLAUDE.md includes) is the template's two lines and says nothing about the app. Fix: describe what the app does, the plans and areas, how to run, test and deploy.
 
 ## 13. App Store readiness checklist
 
