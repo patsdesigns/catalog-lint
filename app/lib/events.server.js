@@ -3,6 +3,7 @@ import { authenticate } from "../shopify.server";
 import { latestScan, saveScan } from "./scans.server";
 import { recheckProducts } from "./scan.server";
 import { planForShop } from "./billing.server";
+import { withShopLock } from "./lock.server";
 
 // The products/create and products/update routes: verify the webhook, work out the plan from the
 // shop's subscription and apply the event. Always answers 200, so Shopify does not retry.
@@ -40,18 +41,8 @@ async function queueProduct(shop, productId, created) {
 // time. Quick Clean and up re-check the product at once; Dust Off queues it (PendingProduct) for the
 // Scan New Products button.
 
-// One shop's updates run one after another: two webhooks for the same shop would otherwise read the
-// same stored scan and the second write would lose the first.
-const locks = new Map();
-export function withShopLock(shop, fn) {
-  const previous = locks.get(shop) || Promise.resolve();
-  const next = previous.then(fn, fn);
-  const settled = next.finally(() => {
-    if (locks.get(shop) === settled) locks.delete(shop);
-  });
-  locks.set(shop, settled);
-  return next;
-}
+// One shop's updates run one after another (lock.server.js): two webhooks for the same shop would
+// otherwise read the same stored scan and the second write would lose the first.
 
 // A product was created or updated. Returns what happened: processed (the scan was updated),
 // pending (queued for the button), or no-scan (nothing to update yet).

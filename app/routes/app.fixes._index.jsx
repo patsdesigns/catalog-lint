@@ -4,6 +4,7 @@ import { authenticate } from "../shopify.server";
 import { undoFix, recentFixes, fixedCount } from "../lib/fixes.server";
 import { refreshAfter } from "../lib/rescan.server";
 import { currentPlan } from "../lib/billing.server";
+import { withShopLock } from "../lib/lock.server";
 import { formatWhen, timeAgo, truncate } from "../lib/format";
 import { shopTimeZone } from "../lib/shop.server";
 import { ruleLabel, Notices } from "../lib/ui";
@@ -30,10 +31,13 @@ export async function action({ request }) {
   const { plan } = await currentPlan(billing);
   const form = await request.formData();
   try {
-    const undo = await undoFix(admin.graphql, session.shop, form.get("batchId"));
-    // A full rescan on a small catalog brings catalog-wide findings back for the reverted products.
-    if (undo.productIds.length) await refreshAfter(admin.graphql, session.shop, { kind: "products", ids: undo.productIds, full: true }, plan.productLimit);
-    return { ok: true, undo };
+    // One write at a time per shop, so a double click cannot revert twice.
+    return await withShopLock(session.shop, async () => {
+      const undo = await undoFix(admin.graphql, session.shop, form.get("batchId"));
+      // A full rescan on a small catalog brings catalog-wide findings back for the reverted products.
+      if (undo.productIds.length) await refreshAfter(admin.graphql, session.shop, { kind: "products", ids: undo.productIds, full: true }, plan.productLimit);
+      return { ok: true, undo };
+    });
   } catch (err) {
     return { ok: false, error: err.message || String(err) };
   }

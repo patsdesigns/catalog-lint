@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { redirect, useFetcher, useLoaderData, useNavigate } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
@@ -12,6 +12,8 @@ import { ignoreCheck } from "../lib/checks.server";
 import { RULE_CATALOG } from "../lib/rules.server";
 import { getSettings } from "../lib/settings.server";
 import { currentPlan } from "../lib/billing.server";
+import { withShopLock } from "../lib/lock.server";
+import { findingKey } from "../lib/validate.server";
 import { planFor, areaLocked, allAreasPlan } from "../lib/plans";
 import { categoryOf } from "../lib/categories";
 import { adminUrl, truncate } from "../lib/format";
@@ -36,24 +38,48 @@ export async function loader({ request, params }) {
   return { rule, findings, plan, label, tracked };
 }
 
+// The browser names a finding by its key (rule, product, variant, word, field); everything else
+// about it, above all the edit descriptor that says what to write where, comes from the stored scan.
+const NOT_UNDERSTOOD = "That finding was not understood. Reload the page and try again.";
+const NOT_LISTED = "That finding is no longer in the list. Refresh the list and try again.";
+// Intents that write to Shopify run one at a time per shop, so a double click or a second tab
+// cannot write twice.
+const WRITES = new Set(["fix", "undo", "edit"]);
+
+function parseKey(raw) {
+  try {
+    return raw ? findingKey(JSON.parse(raw)) : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function action({ request, params }) {
   const { admin, session, billing } = await authenticate.admin(request);
   const { plan } = await currentPlan(billing);
   const form = await request.formData();
   const intent = form.get("intent");
   const ruleId = params.ruleId;
+  const shop = session.shop;
   // Features the plan does not include are refused here as well as hidden in the page.
   const gate = { edit: ["inlineEdits", "Inline edits are"], learn: ["dictionary", "The spelling dictionary is"], ignore: ["ignores", "Ignoring findings is"] }[intent];
   if (gate && !plan.features[gate[0]]) {
     return { ok: false, error: `${gate[1]} part of the ${planFor(gate[0]).name} plan and up. Upgrade in Plans.` };
   }
-  // Fixes and edits in an area the plan does not cover are refused here as well.
+  // Fixes, edits, ignores and refreshes in an area the plan does not cover are refused here as well.
   const category = RULE_CATALOG.find((r) => r.id === ruleId)?.category;
-  if ((intent === "fix" || intent === "edit") && category && areaLocked(plan, category)) {
+  if (["fix", "edit", "ignore", "refresh"].includes(intent) && category && areaLocked(plan, category)) {
     return { ok: false, error: `${categoryOf(category).label} findings are part of the ${allAreasPlan().name} plan. Compare plans to unlock them.` };
   }
 
-  try {
+  // The stored finding a key names, in the latest scan.
+  const locate = async (key) => {
+    const latest = await latestScan(shop);
+    const wanted = ignoreKey(key);
+    return (latest?.findings || []).find((f) => ignoreKey(f) === wanted) || null;
+  };
+
+  const run = async () => {
     let fix = null;
     let undo = null;
     let edit = null;
@@ -63,48 +89,70 @@ export async function action({ request, params }) {
     if (intent === "disableRule") {
       // Ignoring a whole check turns it off in Settings, where its switch shows unchecked, and
       // drops its findings. Turning the switch back on brings it back on the next scan.
-      await ignoreCheck(admin.graphql, session.shop, ruleId, plan.productLimit);
+      await ignoreCheck(admin.graphql, shop, ruleId, plan.productLimit);
       return { ok: true, disabledRule: ruleId };
     }
     if (intent === "fix") {
-      const latest = await latestScan(session.shop);
-      fix = { ruleId, ...(await applyFix(admin.graphql, session.shop, ruleId, latest?.findings || [])) };
+      const latest = await latestScan(shop);
+      fix = { ruleId, ...(await applyFix(admin.graphql, shop, ruleId, latest?.findings || [])) };
       change = { kind: "products", ids: fix.productIds, ruleId };
     }
     if (intent === "undo") {
-      undo = await undoFix(admin.graphql, session.shop, form.get("batchId"));
-      // Undoing a saved row only clears its mark; undoing a bulk fix re-checks the products.
-      const finding = form.get("finding") ? JSON.parse(form.get("finding")) : null;
-      change = finding ? { kind: "unsaved", key: ignoreKey(finding) } : { kind: "products", ids: undo.productIds, full: true };
+      undo = await undoFix(admin.graphql, shop, form.get("batchId"));
+      // Undoing a saved row only clears its mark; undoing a bulk fix re-checks the products it changed.
+      const key = parseKey(form.get("finding"));
+      if (key) change = { kind: "unsaved", key: ignoreKey(key) };
+      else if (undo.productIds.length) change = { kind: "products", ids: undo.productIds, full: true };
     }
     if (intent === "learn") {
-      const word = form.get("word");
-      await addWord(session.shop, word);
+      const word = String(form.get("word") || "").trim().slice(0, 100);
+      if (!word) return { ok: false, error: NOT_UNDERSTOOD };
+      await addWord(shop, word);
       change = { kind: "learn", word };
     }
     if (intent === "ignore") {
-      const finding = JSON.parse(form.get("finding"));
-      await addIgnore(session.shop, finding);
+      const key = parseKey(form.get("finding"));
+      if (!key) return { ok: false, error: NOT_UNDERSTOOD };
+      const finding = (await locate(key)) || key;
+      await addIgnore(shop, finding);
       change = { kind: "ignore", finding };
     }
     if (intent === "edit") {
-      const descriptor = JSON.parse(form.get("edit"));
-      edit = await applyEdit(admin.graphql, session.shop, descriptor, form.get("value"));
+      const key = parseKey(form.get("finding"));
+      if (!key) return { ok: false, error: NOT_UNDERSTOOD };
+      const finding = await locate(key);
+      if (!finding?.edit) return { ok: false, error: NOT_LISTED };
+      const quick = form.get("quick") === "1";
+      let descriptor = finding.edit;
+      let value = String(form.get("value") ?? "");
+      if (descriptor.kind === "choice") {
+        // A choice is an edit of its own; it borrows the row's rule, product and title for the log.
+        const choice = descriptor.choices?.[Number(form.get("choice"))];
+        if (!choice) return { ok: false, error: NOT_UNDERSTOOD };
+        descriptor = { ...choice, ruleId: descriptor.ruleId, productId: descriptor.productId, title: descriptor.title };
+        value = choice.value;
+      } else if (quick) {
+        value = String(descriptor.applyValue ?? descriptor.suggested ?? "");
+      }
+      edit = await applyEdit(admin.graphql, shop, descriptor, value, { quick });
       // The row stays, marked saved, so the change can be undone in place; Refresh re-checks it.
-      const finding = form.get("finding") ? JSON.parse(form.get("finding")) : null;
-      change = edit.ok && finding ? { kind: "saved", key: ignoreKey(finding), batchId: edit.batchId, value: form.get("value"), quick: form.get("quick") === "1" } : null;
+      change = edit.ok ? { kind: "saved", key: ignoreKey(key), batchId: edit.batchId, value, quick } : null;
     }
     if (intent === "refresh") {
       // Re-check every product this check lists (a full rescan on a small catalog).
-      const latest = await latestScan(session.shop);
+      const latest = await latestScan(shop);
       const before = (latest?.findings || []).filter((f) => f.ruleId === ruleId);
       const ids = [...new Set(before.map((f) => f.productId))];
-      if (ids.length) await refreshAfter(admin.graphql, session.shop, { kind: "products", ids, full: true }, plan.productLimit);
-      const after = ((await latestScan(session.shop))?.findings || []).filter((f) => f.ruleId === ruleId).length;
+      if (ids.length) await refreshAfter(admin.graphql, shop, { kind: "products", ids, full: true }, plan.productLimit);
+      const after = ((await latestScan(shop))?.findings || []).filter((f) => f.ruleId === ruleId).length;
       refresh = { ruleId, products: ids.length, before: before.length, after };
     }
-    if (change) await refreshAfter(admin.graphql, session.shop, change, plan.productLimit);
+    if (change) await refreshAfter(admin.graphql, shop, change, plan.productLimit);
     return { ok: true, fix, undo, edit, refresh };
+  };
+
+  try {
+    return WRITES.has(intent) ? await withShopLock(shop, run) : await run();
   } catch (err) {
     return { ok: false, error: err.message || String(err) };
   }
@@ -205,8 +253,6 @@ function FindingRow({ f, columns, tracked, features, onSave, onLearn, onIgnore, 
       {current.note ? <s-text color="subdued">{truncate(current.note, 80)}</s-text> : null}
     </s-stack>
   );
-  // A choice is an edit of its own; it borrows the row's rule, product and title for the log.
-  const pick = (i) => ({ ...edit.choices[i], ruleId: edit.ruleId, productId: edit.productId, title: edit.title });
 
   return (
     <s-table-row>
@@ -295,7 +341,7 @@ function FindingRow({ f, columns, tracked, features, onSave, onLearn, onIgnore, 
             {isChoice ? (
               <s-button
                 variant="secondary"
-                onClick={() => onSave(pick(choice), edit.choices[choice].value, f, true)}
+                onClick={() => onSave(f, edit.choices[choice].value, { quick: true, choice })}
                 disabled={busy || undefined}
                 accessibilityLabel={`Apply ${edit.choices[choice].label} to ${f.productTitle}`}
               >
@@ -306,7 +352,7 @@ function FindingRow({ f, columns, tracked, features, onSave, onLearn, onIgnore, 
               // Saves the suggestion as it is, in one click.
               <s-button
                 variant="secondary"
-                onClick={() => onSave(edit, applyValue, f, true)}
+                onClick={() => onSave(f, applyValue, { quick: true })}
                 disabled={busy || undefined}
                 accessibilityLabel={`${edit.applyLabel || "Quick apply"} for ${f.productTitle}${applyValue ? `: ${applyValue}` : ""}`}
               >
@@ -318,7 +364,7 @@ function FindingRow({ f, columns, tracked, features, onSave, onLearn, onIgnore, 
               // the page-level primary action stays the one primary button on the page.
               <s-button
                 variant="secondary"
-                onClick={() => onSave(edit, value, f, false)}
+                onClick={() => onSave(f, value, {})}
                 disabled={!canSave || busy || undefined}
                 accessibilityLabel={`${edit.kind === "word" ? "Replace the word for" : "Save corrected value for"} ${f.productTitle}`}
               >
@@ -453,6 +499,9 @@ function AllClear({ onBack }) {
 
 // ---------- page ----------
 
+// What names a finding to the server (see ignoreKey): nothing else about it is sent.
+const keyOf = (f) => ({ ruleId: f.ruleId, productId: f.productId, variantId: f.variantId || "", word: f.word || "", field: f.field || "" });
+
 export default function IssuePage() {
   const { rule, findings, plan, label, tracked } = useLoaderData();
   const fetcher = useFetcher();
@@ -460,13 +509,25 @@ export default function IssuePage() {
   const busy = fetcher.state !== "idle";
   const data = fetcher.data;
 
-  const submit = (payload) => fetcher.submit(payload, { method: "post" });
+  // One submission at a time: a second click before the busy state renders is ignored.
+  const pending = useRef(false);
+  useEffect(() => {
+    if (fetcher.state === "idle") pending.current = false;
+  }, [fetcher.state]);
+  const submit = (payload) => {
+    if (pending.current) return;
+    pending.current = true;
+    fetcher.submit(payload, { method: "post" });
+  };
   const back = () => navigate("/app");
   const runFix = () => submit({ intent: "fix" });
-  const runUndo = (batchId, finding) => submit(finding ? { intent: "undo", batchId, finding: JSON.stringify(finding) } : { intent: "undo", batchId });
+  const runUndo = (batchId, finding) => submit(finding ? { intent: "undo", batchId, finding: JSON.stringify(keyOf(finding)) } : { intent: "undo", batchId });
   const learnWord = (word) => submit({ intent: "learn", word });
-  const ignoreFinding = (f) => submit({ intent: "ignore", finding: JSON.stringify(f) });
-  const saveEdit = (edit, value, finding, quick = false) => submit({ intent: "edit", edit: JSON.stringify(edit), value, finding: JSON.stringify(finding), quick: quick ? "1" : "0" });
+  const ignoreFinding = (f) => submit({ intent: "ignore", finding: JSON.stringify(keyOf(f)) });
+  // The server looks the finding up and applies its own edit descriptor; the value travels for
+  // typed corrections, the choice index for rows with alternatives.
+  const saveEdit = (finding, value, { quick = false, choice } = {}) =>
+    submit({ intent: "edit", finding: JSON.stringify(keyOf(finding)), value: value ?? "", quick: quick ? "1" : "0", choice: choice === undefined ? "" : String(choice) });
   const runRefresh = () => submit({ intent: "refresh" });
   const ignoreCheck = () => submit({ intent: "disableRule" });
   const refreshing = busy && fetcher.formData?.get("intent") === "refresh";

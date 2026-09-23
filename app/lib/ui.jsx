@@ -66,7 +66,8 @@ export function Notices({ data, onUndo, onRestore, busy }) {
           <s-stack direction="inline" gap="base" alignItems="center" justifyContent="space-between">
             <s-paragraph>
               {[
-                fix.skipped > 0 ? `${fix.skipped} skipped, no safe value to use` : null,
+                fix.skipped > 0 ? `${fix.skipped} skipped: changed since the scan` : null,
+                fix.overBudget > 0 ? `${fix.overBudget} left for the next run (${fix.perRun || 100} per run), run the fix again for the rest` : null,
                 fix.errors.length > 0 ? `${fix.errors.length} failed: ${fix.errors.slice(0, 2).join("; ")}` : null,
               ]
                 .filter(Boolean)
@@ -79,7 +80,7 @@ export function Notices({ data, onUndo, onRestore, busy }) {
         </s-banner>
       ) : null}
       {undo ? (
-        <s-banner tone={undo.errors.length ? "warning" : "success"} heading={`${undo.undone} changes reverted`}>
+        <s-banner tone={undo.errors.length ? "warning" : "success"} heading={`${undo.undone} ${undo.undone === 1 ? "change" : "changes"} reverted`}>
           {undo.errors.length ? <s-paragraph>{undo.errors.slice(0, 2).join("; ")}</s-paragraph> : null}
         </s-banner>
       ) : null}

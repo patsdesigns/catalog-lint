@@ -1,4 +1,4 @@
-import { Fragment, useState, useEffect } from "react";
+import { Fragment, useState, useEffect, useRef } from "react";
 import { useFetcher, useLoaderData, useNavigate, useRevalidator } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
@@ -10,6 +10,7 @@ import { applyFix, undoFix, fixedCount } from "../lib/fixes.server";
 import { ignoreCheck, restoreCheck } from "../lib/checks.server";
 import { latestScan, scanHistory, saveScan } from "../lib/scans.server";
 import { currentPlan } from "../lib/billing.server";
+import { withShopLock } from "../lib/lock.server";
 import { planFor, lockedAreas, areaLocked, allAreasPlan } from "../lib/plans";
 import { RULE_CATALOG } from "../lib/rules.server";
 import { CATEGORIES, categoryOf } from "../lib/categories";
@@ -64,7 +65,8 @@ export async function action({ request }) {
   const form = await request.formData();
   const intent = form.get("intent") || "scan";
 
-  try {
+  // Intents that write to Shopify run one at a time per shop (lock.server.js).
+  const run = async () => {
     let undo = null;
     let job = null;
     let scanNew = null;
@@ -93,7 +95,7 @@ export async function action({ request }) {
     if (intent === "undo") {
       undo = await undoFix(admin.graphql, session.shop, form.get("batchId"));
       // A full rescan on a small catalog brings catalog-wide findings back for the reverted products.
-      await refreshAfter(admin.graphql, session.shop, { kind: "products", ids: undo.productIds, full: true }, plan.productLimit);
+      if (undo.productIds.length) await refreshAfter(admin.graphql, session.shop, { kind: "products", ids: undo.productIds, full: true }, plan.productLimit);
     }
     if (intent === "ignoreRule") {
       // Quick ignore from a table row: the check goes off in Settings; the notice offers Undo.
@@ -114,6 +116,10 @@ export async function action({ request }) {
     }
     const state = await loadState(session.shop);
     return { ok: true, ...state, undo, scanNew, job, plan, ignored, restored, fix };
+  };
+
+  try {
+    return intent === "fixAll" || intent === "undo" ? await withShopLock(session.shop, run) : await run();
   } catch (err) {
     return { ok: false, error: err.message || String(err) };
   }
@@ -833,7 +839,16 @@ export default function Index() {
     return () => clearInterval(timer);
   }, [scanning, revalidator]);
 
-  const submit = (payload) => fetcher.submit(payload, { method: "post" });
+  // One submission at a time: a second click before the busy state renders is ignored.
+  const inFlight = useRef(false);
+  useEffect(() => {
+    if (fetcher.state === "idle") inFlight.current = false;
+  }, [fetcher.state]);
+  const submit = (payload) => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    fetcher.submit(payload, { method: "post" });
+  };
   const runScan = () => submit({ intent: "scan" });
   const runUndo = (batchId) => submit({ intent: "undo", batchId });
   // Quick ignore from a table row, and its undo from the notice that follows.

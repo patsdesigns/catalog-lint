@@ -1,5 +1,5 @@
 // Ignoring a whole check, from a home page row or an issue page, and taking that back.
-import { latestScan, saveScan, scanById } from "./scans.server";
+import { latestScan, saveScan, scanById, scansSince } from "./scans.server";
 import { getSettings, saveSettings } from "./settings.server";
 import { refreshAfter, withFindings } from "./rescan.server";
 import { RULE_CATALOG } from "./rules.server";
@@ -26,8 +26,8 @@ export async function ignoreCheck(graphql, shop, ruleId, limit = null) {
 }
 
 // Turns the check back on. Its findings come straight back from the row Ignore left behind when
-// the catalog has not been read again since; otherwise a small catalog is scanned again now and a
-// large one reports the check on its next scan.
+// nothing else was saved since (only the ignore itself); otherwise a small catalog is scanned
+// again now and a large one reports the check on its next scan.
 export async function restoreCheck(graphql, shop, ruleId, scanId, limit = null) {
   const current = await getSettings(shop);
   const rule = ruleOrThrow(ruleId);
@@ -35,7 +35,8 @@ export async function restoreCheck(graphql, shop, ruleId, scanId, limit = null) 
   await saveSettings(shop, { ...current, preset: "custom", customDisabled });
   const latest = await latestScan(shop);
   const kept = latest && scanId ? await scanById(shop, scanId) : null;
-  if (latest && kept && kept.readAt === latest.readAt) {
+  const untouched = kept ? (await scansSince(shop, kept.id)) === 1 : false;
+  if (latest && kept && untouched && kept.readAt === latest.readAt) {
     const back = kept.findings.filter((f) => f.ruleId === ruleId);
     const settings = await getSettings(shop);
     const findings = [...latest.findings.filter((f) => f.ruleId !== ruleId), ...back];

@@ -41,6 +41,11 @@ export async function scanById(shop, id) {
   return row ? toResult(row) : null;
 }
 
+// How many results were saved after the given one.
+export async function scansSince(shop, id) {
+  return prisma.scan.count({ where: { shop, id: { gt: Number(id) } } });
+}
+
 // The last few results, oldest first, each with its open-problem count. The count comes from the
 // small per-check summary rather than the findings JSON, which can run to megabytes on a big store.
 export async function scanHistory(shop, limit = 12) {

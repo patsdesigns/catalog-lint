@@ -5,6 +5,7 @@ import { authenticate } from "../shopify.server";
 import { fixBatch, undoFix } from "../lib/fixes.server";
 import { refreshAfter } from "../lib/rescan.server";
 import { currentPlan } from "../lib/billing.server";
+import { withShopLock } from "../lib/lock.server";
 import { adminUrl, timeAgo } from "../lib/format";
 
 // One recent fix: the products it changed, each of which can be undone on its own.
@@ -20,9 +21,11 @@ export async function action({ request, params }) {
   const { plan } = await currentPlan(billing);
   const form = await request.formData();
   try {
-    const undo = await undoFix(admin.graphql, session.shop, params.batchId, form.get("productId") || null);
-    if (undo.productIds.length) await refreshAfter(admin.graphql, session.shop, { kind: "products", ids: undo.productIds, full: true }, plan.productLimit);
-    return { ok: true, undo };
+    return await withShopLock(session.shop, async () => {
+      const undo = await undoFix(admin.graphql, session.shop, params.batchId, form.get("productId") || null);
+      if (undo.productIds.length) await refreshAfter(admin.graphql, session.shop, { kind: "products", ids: undo.productIds, full: true }, plan.productLimit);
+      return { ok: true, undo };
+    });
   } catch (err) {
     return { ok: false, error: err.message || String(err) };
   }
@@ -44,6 +47,12 @@ const FIELD_LABELS = {
   seoDescription: "meta description",
   tags: "tags",
   productType: "product type",
+  status: "status",
+  inventoryPolicy: "continue selling when out of stock",
+  optionValue: "option value",
+  publication: "sales channel",
+  available: "available quantity",
+  metafield: "metafield",
 };
 const n = (v) => Number(v || 0).toLocaleString("en-US");
 

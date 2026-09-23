@@ -1,5 +1,6 @@
-// Every write to Shopify goes through here so fixes, edits, and undo share one path. Reads and
-// writes use the shared helper (graphql.server.js): paced on the cost bucket, retried on throttling.
+// Every write to Shopify goes through here so fixes, edits, and undo share one path, and every
+// write is preceded by a read of the value it replaces. Reads and writes use the shared helper
+// (graphql.server.js): paced on the cost bucket, retried on throttling.
 
 import { request } from "./graphql.server";
 
@@ -17,6 +18,8 @@ async function mutate(graphql, query, variables, pickErrors) {
 }
 
 const read = (graphql, query, variables) => request(graphql, query, variables);
+
+// ---------- operations ----------
 
 const PRODUCT_UPDATE = `#graphql
   mutation ProductUpdate($product: ProductUpdateInput!) {
@@ -45,6 +48,8 @@ const INVENTORY_UPDATE = `#graphql
   }
 `;
 
+// productUpdateMedia is deprecated in favour of fileUpdate, which needs the write_files scope
+// (every file in the store); it still validates in 2026-07 and 2026-10 (AUDIT.md, question 22).
 const MEDIA_UPDATE = `#graphql
   mutation MediaUpdate($productId: ID!, $media: [UpdateMediaInput!]!) {
     productUpdateMedia(productId: $productId, media: $media) {
@@ -85,6 +90,12 @@ const PUBLICATIONS = `#graphql
   }
 `;
 
+const PUBLISHED_ON = `#graphql
+  query PublishedOn($id: ID!, $publicationId: ID!) {
+    product(id: $id) { publishedOnPublication(publicationId: $publicationId) }
+  }
+`;
+
 const SET_QUANTITIES = `#graphql
   mutation SetAvailable($input: InventorySetQuantitiesInput!) {
     inventorySetQuantities(input: $input) {
@@ -94,15 +105,25 @@ const SET_QUANTITIES = `#graphql
   }
 `;
 
-const INVENTORY_LEVEL = `#graphql
-  query InventoryLevel($id: ID!) {
+const INVENTORY_LEVELS = `#graphql
+  query InventoryLevels($id: ID!) {
     inventoryItem(id: $id) {
-      inventoryLevels(first: 1) {
+      inventoryLevels(first: 50) {
         nodes {
           location { id }
           quantities(names: ["available"]) { name quantity }
         }
       }
+    }
+  }
+`;
+
+const INVENTORY_ITEM = `#graphql
+  query InventoryItemRead($id: ID!) {
+    inventoryItem(id: $id) {
+      id
+      unitCost { amount }
+      measurement { weight { value unit } }
     }
   }
 `;
@@ -148,18 +169,47 @@ const PRODUCT_READ = `#graphql
   }
 `;
 
-export const PRODUCT_TEXT_FIELDS = [
-  "title",
-  "descriptionHtml",
-  "vendor",
-  "productType",
-  "tags",
-  "seoTitle",
-  "seoDescription",
-];
+const VARIANT_READ = `#graphql
+  query VariantRead($id: ID!) {
+    productVariant(id: $id) {
+      id
+      price
+      compareAtPrice
+      sku
+      barcode
+      inventoryPolicy
+      inventoryItem { id }
+    }
+  }
+`;
+
+const VARIANT_IDS = `#graphql
+  query VariantIds($id: ID!) {
+    product(id: $id) { variants(first: 250) { nodes { id inventoryPolicy } } }
+  }
+`;
+
+const MEDIA_ALTS = `#graphql
+  query MediaAlts($id: ID!) {
+    product(id: $id) { media(first: 250) { nodes { ... on MediaImage { id alt } } } }
+  }
+`;
+
+const OPTIONS_READ = `#graphql
+  query OptionsRead($id: ID!) {
+    product(id: $id) { options { id name optionValues { id name } } }
+  }
+`;
+
+// ---------- fields ----------
+
+export const PRODUCT_TEXT_FIELDS = ["title", "descriptionHtml", "vendor", "productType", "tags", "seoTitle", "seoDescription"];
 // Product fields that are not text but are still set through productUpdate.
 export const PRODUCT_ENUM_FIELDS = ["status"];
+export const PRODUCT_FIELDS = [...PRODUCT_TEXT_FIELDS, ...PRODUCT_ENUM_FIELDS];
 export const VARIANT_FIELDS = ["sku", "barcode", "price", "compareAt", "inventoryPolicy"];
+
+// ---------- reads ----------
 
 export async function readProduct(graphql, productId) {
   const data = await read(graphql, PRODUCT_READ, { id: productId });
@@ -177,7 +227,86 @@ export async function readProduct(graphql, productId) {
   };
 }
 
+// The variant as it is now, keyed like VARIANT_FIELDS, or null when it no longer exists.
+export async function readVariant(graphql, variantId) {
+  const data = await read(graphql, VARIANT_READ, { id: variantId });
+  const v = data?.productVariant;
+  if (!v) return null;
+  return {
+    sku: v.sku || "",
+    barcode: v.barcode || "",
+    price: v.price ?? "",
+    compareAt: v.compareAtPrice ?? null,
+    inventoryPolicy: v.inventoryPolicy || "DENY",
+    inventoryItemId: v.inventoryItem?.id || null,
+  };
+}
+
+// Every variant of a product with its inventory policy.
+export async function readVariantIds(graphql, productId) {
+  const data = await read(graphql, VARIANT_IDS, { id: productId });
+  return (data?.product?.variants?.nodes || []).map((v) => ({ id: v.id, inventoryPolicy: v.inventoryPolicy || "DENY" }));
+}
+
+// The cost and the weight of an inventory item, or null when it no longer exists.
+export async function readInventoryItem(graphql, inventoryItemId) {
+  const data = await read(graphql, INVENTORY_ITEM, { id: inventoryItemId });
+  const item = data?.inventoryItem;
+  if (!item) return null;
+  return {
+    cost: item.unitCost?.amount ?? null,
+    weight: { value: Number(item.measurement?.weight?.value ?? 0), unit: item.measurement?.weight?.unit || "KILOGRAMS" },
+  };
+}
+
+// The alt text of every image of a product, by media id.
+export async function readMediaAlts(graphql, productId) {
+  const data = await read(graphql, MEDIA_ALTS, { id: productId });
+  const alts = new Map();
+  for (const m of data?.product?.media?.nodes || []) if (m?.id) alts.set(m.id, m.alt || "");
+  return alts;
+}
+
+// The options of a product with their values, by option id.
+export async function readOptions(graphql, productId) {
+  const data = await read(graphql, OPTIONS_READ, { id: productId });
+  return (data?.product?.options || []).map((o) => ({ id: o.id, name: o.name, values: (o.optionValues || []).map((v) => ({ id: v.id, name: v.name })) }));
+}
+
+// The Online Store sales channel of this store, or null when the store has none.
+export async function onlineStorePublicationId(graphql) {
+  const data = await read(graphql, PUBLICATIONS);
+  const nodes = data?.publications?.nodes || [];
+  const title = (n) => n.catalog?.title || "";
+  const hit = nodes.find((n) => title(n) === "Online Store") || nodes.find((n) => /online store/i.test(title(n)));
+  return hit ? hit.id : null;
+}
+
+export async function readPublished(graphql, productId, publicationId) {
+  const data = await read(graphql, PUBLISHED_ON, { id: productId, publicationId });
+  return Boolean(data?.product?.publishedOnPublication);
+}
+
+// Where the item is stocked, with the available quantity at each location.
+export async function readInventoryLevels(graphql, inventoryItemId) {
+  const data = await read(graphql, INVENTORY_LEVELS, { id: inventoryItemId });
+  return (data?.inventoryItem?.inventoryLevels?.nodes || [])
+    .filter((level) => level?.location?.id)
+    .map((level) => ({ locationId: level.location.id, quantity: (level.quantities || []).find((q) => q.name === "available")?.quantity ?? 0 }));
+}
+
+// The metafield as it is now ({ type, value }), or null when the product has none by that key.
+export async function readMetafield(graphql, productId, key) {
+  const { namespace, key: k } = splitKey(key);
+  const data = await read(graphql, METAFIELD_READ, { id: productId, namespace, key: k });
+  const m = data?.product?.metafield;
+  return m ? { type: m.type, value: m.value } : null;
+}
+
+// ---------- writes ----------
+
 export async function setProductField(graphql, productId, field, value) {
+  if (!PRODUCT_FIELDS.includes(field)) return [`Unknown product field ${field}`];
   const product = { id: productId };
   if (field === "seoTitle") product.seo = { title: value };
   else if (field === "seoDescription") product.seo = { description: value };
@@ -190,9 +319,10 @@ export async function setProductField(graphql, productId, field, value) {
 }
 
 export async function setVariantField(graphql, productId, variantId, field, value) {
+  if (!VARIANT_FIELDS.includes(field)) return [`Unknown variant field ${field}`];
   const variant = { id: variantId };
   if (field === "sku") variant.inventoryItem = { sku: value };
-  else if (field === "compareAt") variant.compareAtPrice = value === "" ? null : value;
+  else if (field === "compareAt") variant.compareAtPrice = value === "" || value === null ? null : value;
   else variant[field] = value;
   return mutate(
     graphql,
@@ -239,15 +369,6 @@ export async function renameOptionValue(graphql, productId, optionId, valueId, n
   );
 }
 
-// The Online Store sales channel of this store, or null when the store has none.
-export async function onlineStorePublicationId(graphql) {
-  const data = await read(graphql, PUBLICATIONS);
-  const nodes = data?.publications?.nodes || [];
-  const title = (n) => n.catalog?.title || "";
-  const hit = nodes.find((n) => title(n) === "Online Store") || nodes.find((n) => /online store/i.test(title(n)));
-  return hit ? hit.id : null;
-}
-
 export async function setPublished(graphql, productId, publicationId, on) {
   const query = on ? PUBLISH : UNPUBLISH;
   return mutate(
@@ -256,15 +377,6 @@ export async function setPublished(graphql, productId, publicationId, on) {
     { id: productId, input: [{ publicationId }] },
     (d) => (on ? d.publishablePublish : d.publishableUnpublish)?.userErrors,
   );
-}
-
-// Where the item is stocked first, with its available quantity, or null when it is stocked nowhere.
-export async function readAvailable(graphql, inventoryItemId) {
-  const data = await read(graphql, INVENTORY_LEVEL, { id: inventoryItemId });
-  const level = data?.inventoryItem?.inventoryLevels?.nodes?.[0];
-  if (!level?.location?.id) return null;
-  const available = (level.quantities || []).find((q) => q.name === "available");
-  return { locationId: level.location.id, quantity: available ? available.quantity : 0 };
 }
 
 export async function setAvailable(graphql, inventoryItemId, locationId, quantity) {
@@ -288,14 +400,6 @@ const splitKey = (key) => {
   return i === -1 ? { namespace: "custom", key: String(key) } : { namespace: key.slice(0, i), key: key.slice(i + 1) };
 };
 
-// The metafield as it is now ({ type, value }), or null when the product has none by that key.
-export async function readMetafield(graphql, productId, key) {
-  const { namespace, key: k } = splitKey(key);
-  const data = await read(graphql, METAFIELD_READ, { id: productId, namespace, key: k });
-  const m = data?.product?.metafield;
-  return m ? { type: m.type, value: m.value } : null;
-}
-
 export async function setMetafield(graphql, productId, key, type, value) {
   const { namespace, key: k } = splitKey(key);
   return mutate(
@@ -316,20 +420,82 @@ export async function deleteMetafield(graphql, productId, key) {
   );
 }
 
-// Reverse one FixLog entry. Returns error strings, empty on success.
+// ---------- undo ----------
+
+// Values compared the way the field holds them: numbers as numbers, cleared values as null.
+function same(field, a, b) {
+  const numeric = ["price", "compareAt", "cost"];
+  if (numeric.includes(field)) {
+    const n = (v) => (v === "" || v === null || v === undefined ? null : Number(v));
+    return n(a) === n(b);
+  }
+  if (field === "tags") return (Array.isArray(a) ? a : []).join(" ") === (Array.isArray(b) ? b : []).join(" ");
+  if (field === "weight") return Number(a?.value) === Number(b?.value) && (a?.unit || "") === (b?.unit || "");
+  if (field === "available") return Number(a?.quantity) === Number(b?.quantity);
+  if (field === "metafield") return (a?.value ?? null) === (b?.value ?? null);
+  if (field === "optionValue") return (a?.name ?? a) === (b?.name ?? b);
+  if (field === "publication") return Boolean(a) === Boolean(b);
+  return String(a ?? "") === String(b ?? "");
+}
+
+// What the field holds right now, or undefined when its owner no longer exists.
+async function currentValue(graphql, entry) {
+  const f = entry.field;
+  if (PRODUCT_FIELDS.includes(f)) {
+    const p = await readProduct(graphql, entry.productId);
+    return p ? p[f] : undefined;
+  }
+  if (VARIANT_FIELDS.includes(f)) {
+    const v = await readVariant(graphql, entry.targetId);
+    return v ? v[f] : undefined;
+  }
+  if (f === "weight" || f === "cost") {
+    const item = await readInventoryItem(graphql, entry.targetId);
+    return item ? item[f] : undefined;
+  }
+  if (f === "alt") {
+    const alts = await readMediaAlts(graphql, entry.productId);
+    return alts.has(entry.targetId) ? alts.get(entry.targetId) : undefined;
+  }
+  if (f === "optionValue") {
+    for (const o of await readOptions(graphql, entry.productId)) {
+      const v = o.values.find((x) => x.id === entry.targetId);
+      if (v) return { optionId: o.id, name: v.name };
+    }
+    return undefined;
+  }
+  if (f === "publication") return readPublished(graphql, entry.productId, entry.targetId);
+  if (f === "available") {
+    const after = JSON.parse(entry.after);
+    const level = (await readInventoryLevels(graphql, entry.targetId)).find((l) => l.locationId === after?.locationId);
+    return level || undefined;
+  }
+  if (f === "metafield") return readMetafield(graphql, entry.productId, entry.targetId);
+  return undefined;
+}
+
+// Reverses one FixLog entry. Returns { errors, stale }: errors are messages (empty on success);
+// stale means the field no longer holds what the fix wrote (the product changed since, or is gone),
+// so it was left as it is and the entry is closed.
 export async function revert(graphql, entry) {
   const before = JSON.parse(entry.before);
+  const after = JSON.parse(entry.after);
   const f = entry.field;
-  if (PRODUCT_TEXT_FIELDS.includes(f) || PRODUCT_ENUM_FIELDS.includes(f)) return setProductField(graphql, entry.productId, f, before);
-  if (VARIANT_FIELDS.includes(f)) return setVariantField(graphql, entry.productId, entry.targetId, f, before);
-  if (f === "weight") return setWeight(graphql, entry.targetId, before.value, before.unit);
-  if (f === "alt") return setAlt(graphql, entry.productId, entry.targetId, before);
-  if (f === "cost") return setCost(graphql, entry.targetId, before);
-  if (f === "optionValue") return renameOptionValue(graphql, entry.productId, before.optionId, entry.targetId, before.name);
-  if (f === "publication") return setPublished(graphql, entry.productId, entry.targetId, Boolean(before));
-  if (f === "available") return setAvailable(graphql, entry.targetId, before.locationId, before.quantity);
-  if (f === "metafield") {
-    return before ? setMetafield(graphql, entry.productId, entry.targetId, before.type, before.value) : deleteMetafield(graphql, entry.productId, entry.targetId);
-  }
-  return [`Unknown field ${f}`];
+  const current = await currentValue(graphql, entry);
+  if (current === undefined) return { errors: ["no longer exists, nothing to undo"], stale: true };
+  if (!same(f, current, after)) return { errors: ["was changed after the fix, left as it is"], stale: true };
+
+  let errors;
+  if (PRODUCT_FIELDS.includes(f)) errors = await setProductField(graphql, entry.productId, f, before);
+  else if (VARIANT_FIELDS.includes(f)) errors = await setVariantField(graphql, entry.productId, entry.targetId, f, before);
+  else if (f === "weight") errors = await setWeight(graphql, entry.targetId, before.value, before.unit);
+  else if (f === "alt") errors = await setAlt(graphql, entry.productId, entry.targetId, before);
+  else if (f === "cost") errors = await setCost(graphql, entry.targetId, before);
+  else if (f === "optionValue") errors = await renameOptionValue(graphql, entry.productId, before.optionId, entry.targetId, before.name);
+  else if (f === "publication") errors = await setPublished(graphql, entry.productId, entry.targetId, Boolean(before));
+  else if (f === "available") errors = await setAvailable(graphql, entry.targetId, before.locationId, before.quantity);
+  else if (f === "metafield") {
+    errors = before ? await setMetafield(graphql, entry.productId, entry.targetId, before.type, before.value) : await deleteMetafield(graphql, entry.productId, entry.targetId);
+  } else errors = [`Unknown field ${f}`];
+  return { errors, stale: false };
 }
