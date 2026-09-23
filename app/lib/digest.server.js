@@ -54,7 +54,7 @@ export async function buildDigest(shop, locale = "en") {
     : `TidyUp weekly for ${store}: run your first scan`;
 
   const lines = [
-    `TidyUp weekly digest for ${store}`,
+    `TidyUp weekly email for ${store}`,
     "",
     latest ? `Potential problems: ${n(open)} across ${n(latest.total)} products. ${changeText}` : "No scan yet. Open TidyUp and run a full scan to get started.",
     "",
@@ -75,7 +75,7 @@ export async function buildDigest(shop, locale = "en") {
     .join("");
   const html = `<!doctype html><html><body style="margin:0;padding:24px;background:#f6f6f7;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#303030;">
   <div style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:12px;padding:24px;">
-    <p style="margin:0 0 4px;color:#616161;font-size:13px;">TidyUp weekly digest · ${escapeHtml(store)}</p>
+    <p style="margin:0 0 4px;color:#616161;font-size:13px;">TidyUp weekly email · ${escapeHtml(store)}</p>
     ${
       latest
         ? `<p style="margin:0;font-size:40px;font-weight:650;line-height:1;">${n(open)}</p>

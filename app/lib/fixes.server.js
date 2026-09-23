@@ -1,4 +1,5 @@
 import { RULE_CATALOG } from "./rules.server";
+import { FIX_NAMES } from "./checkLabels";
 import { randomUUID } from "node:crypto";
 import prisma from "../db.server";
 import { fetchProductsByIds } from "./scan.server";
@@ -225,17 +226,8 @@ export async function fixBatch(shop, batchId) {
   };
 }
 
-// What a fix is called in the Recent fixes card and on its page: a short name for the bulk fixes,
-// the check label for saved edits.
-const FIX_NAMES = {
-  vendor_casing: "Vendor spelling",
-  missing_weight: "Shipping weight",
-  missing_alt_text: "Image alt text",
-  compare_at_not_higher: "Sale price",
-  zero_price: "Price",
-  missing_sku: "SKU",
-  duplicate_sku: "Duplicate SKU",
-};
+// What a fix is called in the Recent fixes card and on its page: a short name for the bulk fixes
+// (checkLabels.js), the check label for saved edits.
 export function fixLabel(ruleId) {
   if (FIX_NAMES[ruleId]) return FIX_NAMES[ruleId];
   const rule = RULE_CATALOG.find((r) => r.id === ruleId);

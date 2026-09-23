@@ -81,7 +81,7 @@ export const FEATURE_LABELS = {
   ignores: "Ignore findings",
   newProductScans: "Scan newly added products",
   autoRescan: "Automatic re-check when products change",
-  weeklyDigest: "Weekly email digest",
+  weeklyDigest: "Weekly email",
   customRules: "Tracked metafields",
 };
 
