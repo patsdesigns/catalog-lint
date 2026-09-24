@@ -1,5 +1,7 @@
 # App Store submission checklist
 
+**Submitted for review on 2026-09-24, version 0.11.0.** The listing, pricing (manual, four plans), screencast (https://youtu.be/2uNSqAvx3F4) and testing instructions were filled in on the App Store review page that day; Shopify writes to hello@patsdesigns.com during the review. While it is under review, change the live app only to fix what the review asks for. When the app is approved and listed, release 1.0.0.
+
 State on 2026-09-23, after the audit in `AUDIT.md`. "Done" means it is in the code or the deploy config; "Needed" means something outside the repository, or a decision, still has to happen.
 
 ## Listing
