@@ -2,7 +2,7 @@ import { useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { PLANS, DEFAULT_PLAN, EARLY_BIRD, EARLY_BIRD_SEATS, FEATURE_LABELS, COMING_SOON, ALL_AREAS } from "../lib/plans";
-import { PLAN_UNKNOWN, EARLY_BIRD_PAYING_ONLY, currentPlan, forgetPlan, testCharges, earlyBirdSeatsLeft, earlyBirdClaim, settleEarlyBird, lapseEarlyBird, isEarlyBirdSubscription } from "../lib/billing.server";
+import { PLAN_UNKNOWN, EARLY_BIRD_PAYING_ONLY, currentPlan, forgetPlan, testCharges, earlyBirdSeatsLeft, earlyBirdClaim, settleEarlyBird, lapseEarlyBird, isEarlyBirdSubscription, SEATS_TAKEN } from "../lib/billing.server";
 import { shopInfo } from "../lib/shop.server";
 
 // The three plans, plus the Early Bird offer while seats remain. Choosing a paid plan sends the
@@ -69,7 +69,7 @@ export async function action({ request }) {
       if (await testCharges(admin.graphql, shop)) return { ok: false, error: EARLY_BIRD_PAYING_ONLY };
       // Seats are checked here and again, inside a transaction, when the claim is recorded.
       if (await earlyBirdClaim(shop)) return { ok: false, error: "This store has already used the Early Bird offer." };
-      if ((await earlyBirdSeatsLeft()) <= 0) return { ok: false, error: "All Early Bird seats are taken." };
+      if ((await earlyBirdSeatsLeft()) <= 0) return { ok: false, error: SEATS_TAKEN };
     }
     // Throws a redirect to the approval screen. Shopify then brings the merchant back to Home inside
     // the admin, the library's default return URL. A URL on the app's own host would open the app

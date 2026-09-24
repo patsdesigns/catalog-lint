@@ -29,6 +29,7 @@ Versions follow [semantic versioning](https://semver.org): the first number chan
 ### Fixed
 
 - After approving a plan, Shopify brought the merchant back to TidyUp outside the Shopify admin, where the page showed only an error. It now returns to Home inside the admin. Home also settles the Early Bird seat: it claims the seat, or, if the seats ran out during the approval, cancels the subscription again and says so.
+- Early Bird: an approved subscription is canceled again only when the 50 seats are really gone, and then with the unused time credited to the merchant's Shopify bill. Before, any failure to record the seat (the database busy, two page loads at the same moment) canceled it, without a credit, while the notice said nothing was charged.
 
 ## 0.10.0 - 2026-09-23
 

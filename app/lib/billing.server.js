@@ -145,10 +145,12 @@ export async function earlyBirdClaim(shop) {
 
 // Records the claim inside a transaction: only while seats remain and the store never claimed.
 // The seat number is unique in the database, so a 51st claim cannot slip through a race.
+export const SEATS_TAKEN = "All Early Bird seats are taken.";
+
 export async function claimEarlyBird(shop, subscriptionId) {
   const claim = await prisma.$transaction(async (tx) => {
     const claims = await tx.earlyBirdClaim.count();
-    if (claims >= EARLY_BIRD_SEATS) throw new Error("All Early Bird seats are taken.");
+    if (claims >= EARLY_BIRD_SEATS) throw new Error(SEATS_TAKEN);
     const existing = await tx.earlyBirdClaim.findUnique({ where: { shop } });
     if (existing) throw new Error("This store has already claimed the Early Bird offer.");
     return tx.earlyBirdClaim.create({ data: { shop, subscriptionId, status: "active", seat: claims + 1 } });
@@ -170,9 +172,11 @@ export function isEarlyBirdSubscription(subscription) {
 // Keeps the claim in step with the live subscription, on whichever page the merchant lands (Shopify
 // brings them back to Home after an approval): an approved Early Bird subscription with no claim
 // gets one, and an active claim whose subscription is no longer Early Bird lapses (a plan change
-// replaces the subscription, and the webhook that says so may not arrive). When the seat cannot be
-// claimed (the seats ran out between the request and the approval), the subscription is canceled
-// again, so nothing is charged. Returns a notice for the page when that happened, else null; never
+// replaces the subscription, and the webhook that says so may not arrive). When the seats ran out
+// between the request and the approval, the subscription is canceled again with a prorated credit,
+// so the merchant gets the charge back. Any other failure to record the seat (the database busy, a
+// second page load claiming at the same moment) leaves the subscription alone: the next page load
+// tries again. Returns a notice for the page when a cancel happened or failed, else null; never
 // throws. `canceled` says whether the store is back on Dust Off.
 export async function settleEarlyBird(billing, shop, plan, subscription) {
   let claim;
@@ -189,11 +193,15 @@ export async function settleEarlyBird(billing, shop, plan, subscription) {
     await claimEarlyBird(shop, subscription.id);
     return null;
   } catch (err) {
+    if (err?.message !== SEATS_TAKEN) {
+      console.error(`Early Bird seat not recorded for ${shop}, will retry: ${err?.message || err}`);
+      return null;
+    }
     const heading = "The Early Bird offer is no longer available";
     try {
-      await billing.cancel({ subscriptionId: subscription.id, isTest: subscription.test, prorate: false });
+      await billing.cancel({ subscriptionId: subscription.id, isTest: subscription.test, prorate: true });
       forgetPlan(shop);
-      return { canceled: true, tone: "critical", heading, text: `${err.message} The subscription was canceled and nothing is charged.` };
+      return { canceled: true, tone: "critical", heading, text: `${err.message} The subscription was canceled, and the unused time is credited to your Shopify bill.` };
     } catch (cancelErr) {
       return { canceled: false, tone: "critical", heading, text: `${err.message} The subscription could not be canceled automatically (${cancelErr.message}); choose Dust Off on the Plans page.` };
     }
