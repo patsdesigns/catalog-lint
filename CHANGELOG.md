@@ -6,6 +6,10 @@ Versions follow [semantic versioning](https://semver.org): the first number chan
 
 ## Unreleased
 
+### Added
+
+- Support form messages are emailed to hello@patsdesigns.com, with the merchant's address as the reply-to, so a reply answers them. They are still stored, and still posted to `SUPPORT_WEBHOOK_URL` when that is set. Emails need `RESEND_API_KEY`; the sender comes from `EMAIL_FROM`, which replaces the weekly email's `DIGEST_FROM`.
+
 ### Changed
 
 - Home: the open findings split by severity, in red, orange and yellow tiles under Potential problems.

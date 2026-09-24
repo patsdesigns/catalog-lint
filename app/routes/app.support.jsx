@@ -5,9 +5,10 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { describeError } from "../lib/graphql.server";
 import { APP_VERSION } from "../lib/version.server";
+import { deliverSupportMessage } from "../lib/support.server";
 
-// Contact form. Messages are kept per shop in SupportMessage and, when SUPPORT_WEBHOOK_URL is set,
-// posted there as well (a Slack incoming webhook, Zapier, Make or any endpoint that takes JSON).
+// Contact form. Messages are kept per shop in SupportMessage, then emailed to the support inbox and
+// posted to SUPPORT_WEBHOOK_URL when that is set (support.server.js).
 
 const CATEGORIES = ["General question", "Feature request", "Bug report"];
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -47,28 +48,8 @@ export async function action({ request }) {
   } catch (err) {
     return { ok: false, error: describeError(err) };
   }
-  await forward(session.shop, entry);
+  await deliverSupportMessage(session.shop, entry);
   return { ok: true };
-}
-
-// Best effort: a failed forward is logged, never shown to the merchant, since the message is stored.
-async function forward(shop, entry) {
-  // eslint-disable-next-line no-undef
-  const url = process.env.SUPPORT_WEBHOOK_URL;
-  if (!url) return;
-  const text = `TidyUp support · ${entry.category}\nShop: ${shop}\nFrom: ${entry.name} <${entry.email}>\nSubject: ${entry.subject}\n\n${entry.message}`;
-  try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, shop, ...entry }),
-      signal: AbortSignal.timeout(5000),
-    });
-    if (!res.ok) console.error(`Support webhook responded ${res.status}`);
-  } catch (err) {
-    // The message only: the error object can carry the webhook address.
-    console.error(`Support webhook failed: ${err?.message || err}`);
-  }
 }
 
 export default function SupportPage() {
