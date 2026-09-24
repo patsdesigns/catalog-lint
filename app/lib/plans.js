@@ -11,7 +11,6 @@ const CORE_AREAS = ["description", "media", "pricing", "inventory", "organizatio
 
 const NONE = {
   inlineEdits: false,
-  export: false,
   dictionary: false,
   ignores: false,
   newProductScans: false,
@@ -19,9 +18,8 @@ const NONE = {
   weeklyDigest: false,
   customRules: false,
 };
-const QUICK_FEATURES = { ...NONE, inlineEdits: true, export: true, dictionary: true, ignores: true, newProductScans: true, autoRescan: true, weeklyDigest: true };
+const QUICK_FEATURES = { ...NONE, inlineEdits: true, dictionary: true, ignores: true, newProductScans: true, autoRescan: true, weeklyDigest: true };
 const DEEP_FEATURES = { ...QUICK_FEATURES, customRules: true };
-const DEEP_EXTRAS = ["Priority support"];
 
 export const PLANS = [
   {
@@ -49,7 +47,7 @@ export const PLANS = [
     productLimit: null,
     areas: ALL_AREAS,
     features: { ...DEEP_FEATURES },
-    extras: [...DEEP_EXTRAS],
+    extras: [],
   },
 ];
 
@@ -65,7 +63,7 @@ export const EARLY_BIRD = {
   productLimit: null,
   areas: ALL_AREAS,
   features: { ...DEEP_FEATURES },
-  extras: [...DEEP_EXTRAS],
+  extras: [],
   earlyBird: true,
 };
 
@@ -76,7 +74,6 @@ export const PAID_PLANS = [...PLANS.filter((p) => p.price > 0), EARLY_BIRD];
 // What each feature is called on the Plans page.
 export const FEATURE_LABELS = {
   inlineEdits: "Inline edits on issue pages",
-  export: "Export issues (coming soon)",
   dictionary: "Spelling dictionary",
   ignores: "Ignore findings",
   newProductScans: "Scan newly added products",
@@ -85,8 +82,9 @@ export const FEATURE_LABELS = {
   customRules: "Tracked metafields",
 };
 
-// Features a plan includes but that are not built yet; the Plans page lists them last.
-export const COMING_SOON = new Set(["export"]);
+// Features a plan includes but that are not built yet; the Plans page lists them last. None now:
+// the Plans page lists only what the app does.
+export const COMING_SOON = new Set();
 
 export function planById(id) {
   return [...PLANS, EARLY_BIRD].find((p) => p.id === id) || null;

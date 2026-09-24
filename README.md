@@ -18,7 +18,7 @@ Plans are defined once in `app/lib/plans.js` and billed through the Shopify Bill
 | --- | --- | --- | --- | --- |
 | Dust Off | free | up to 20 | the five core areas: title and description, media, pricing, inventory, product organization | full scans, Fix all, undo |
 | Quick Clean | $10 | unlimited | the five core areas | inline edits, spelling dictionary, ignored findings, scans of new products, automatic re-check on product change, weekly email |
-| Deep Clean | $20 | unlimited | all eleven areas | everything in Quick Clean plus tracked metafields and priority support |
+| Deep Clean | $20 | unlimited | all eleven areas | everything in Quick Clean plus tracked metafields |
 
 The first 50 paying stores can take **Deep Clean Early Bird**: Deep Clean at the Quick Clean price for as long as the subscription stays active. Test stores see the offer but cannot choose it, and a test charge never takes a seat. Every feature and area is enforced in the loaders and actions as well as hidden in the pages; a plan check that fails falls back to Dust Off with a warning and blocks scans and writes until Shopify answers.
 
@@ -33,7 +33,7 @@ npm run dev
 
 `npm run dev` runs `shopify app dev`, which starts the app, keeps the app URLs in Shopify pointed at it and prints a preview URL to open the app in the store. The `.claude/launch.json` in this repo starts it with `--use-localhost`, which needs no tunnel but cannot receive webhooks.
 
-The database is SQLite at `prisma/dev.sqlite`. Migrations run with `npm run setup` (also run by `npm run dev` on first start). A schema change needs a migration: `npx prisma migrate dev --name <change>` for an added column, or `npx prisma migrate diff --from-schema-datasource prisma/schema.prisma --to-schema-datamodel prisma/schema.prisma --script` written into a new folder under `prisma/migrations/` followed by `npx prisma migrate deploy` for anything else. Stop the dev server first.
+The database is SQLite at `prisma/dev.sqlite`, set by `DATABASE_URL="file:dev.sqlite"` in `.env`. Migrations run with `npm run setup` (also run by `npm run dev` on first start). A schema change needs a migration: `npx prisma migrate dev --name <change>` for an added column, or `npx prisma migrate diff --from-schema-datasource prisma/schema.prisma --to-schema-datamodel prisma/schema.prisma --script` written into a new folder under `prisma/migrations/` followed by `npx prisma migrate deploy` for anything else. Stop the dev server first.
 
 ## Testing
 
@@ -46,9 +46,10 @@ npm run lint
 
 ## Deploying
 
-1. Host the app as a Node server: `npm run build`, then `npm run setup` (migrations) and `npm run start`. The `Dockerfile` does this; mount a persistent volume at `/app/prisma` for the SQLite file, or switch `prisma/schema.prisma` to Postgres for anything larger.
+1. Host the app as a Node server: `npm run build`, then `npm run setup` (migrations) and `npm run start`. The `Dockerfile` does this. Use an always-on server (the app finishes bulk scans and webhook work after answering, which serverless hosts cut short) with a persistent disk mounted at `/data`, not over `prisma/`, which holds the schema and migrations. Or switch `prisma/schema.prisma` to Postgres for anything larger.
 2. Set the environment:
    - `SHOPIFY_API_KEY`, `SHOPIFY_API_SECRET`, `SHOPIFY_APP_URL`, `SCOPES` (the CLI provides these in development).
+   - `DATABASE_URL`: where the SQLite file lives, `file:/data/tidyup.sqlite` on the persistent disk. Without it the app stops at start rather than keep data in a throwaway file.
    - `NODE_ENV=production`.
    - `BILLING_TEST`: `false` for real charges. Unset, production means real charges and anything else means test charges. Development stores get test charges whatever this says: they accept no other kind, and they are where Shopify's reviewers and other Partners try the app. Any other value stops the app at startup.
    - `SUPPORT_WEBHOOK_URL` (optional): support form messages are also posted here as JSON with a `text` field, which suits a Slack incoming webhook, Zapier or Make.
