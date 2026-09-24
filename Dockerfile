@@ -16,8 +16,9 @@ COPY . .
 
 RUN npm run build && npm prune --omit=dev
 
-# The SQLite database lives in prisma/ (prisma/schema.prisma): mount a volume there so it survives
-# a new container. `docker-start` applies the migrations and starts the server.
-VOLUME ["/app/prisma"]
+# The SQLite file lives where DATABASE_URL says, on a persistent disk mounted apart from prisma/
+# (which holds the schema and migrations): mount the disk at /data and set
+# DATABASE_URL=file:/data/tidyup.sqlite on the host. `docker-start` applies the migrations and
+# starts the server; without DATABASE_URL it stops at once rather than write to a throwaway file.
 
 CMD ["npm", "run", "docker-start"]

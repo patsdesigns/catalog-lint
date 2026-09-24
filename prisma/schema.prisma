@@ -8,9 +8,13 @@ generator client {
 // Note that some adapters may set a maximum length for the String type by default, please ensure your strings are long
 // enough when changing adapters.
 // See https://www.prisma.io/docs/orm/reference/prisma-schema-reference#string for more information
+// Where the SQLite file lives comes from DATABASE_URL: "file:dev.sqlite" in development (the .env
+// file; relative to this folder, so prisma/dev.sqlite), and a file on the host's persistent disk in
+// production, such as "file:/data/tidyup.sqlite". The disk is mounted apart from prisma/, which holds
+// this schema and the migrations the container needs at start.
 datasource db {
   provider = "sqlite"
-  url      = "file:dev.sqlite"
+  url      = env("DATABASE_URL")
 }
 
 model Session {
