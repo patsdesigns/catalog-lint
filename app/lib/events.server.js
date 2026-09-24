@@ -9,7 +9,19 @@ import { withShopLock } from "./lock.server";
 // expects an answer within five seconds and retries otherwise), then work out the plan from the
 // shop's subscription and apply the event. The work is safe to repeat: it re-reads the product.
 export async function productWebhook(request, { created }) {
-  const { shop, topic, payload, admin } = await authenticate.webhook(request);
+  let context;
+  try {
+    context = await authenticate.webhook(request);
+  } catch (err) {
+    // The library answers a bad call with a 4xx Response (a bad HMAC is a 401): passed on as it is.
+    // A failure after the signature check, renewing the shop's expired token (which Shopify refuses
+    // once the app is uninstalled), comes as a bare 500 Response or an error: there is no shop to
+    // re-check the product for, so the webhook is acknowledged and skipped.
+    if (err instanceof Response && err.status < 500) throw err;
+    console.error(`Product webhook skipped, the shop could not be reached: ${err instanceof Response ? `status ${err.status}` : err?.message || err}`);
+    return new Response();
+  }
+  const { shop, topic, payload, admin } = context;
   const productId = payload?.admin_graphql_api_id;
   if (!admin || !productId) return new Response();
   void processProductEvent(admin.graphql, shop, productId, { created, topic }).catch((err) => {

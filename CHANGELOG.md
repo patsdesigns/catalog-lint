@@ -6,6 +6,12 @@ Versions follow [semantic versioning](https://semver.org): the first number chan
 
 ## Unreleased
 
+## 0.11.1 - 2026-09-24
+
+### Fixed
+
+- The uninstall, privacy, subscription and scopes webhooks answered with a server error once a store's access token had expired (they last an hour), because the Shopify library tried to renew it first, which Shopify refuses after an uninstall. Uninstalls were not cleaned up and the mandatory privacy webhooks failed, as seen with the App Store review stores. These webhooks now check Shopify's signature without touching the store's session. A product webhook for a store that can no longer be reached is acknowledged and skipped.
+
 ## 0.11.0 - 2026-09-24
 
 Submitted to the Shopify App Store. TidyUp runs on its production host, comes back to Home after a plan approval, emails support messages to hello@patsdesigns.com and has a privacy policy. The alt text checks and the weekly email wait for a later version.

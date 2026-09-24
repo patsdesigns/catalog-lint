@@ -1,12 +1,13 @@
-import { authenticate } from "../shopify.server";
 import db from "../db.server";
+import { verifyWebhook } from "../lib/webhooks.server";
 
 // Privacy (GDPR) webhooks, mandatory for a public app. TidyUp keeps no customer data, so the two
 // customer topics have nothing to return or erase; shop/redact, sent 48 hours after an uninstall,
-// removes everything kept for the shop. authenticate.webhook rejects a bad HMAC with a 401.
+// removes everything kept for the shop. verifyWebhook rejects a bad HMAC with a 401, and never
+// touches the shop's session, which is gone or expired by the time these arrive.
 
 export const action = async ({ request }) => {
-  const { shop, topic } = await authenticate.webhook(request);
+  const { shop, topic } = await verifyWebhook(request);
 
   if (topic === "SHOP_REDACT") await redactShop(shop);
 

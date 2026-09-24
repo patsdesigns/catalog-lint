@@ -1,15 +1,15 @@
-import { authenticate } from "../shopify.server";
 import db from "../db.server";
 import { forgetPlan, lapseEarlyBird } from "../lib/billing.server";
+import { verifyWebhook } from "../lib/webhooks.server";
 
 // app/uninstalled: the shop can no longer be reached, so everything that would act on its behalf
 // stops. Its data stays until shop/redact, 48 hours later. Webhooks can arrive more than once, so
-// every step here is safe to repeat.
+// every step here is safe to repeat. Verified without the library's session handling
+// (webhooks.server.js): renewing the shop's expired token is exactly what fails after an uninstall.
 export const action = async ({ request }) => {
-  const { shop, session } = await authenticate.webhook(request);
+  const { shop } = await verifyWebhook(request);
 
-  // The session may already be gone when a webhook is delivered a second time.
-  if (session) await db.session.deleteMany({ where: { shop } });
+  await db.session.deleteMany({ where: { shop } });
   forgetPlan(shop);
   // Uninstalling ends the subscription, and with it the Early Bird seat.
   await lapseEarlyBird(shop);

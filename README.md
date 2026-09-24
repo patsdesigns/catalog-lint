@@ -75,7 +75,7 @@ Versions stay below 1.0.0 until the app is listed in the App Store. The first ve
 
 ## Webhooks
 
-`shopify.app.production.toml` subscribes to `app/uninstalled`, `app/scopes_update`, `products/create`, `products/update`, `app_subscriptions/update` and the three privacy topics (`customers/data_request`, `customers/redact`, `shop/redact`). The handlers are in `app/routes/webhooks.*.jsx`; every one verifies the HMAC first, answers at once and is safe to repeat. `app/uninstalled` deletes the sessions, turns the weekly email off and closes any running export; `shop/redact` deletes everything stored for the shop. Webhooks reach the app only when it is hosted at a public URL.
+`shopify.app.production.toml` subscribes to `app/uninstalled`, `app/scopes_update`, `products/create`, `products/update`, `app_subscriptions/update` and the three privacy topics (`customers/data_request`, `customers/redact`, `shop/redact`). The handlers are in `app/routes/webhooks.*.jsx`; every one verifies the HMAC first, answers at once and is safe to repeat. The uninstall, privacy, subscription and scopes routes verify it with `app/lib/webhooks.server.js` rather than `authenticate.webhook`: the library renews a shop's expired offline token (they last an hour) before handing the webhook over, Shopify refuses that renewal once the app is uninstalled, and the webhook then failed with a 500. The product routes need the Admin client, so they keep `authenticate.webhook` and skip the webhook when the token cannot be renewed. `app/uninstalled` deletes the sessions, turns the weekly email off and closes any running export; `shop/redact` deletes everything stored for the shop. Webhooks reach the app only when it is hosted at a public URL.
 
 ## Layout
 
