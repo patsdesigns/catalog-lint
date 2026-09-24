@@ -10,13 +10,16 @@ State on 2026-09-23, after the audit in `AUDIT.md`. "Done" means it is in the co
 | Listing name | Needed | Set **TidyUp: Product Data Cleanup** as the listing name in the Partner Dashboard. |
 | App introduction (100 characters) and description | Needed | Written in the Partner Dashboard. Say what it does (scans product data, fixes it in place, undo), no outcome promises. |
 | Privacy policy URL | Needed | A public page that says what TidyUp stores: product data findings, fix logs, settings and support form messages; no customer data. Support form messages (name, email address, message) are also emailed to hello@patsdesigns.com through Resend. Required for the listing. Add the weekly email address when that feature returns. |
-| Support email and support URL | Needed | Use hello@patsdesigns.com in the listing. The in-app Support page stores messages and emails them there with the merchant's address as the reply-to (needs `RESEND_API_KEY` on Render), and can also post them to `SUPPORT_WEBHOOK_URL`. |
+| Partner account email | Done | hello@patsdesigns.com since 2026-09-24. Shopify's account emails go there; it does not route the in-app Support form, which sends through Resend. |
+| App submission email | Needed | hello@patsdesigns.com, in the Contact information section of the listing form: Shopify emails you there during review. Add noreply@shopify.com to the allowed senders of that mailbox so review emails do not land in spam. |
+| API contact email | Needed | hello@patsdesigns.com, in the app's settings in the Partner Dashboard. It must not contain the word Shopify. |
+| Support email and support URL | Needed | Use hello@patsdesigns.com as the Support email address in the Support section of the listing. Shopify's own "Get support" links (app settings in the admin, the app's menu, the App Store listing) relay merchant messages to it. The in-app Support page stores messages and emails them there with the merchant's address as the reply-to (needs `RESEND_API_KEY` on Render), and can also post them to `SUPPORT_WEBHOOK_URL`. |
 | App icon | Needed | 1200 by 1200, no Shopify branding. |
 | Screenshots | Needed | 1600 by 900, three to six, desktop, no browser chrome, no pricing in the images. Suggested: the home overview after a scan, an issue page with Quick apply, the Settings page, Recent fixes, the Plans page. Add one phone-width shot if mobile is claimed. |
 | Pricing in the listing | Needed | Must match `app/lib/plans.js`: Dust Off free (20 products), Quick Clean $10 every 30 days, Deep Clean $20 every 30 days, Early Bird $10 for the first 50 paying stores (not available on development stores). No trial. |
 | Demo store or test instructions | Needed | A development store with products that trigger a range of checks. Charges on development stores are always test charges, so reviewers can try every plan except Early Bird. Say that Early Bird is Deep Clean at the Quick Clean price for the first 50 paying stores, shown but not selectable on development stores. |
 | Demo screencast | Needed | A video of setup and the main features as the listing describes them, in English or with English subtitles (App Store requirement 4.5.3). |
-| Emergency developer contact | Needed | Set in the Partner Dashboard account settings (App Store requirement 4.5.6). |
+| Emergency developer contact | Needed | An email (hello@patsdesigns.com) and a phone number, set in the Partner Dashboard account settings, for critical technical issues with the app (App Store requirement 4.5.6). |
 
 ## Hosting and configuration
 
