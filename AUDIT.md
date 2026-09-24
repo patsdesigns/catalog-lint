@@ -270,3 +270,5 @@ On 2026-09-23, before submitting to the App Store, the code was checked against 
 - **Store address form** (`app/routes/auth.login/route.jsx`). The page outside the admin asked for a myshopify address, which self-review item 2.3.1 forbids. It now points to the admin and the App Store; links that name the store still go straight to the install.
 
 Not covered by these checks and still to prove on the live store before submitting: alt text through `fileUpdate`, undo, the whole billing flow, uninstall and reinstall, the bulk path (the development store now has 18 products), webhooks (they need the public host) and the weekly email.
+
+Update 2026-09-24: proven since on the real store: undo (price, SKU and alt text each went back to the original), plan approvals on the live app returning to Home, uninstall and reinstall, and webhooks reaching the live app with a valid signature. Alt text is out of this version and the weekly email is off for launch. Still unproven: the bulk path (over 250 products).

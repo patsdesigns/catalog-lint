@@ -13,7 +13,7 @@ State on 2026-09-23, after the audit in `AUDIT.md`. "Done" means it is in the co
 | Partner account email | Done | hello@patsdesigns.com since 2026-09-24. Shopify's account emails go there; it does not route the in-app Support form, which sends through Resend. |
 | App submission email | Needed | hello@patsdesigns.com, in the Contact information section of the listing form: Shopify emails you there during review. Add noreply@shopify.com to the allowed senders of that mailbox so review emails do not land in spam. |
 | API contact email | Needed | hello@patsdesigns.com, in the app's settings in the Partner Dashboard. It must not contain the word Shopify. |
-| Support email and support URL | Needed | Use hello@patsdesigns.com as the Support email address in the Support section of the listing. Shopify's own "Get support" links (app settings in the admin, the app's menu, the App Store listing) relay merchant messages to it. The in-app Support page stores messages and emails them there with the merchant's address as the reply-to (needs `RESEND_API_KEY` on Render), and can also post them to `SUPPORT_WEBHOOK_URL`. |
+| Support email and support URL | Needed | Use hello@patsdesigns.com as the Support email address in the Support section of the listing. Shopify's own "Get support" links (app settings in the admin, the app's menu, the App Store listing) relay merchant messages to it. The in-app Support page stores messages and emails them there with the merchant's address as the reply-to (`RESEND_API_KEY` is set on Render; verified live on 2026-09-24, arriving from onboarding@resend.dev until patsdesigns.com is verified in Resend and `EMAIL_FROM` is set), and can also post them to `SUPPORT_WEBHOOK_URL`. |
 | App icon | Needed | 1200 by 1200, no Shopify branding. |
 | Screenshots | Needed | 1600 by 900, three to six, desktop, no browser chrome, no pricing in the images. Suggested: the home overview after a scan, an issue page with Quick apply, the Settings page, Recent fixes, the Plans page. Add one phone-width shot if mobile is claimed. |
 | Pricing in the listing | Needed | Must match `app/lib/plans.js`: Dust Off free (20 products), Quick Clean $10 every 30 days, Deep Clean $20 every 30 days, Early Bird $10 for the first 50 paying stores (not available on development stores). No trial. |
@@ -51,7 +51,9 @@ State on 2026-09-23, after the audit in `AUDIT.md`. "Done" means it is in the co
 
 Run it once with `BILLING_TEST=false` in the development `.env` (then restart the dev server): that is the production setting, and a development store still gets test charges, so the run shows exactly what a reviewer sees.
 
-1. On a development store, open Plans and choose Quick Clean: Shopify shows the approval screen for a test charge; approve; back on Plans the card reads "Current plan".
+Run on the live app (Render) on 2026-09-24 with test-store-41bamjnv: steps 1 to 3 passed. Quick Clean and then Deep Clean were approved, each returning to Home inside the admin; Quick apply on No SKU was undone from Recent fixes; the `products/update`, `app_subscriptions/update` and `app/scopes_update` webhooks answered 200. Step 7 passed on 2026-09-23. Steps 4 to 6 ran earlier on the development server, not yet on the live app.
+
+1. On a development store, open Plans and choose Quick Clean: Shopify shows the approval screen for a test charge; approve; Shopify brings you back to Home inside the admin, and Plans reads "Current plan" on Quick Clean.
 2. Open an issue page: inline edits, Trust word and Ignore appear. Quick apply a suggestion, then undo it from the row and from Recent fixes.
 3. Choose Deep Clean: the subscription is replaced; Deep Clean areas unlock on Home.
 4. The Early Bird card shows with its button disabled and the note that it is for paying stores: a development store cannot choose it and never takes a seat. The claim and lapse of a seat can only be seen on a live store with real billing.
