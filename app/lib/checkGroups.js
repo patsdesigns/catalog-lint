@@ -17,7 +17,6 @@ const FAMILY_LIST = [
   { id: "description", label: "Description", category: "description" },
   { id: "spelling", label: "Spelling", category: "description" },
   { id: "images", label: "Images", category: "media" },
-  { id: "alt", label: "Alt text", category: "media" },
   { id: "prices", label: "Prices", category: "pricing" },
   { id: "sales", label: "Sales and margins", category: "pricing" },
   { id: "identifiers", label: "SKUs and barcodes", category: "inventory" },
@@ -78,12 +77,6 @@ export const RULE_META = {
   missing_image: { family: "images", tier: E },
   few_images: { family: "images", tier: R },
   small_image: { family: "images", tier: R },
-
-  // Alt text
-  missing_alt_text: { family: "alt", tier: R },
-  same_alt_text: { family: "alt", tier: R },
-  alt_is_filename: { family: "alt", tier: R },
-  alt_too_long: { family: "alt", tier: R },
 
   // SKUs & barcodes
   missing_sku: { family: "identifiers", tier: E },

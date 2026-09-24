@@ -1,4 +1,4 @@
-// The 65 checks against a synthetic catalog (test/fixtures.mjs): the catalog itself (ids, labels,
+// The 61 checks against a synthetic catalog (test/fixtures.mjs): the catalog itself (ids, labels,
 // severities, categories), exact findings per product, coverage of every check, the shape of a
 // finding, the summary, and that empty and single-product catalogs do not throw.
 // Plain node: `npm run test:rules`. One line per assertion, exit code 1 on any failure.
@@ -16,7 +16,7 @@ const check = (name, ok, extra = "") => {
 const uniqueSorted = (list) => [...new Set(list)].sort();
 const minus = (a, b) => a.filter((x) => !b.includes(x));
 
-// ---------- 1. the catalog: 65 checks with these labels, severities and categories ----------
+// ---------- 1. the catalog: 61 checks with these labels, severities and categories ----------
 const FINAL = {
   description: {
     high: { missing_description: "No description", placeholder_text: "Placeholder text" },
@@ -30,8 +30,7 @@ const FINAL = {
   },
   media: {
     high: { missing_image: "No product image" },
-    medium: { small_image: "Image under 800px", missing_alt_text: "Image has no alt text", few_images: "Only one image" },
-    low: { same_alt_text: "All images share the same alt text", alt_is_filename: "Alt text is a filename", alt_too_long: "Alt text over 125 characters" },
+    medium: { small_image: "Image under 800px", few_images: "Only one image" },
   },
   pricing: {
     high: { zero_price: "No price set", price_below_cost: "Price below cost" },
@@ -75,8 +74,8 @@ for (const [category, bySeverity] of Object.entries(FINAL)) {
 const RULE_IDS = [...FINAL_RULES.keys()].sort();
 
 console.log("---- catalog");
-check("the final list has 65 checks", FINAL_RULES.size === 65, String(FINAL_RULES.size));
-check("RULE_CATALOG has 65 checks", RULE_CATALOG.length === 65, String(RULE_CATALOG.length));
+check("the final list has 61 checks", FINAL_RULES.size === 61, String(FINAL_RULES.size));
+check("RULE_CATALOG has 61 checks", RULE_CATALOG.length === 61, String(RULE_CATALOG.length));
 const catalogIds = RULE_CATALOG.map((r) => r.id).sort();
 check("RULE_CATALOG ids are unique", new Set(catalogIds).size === RULE_CATALOG.length);
 check("RULE_CATALOG has exactly the final ids", catalogIds.join() === RULE_IDS.join(),
@@ -118,7 +117,7 @@ for (const p of products) {
 console.log("---- coverage");
 const fired = new Set(findings.map((f) => f.ruleId));
 const uncovered = RULE_IDS.filter((id) => !fired.has(id));
-check("every one of the 65 checks has at least one finding", uncovered.length === 0, uncovered.length ? `uncovered: ${uncovered.join(", ")}` : "");
+check("every one of the 61 checks has at least one finding", uncovered.length === 0, uncovered.length ? `uncovered: ${uncovered.join(", ")}` : "");
 check("no finding carries an unknown check", [...fired].every((id) => FINAL_RULES.has(id)), [...fired].filter((id) => !FINAL_RULES.has(id)).join(", "));
 
 // ---------- 4. the shape of a finding ----------
@@ -145,7 +144,7 @@ check("variant findings name their variant", findings.filter((f) => f.variantId)
 // ---------- 5. the summary ----------
 console.log("---- summary");
 const summary = summarizeFindings(products.length, findings, settings);
-check("summary lists a check for each of the 65", summary.checks.length === 65 && summary.checks.map((c) => c.ruleId).sort().join() === RULE_IDS.join());
+check("summary lists a check for each of the 61", summary.checks.length === 61 && summary.checks.map((c) => c.ruleId).sort().join() === RULE_IDS.join());
 const notFailed = summary.checks.filter((c) => fired.has(c.ruleId) && c.status !== "failed");
 check("every triggered check is failed", notFailed.length === 0, notFailed.map((c) => `${c.ruleId}=${c.status}`).join(", "));
 const skipped = summary.checks.filter((c) => c.status === "skipped" || c.status === "off");

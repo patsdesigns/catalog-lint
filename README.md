@@ -4,8 +4,8 @@ TidyUp is a Shopify embedded app that scans a product catalog for missing, incon
 
 ## What it does
 
-- **65 checks** across the eleven sections of the product page: title and description, media, pricing, inventory, product organization, shipping, variants, search engine listing, status, sales channels and metafields. The list, with each check's severity, is in `app/lib/rules.server.js`; `npm run test:rules` prints and verifies it.
-- **One page per check** listing the products it flagged, each with its current value, a suggestion and a correction field. Quick apply saves the suggestion in one click. Three checks have a bulk fix (vendor spelling, alt text, sale prices). Every change is read before it is written, logged with its previous value, and can be undone from Recent fixes.
+- **61 checks** across the eleven sections of the product page: title and description, media, pricing, inventory, product organization, shipping, variants, search engine listing, status, sales channels and metafields. The list, with each check's severity, is in `app/lib/rules.server.js`; `npm run test:rules` prints and verifies it.
+- **One page per check** listing the products it flagged, each with its current value, a suggestion and a correction field. Quick apply saves the suggestion in one click. Two checks have a bulk fix (vendor spelling and sale prices). Every change is read before it is written, logged with its previous value, and can be undone from Recent fixes.
 - **Scans any catalog size**: up to 250 products inline, paced on the API rate limit; larger catalogs through a Shopify bulk operation in the background.
 - **Keeps the stored result current**: product webhooks re-check a product as it changes (paid plans) or queue it (free plan); ignoring a finding, learning a word or turning a check off updates the result at once.
 - **Settings**: which checks run (by family or one by one), a spelling dictionary, ignored findings, tracked metafields (up to seven, each with a required flag and a pattern) and a weekly email.
@@ -42,7 +42,7 @@ npm run test:rules
 npm run lint
 ```
 
-`test:rules` runs the 65 checks against `test/fixtures.mjs` (42 synthetic products: 36 that together trigger every check, 6 clean ones and 2 edge products with empty and missing fields) and asserts the exact findings per product, the check list with its labels, severities and areas, the summary counts and that empty and single-product catalogs do not throw. The runner needs no framework; `test/register.mjs` lets plain Node import the app's extensionless modules.
+`test:rules` runs the 61 checks against `test/fixtures.mjs` (42 synthetic products: 36 that together trigger every check, 6 clean ones and 2 edge products with empty and missing fields) and asserts the exact findings per product, the check list with its labels, severities and areas, the summary counts and that empty and single-product catalogs do not throw. The runner needs no framework; `test/register.mjs` lets plain Node import the app's extensionless modules.
 
 ## Deploying
 
@@ -59,7 +59,7 @@ npm run lint
    In development, put any of these in a `.env` file at the project root: the Shopify CLI loads it when `npm run dev` starts, so restart the dev server after changing it.
 3. Put the hosted URL in `shopify.app.production.toml` (`application_url` and `redirect_urls`), then `npm run deploy -- -c production` to push the config, the app name, the access scopes and the webhook subscriptions to Shopify. The plain `shopify.app.toml` is the localhost development config and carries no webhook subscriptions, because a localhost session cannot register them.
 
-The access scopes are `write_products`, `write_files` (image alt text is written with `fileUpdate`), `read_inventory`, `write_inventory`, `read_publications`, `write_publications` and `read_locales`. The Admin API version is 2026-10 in `app/shopify.server.js` and for webhooks in both tomls; change both together.
+The access scopes are `write_products`, `read_inventory`, `write_inventory`, `read_publications`, `write_publications` and `read_locales`. The Admin API version is 2026-10 in `app/shopify.server.js` and for webhooks in both tomls; change both together.
 
 ## Versions
 

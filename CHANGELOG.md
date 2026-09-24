@@ -16,7 +16,8 @@ Versions follow [semantic versioning](https://semver.org): the first number chan
 
 ### Removed
 
-- The "Vendor not on your approved list" check and the Approved vendors box in Settings. TidyUp now runs 65 checks.
+- The "Vendor not on your approved list" check and the Approved vendors box in Settings.
+- The four alt text checks, for a later version: Image has no alt text, All images share the same alt text, Alt text is a filename, and Alt text over 125 characters, with their fixes. The app no longer asks for the file permission they needed. Alt text fixes made before cannot be undone until the checks return. TidyUp now runs 61 checks.
 
 ## 0.10.0 - 2026-09-23
 

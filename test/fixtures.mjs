@@ -102,15 +102,15 @@ add("no-description", "Winter Jacket Light", ["missing_description", "meta_descr
   { descriptionHtml: "", seoDescription: "", images: [] });
 add("placeholder", "Wool Scarf Long", ["placeholder_text", "few_images"],
   (k) => ({ descriptionHtml: PLACEHOLDER, images: [image(k, 1, "Wool Scarf Long")] }));
-add("misspelled", "Leather Boots Brown", ["spelling", "missing_alt_text"],
+add("misspelled", "Leather Boots Brown", ["spelling"],
   (k) => ({ descriptionHtml: MISSPELLED, images: [image(k, 1, ""), image(k, 2, "Leather Boots Brown side")] }));
-add("all-caps", "WINTER JACKET DELUXE", ["title_all_caps", "same_alt_text"],
+add("all-caps", "WINTER JACKET DELUXE", ["title_all_caps"],
   (k) => ({ images: [image(k, 1, "Winter Jacket"), image(k, 2, "Winter Jacket")] }));
 add("too-long-title", LONG_TITLE, ["title_too_long", "small_image"],
   (k) => ({ seoTitle: "Warm Winter Jacket", images: [image(k, 1, "Warm Winter Jacket", { width: 600, height: 400 }), image(k, 2, "Warm Winter Jacket side")] }));
-add("seo-too-long", "Cotton Shirt Blue", ["seo_title_too_long", "alt_is_filename"],
+add("seo-too-long", "Cotton Shirt Blue", ["seo_title_too_long"],
   (k) => ({ seoTitle: LONG_TITLE, images: [image(k, 1, "IMG_1234.jpg"), image(k, 2, "Cotton Shirt Blue side")] }));
-add("stray-punctuation", "Summer  Hat Wide!!", ["title_formatting", "alt_too_long"],
+add("stray-punctuation", "Summer  Hat Wide!!", ["title_formatting"],
   (k) => ({ images: [image(k, 1, LONG_ALT), image(k, 2, "Summer Hat side")] }));
 // A description that is the title is also under 20 words.
 add("repeats-title", "Wool Scarf Classic", ["description_is_title", "short_description", "missing_sku"],

@@ -89,8 +89,6 @@ export function valueError(edit, value) {
       return moneyError(v, "cost", true);
     case "inventory":
       return /^-?\d+$/.test(v.trim()) ? null : "Enter a whole number of items.";
-    case "alt":
-      return v.length <= 512 ? null : "Alt text can have up to 512 characters.";
     case "option":
       return v.trim() && v.length <= 255 ? null : "Enter an option value of up to 255 characters.";
     case "metafield":

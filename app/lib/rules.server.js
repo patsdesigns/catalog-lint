@@ -205,7 +205,6 @@ function catalogContext(products) {
 export { catalogContext };
 const KG = { KILOGRAMS: 1, GRAMS: 0.001, POUNDS: 0.45359237, OUNCES: 0.028349523125 };
 const toKg = (value, unit) => Number(value) * (KG[unit] ?? 1);
-const FILENAME_ALT_RE = /\.(jpe?g|png|gif|webp|heic|tiff?|bmp|svg)$|^(img|dsc|dcim|pxl|dscn|screenshot|image|photo)[_ -]?\d+(\.\w{3,4})?$|^\d{4,}[_-]?\d*$/i;
 const MIN_MARGIN = 0.1;
 const MAX_PATTERN_INPUT = 1000; // characters of a metafield value a merchant pattern is tested on
 
@@ -473,27 +472,6 @@ export const PRODUCT_RULES = [
       if ((p.mediaCount ?? p.images.length) !== 1) return [];
       // The one item may be a video or a 3D model rather than an image.
       return [finding(this, p, { current: p.images.length === 1 ? "1 image" : "1 media item, no image" })];
-    },
-  },
-  {
-    id: "missing_alt_text", category: "media", label: "Image has no alt text", severity: "medium",
-    fixable: true, fixLabel: "Set alt text to product title",
-    check(p) {
-      const missing = p.images.filter((img) => !(img.alt || "").trim());
-      return missing.length
-        ? [finding(this, p, { detail: `${missing.length} of ${p.images.length} images`, edit: { kind: "alt", mediaIds: missing.map((m) => m.id), current: `${missing.length} of ${p.images.length} images without alt`, raw: "", suggested: p.title, apply: true } })]
-        : [];
-    },
-  },
-  {
-    id: "same_alt_text", category: "media", label: "All images share the same alt text", severity: "low",
-    check(p) {
-      if (p.images.length < 2) return [];
-      const alts = new Set(p.images.map((i) => (i.alt || "").trim()).filter(Boolean));
-      if (!(alts.size === 1 && p.images.every((i) => (i.alt || "").trim()))) return [];
-      const alt = [...alts][0];
-      // Numbered: the value plus the image number on each image.
-      return [finding(this, p, { detail: `"${alt}"`, edit: { kind: "alt", mediaIds: p.images.map((i) => i.id), numbered: true, current: alt, suggested: p.title, apply: true, applyLabel: "Number them" } })];
     },
   },
   {
@@ -900,35 +878,8 @@ PRODUCT_RULES.push(
     },
   },
 
-  // Images
-  {
-    id: "alt_is_filename", category: "media", label: "Alt text is a filename", severity: "low",
-    check(p) {
-      const hits = p.images.filter((i) => FILENAME_ALT_RE.test((i.alt || "").trim()));
-      if (!hits.length) return [];
-      const firstAlt = hits[0].alt.trim();
-      // Each image gets its own value on Quick apply: the title, numbered when several images need one.
-      const perImage = hits.map((i, n) => ({ id: i.id, raw: i.alt.trim(), suggested: hits.length > 1 ? `${p.title} ${n + 1}` : p.title }));
-      return [finding(this, p, {
-        detail: `"${firstAlt}"${hits.length > 1 ? ` and ${hits.length - 1} more` : ""}`,
-        edit: { kind: "alt", mediaIds: hits.map((i) => i.id), perImage, current: firstAlt, suggested: perImage[0].suggested, apply: true },
-      })];
-    },
-  },
-  {
-    id: "alt_too_long", category: "media", label: "Alt text over 125 characters", severity: "low",
-    check(p) {
-      const hits = p.images.filter((i) => (i.alt || "").trim().length > 125);
-      if (!hits.length) return [];
-      const firstAlt = hits[0].alt.trim();
-      // Each image keeps its own text, trimmed, on Quick apply.
-      const perImage = hits.map((i) => ({ id: i.id, raw: i.alt.trim(), suggested: trimAt(i.alt.trim(), 125) }));
-      return [finding(this, p, {
-        detail: `${hits.length} of ${p.images.length} images, longest ${Math.max(...hits.map((i) => i.alt.trim().length))} characters`,
-        edit: { kind: "alt", mediaIds: hits.map((i) => i.id), perImage, current: firstAlt, suggested: perImage[0].suggested, apply: true },
-      })];
-    },
-  },
+  // The four alt text checks (missing, all the same, a filename, over 125 characters) and their
+  // fixes were taken out on 2026-09-24, to come back in a later version; see CHANGELOG.md.
 
   // Variants and inventory
   {

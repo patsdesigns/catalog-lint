@@ -3,7 +3,7 @@ import { FIX_NAMES } from "./checkLabels";
 import { randomUUID } from "node:crypto";
 import prisma from "../db.server";
 import { fetchProductsByIds } from "./scan.server";
-import { setProductField, setVariantField, setAlt, revert } from "./writes.server";
+import { setProductField, setVariantField, revert } from "./writes.server";
 
 // Every fix re-reads the products it touches first so it never acts on stale data, a few at a
 // time and only as far as the budget of one run reaches. Every change is logged as soon as it is
@@ -40,25 +40,6 @@ async function fixVendorCasing(graphql, products, log, findingsByProduct, budget
   }
 }
 
-async function fixMissingAltText(graphql, products, log, findingsByProduct, budget, result) {
-  for (const p of products) {
-    const missing = p.images.filter((img) => !(img.alt || "").trim());
-    for (const img of missing) {
-      if (budget.left <= 0) {
-        result.overBudget += 1;
-        continue;
-      }
-      budget.left -= 1;
-      const errs = await setAlt(graphql, p.id, img.id, p.title);
-      if (errs.length) result.errors.push(`${p.title}: ${errs.join(", ")}`);
-      else {
-        result.fixed += 1;
-        await log({ field: "alt", targetId: img.id, productId: p.id, title: p.title, before: img.alt || "", after: p.title });
-      }
-    }
-  }
-}
-
 async function fixCompareAt(graphql, products, log, findingsByProduct, budget, result) {
   for (const p of products) {
     const bad = p.variants.filter(
@@ -89,7 +70,6 @@ async function fixCompareAt(graphql, products, log, findingsByProduct, budget, r
 
 const FIXERS = {
   vendor_casing: fixVendorCasing,
-  missing_alt_text: fixMissingAltText,
   compare_at_not_higher: fixCompareAt,
 };
 

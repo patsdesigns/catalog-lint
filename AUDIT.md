@@ -248,7 +248,7 @@ Answers given on 2026-09-23 and what was done with them.
 - **13, few_images and missing_image.** Every media item counts (videos and 3D models included); alt text checks still look at images only.
 - **14 and 15, colors and typography.** First removed for Polaris compliance, then brought back the same day at your request, with every value taken from the Polaris palette: each area card has its stripe, wash and dot again in a color that is a named Polaris token (`app/lib/categories.js`); severity badges use the critical, warning and caution tones; the summary numbers are display-size again and take a tone by state; the trend bars are back in the info tone.
 - **16 to 21.** Unchanged as designed: the first-run page, the home heading, the 250-product inline limit, the retention of twenty rows and twelve full scans, the 24-hour job timeout, and the owner-only stats module stay.
-- **22, alt text mutation.** Decided: request `write_files` and write alt text with `fileUpdate`. Both tomls carry the scope; existing installs are asked to approve it the next time they open the app.
+- **22, alt text mutation.** Decided: request `write_files` and write alt text with `fileUpdate`. Both tomls carry the scope; existing installs are asked to approve it the next time they open the app. Superseded on 2026-09-24: the four alt text checks and their fixes were taken out for a later version, and `write_files` with them, so the app requests no scope it does not use.
 
 ## Review of the decisions
 

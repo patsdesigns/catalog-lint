@@ -35,11 +35,7 @@ export const PASS_LABELS = {
   // Media
   missing_image: "Every product has an image",
   few_images: "Products have more than one image",
-  missing_alt_text: "Every image has alt text",
-  same_alt_text: "Alt text differs between the images of a product",
   small_image: "Images are at least 800px",
-  alt_is_filename: "No alt text is a filename",
-  alt_too_long: "Alt text is 125 characters or fewer",
 
   // Inventory
   missing_sku: "Every variant has a SKU",
@@ -102,7 +98,6 @@ export const SETUP_LABELS = {
 export const FIX_NAMES = {
   vendor_casing: "Vendor spelling",
   missing_weight: "Shipping weight",
-  missing_alt_text: "Image alt text",
   compare_at_not_higher: "Sale price",
   zero_price: "Price",
   missing_sku: "SKU",

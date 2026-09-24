@@ -7,10 +7,9 @@ name = "TidyUp"
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-# Products and their variants, media and metafields (write_products), image alt text (write_files:
-# fileUpdate is the only way to set it now), costs, weights and stock (inventory), sales channels
-# (publications) and the store language (read_locales).
-scopes = "write_products,write_files,read_inventory,write_inventory,read_publications,write_publications,read_locales"
+# Products and their variants, media and metafields (write_products), costs, weights and stock
+# (inventory), sales channels (publications) and the store language (read_locales).
+scopes = "write_products,read_inventory,write_inventory,read_publications,write_publications,read_locales"
 
 [webhooks]
 # The same version the Admin API client uses (app/shopify.server.js).

@@ -48,17 +48,6 @@ const INVENTORY_UPDATE = `#graphql
   }
 `;
 
-// Alt text is written with fileUpdate (a product image is a file), which needs the write_files
-// scope. productUpdateMedia, the older way, is deprecated.
-const FILE_UPDATE = `#graphql
-  mutation FileUpdate($files: [FileUpdateInput!]!) {
-    fileUpdate(files: $files) {
-      files { id }
-      userErrors { field message code }
-    }
-  }
-`;
-
 const OPTION_UPDATE = `#graphql
   mutation OptionUpdate($productId: ID!, $option: OptionUpdateInput!, $optionValuesToUpdate: [OptionValueUpdateInput!]) {
     productOptionUpdate(productId: $productId, option: $option, optionValuesToUpdate: $optionValuesToUpdate) {
@@ -189,11 +178,6 @@ const VARIANT_IDS = `#graphql
   }
 `;
 
-const MEDIA_ALTS = `#graphql
-  query MediaAlts($id: ID!) {
-    product(id: $id) { media(first: 250) { nodes { ... on MediaImage { id alt } } } }
-  }
-`;
 
 const OPTIONS_READ = `#graphql
   query OptionsRead($id: ID!) {
@@ -257,14 +241,6 @@ export async function readInventoryItem(graphql, inventoryItemId) {
     cost: item.unitCost?.amount ?? null,
     weight: { value: Number(item.measurement?.weight?.value ?? 0), unit: item.measurement?.weight?.unit || "KILOGRAMS" },
   };
-}
-
-// The alt text of every image of a product, by media id.
-export async function readMediaAlts(graphql, productId) {
-  const data = await read(graphql, MEDIA_ALTS, { id: productId });
-  const alts = new Map();
-  for (const m of data?.product?.media?.nodes || []) if (m?.id) alts.set(m.id, m.alt || "");
-  return alts;
 }
 
 // The options of a product with their values, by option id.
@@ -350,15 +326,6 @@ export async function setCost(graphql, inventoryItemId, cost) {
   );
 }
 
-// productId is not needed by fileUpdate; it stays so every write helper has the same shape.
-export async function setAlt(graphql, productId, mediaId, alt) {
-  return mutate(
-    graphql,
-    FILE_UPDATE,
-    { files: [{ id: mediaId, alt }] },
-    (d) => d.fileUpdate?.userErrors,
-  );
-}
 
 // Renames one value of a product option (the value keeps its id, so every variant follows).
 export async function renameOptionValue(graphql, productId, optionId, valueId, name) {
@@ -454,10 +421,6 @@ async function currentValue(graphql, entry) {
     const item = await readInventoryItem(graphql, entry.targetId);
     return item ? item[f] : undefined;
   }
-  if (f === "alt") {
-    const alts = await readMediaAlts(graphql, entry.productId);
-    return alts.has(entry.targetId) ? alts.get(entry.targetId) : undefined;
-  }
   if (f === "optionValue") {
     for (const o of await readOptions(graphql, entry.productId)) {
       const v = o.values.find((x) => x.id === entry.targetId);
@@ -482,6 +445,10 @@ export async function revert(graphql, entry) {
   const before = JSON.parse(entry.before);
   const after = JSON.parse(entry.after);
   const f = entry.field;
+  // Alt text fixes from before the alt text checks were taken out (2026-09-24) cannot be undone
+  // until they come back: writing alt text needs a permission the app no longer asks for. The
+  // entry stays open, so the undo works again then.
+  if (f === "alt") return { errors: ["alt text changes cannot be undone in this version"], stale: false };
   const current = await currentValue(graphql, entry);
   if (current === undefined) return { errors: ["no longer exists, nothing to undo"], stale: true };
   if (!same(f, current, after)) return { errors: ["was changed after the fix, left as it is"], stale: true };
@@ -490,7 +457,6 @@ export async function revert(graphql, entry) {
   if (PRODUCT_FIELDS.includes(f)) errors = await setProductField(graphql, entry.productId, f, before);
   else if (VARIANT_FIELDS.includes(f)) errors = await setVariantField(graphql, entry.productId, entry.targetId, f, before);
   else if (f === "weight") errors = await setWeight(graphql, entry.targetId, before.value, before.unit);
-  else if (f === "alt") errors = await setAlt(graphql, entry.productId, entry.targetId, before);
   else if (f === "cost") errors = await setCost(graphql, entry.targetId, before);
   else if (f === "optionValue") errors = await renameOptionValue(graphql, entry.productId, before.optionId, entry.targetId, before.name);
   else if (f === "publication") errors = await setPublished(graphql, entry.productId, entry.targetId, Boolean(before));

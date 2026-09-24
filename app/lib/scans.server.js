@@ -1,5 +1,9 @@
 import prisma from "../db.server";
 import { ensureDailySnapshot } from "./snapshots.server";
+import { RULE_META } from "./checkGroups";
+
+// A result saved before a check was taken out still lists it; reads skip what no longer exists.
+const isKnownCheck = (ruleId) => Object.prototype.hasOwnProperty.call(RULE_META, ruleId);
 
 // One row per saved result. Findings, the rule summary and the list of checks that ran are stored
 // as JSON strings so the overview can render instantly without re-reading the catalog. Every save
@@ -60,7 +64,7 @@ export async function latestScanSummary(shop) {
     select: { id: true, score: true, total: true, clean: true, durationMs: true, rules: true, checks: true, catalogTotal: true, readAt: true, createdAt: true, full: true },
   });
   if (!row) return null;
-  const rules = parse(row.rules, [], row.id, "rules");
+  const rules = parse(row.rules, [], row.id, "rules").filter((r) => isKnownCheck(r.ruleId));
   return {
     id: row.id,
     score: row.score,
@@ -68,7 +72,7 @@ export async function latestScanSummary(shop) {
     clean: row.clean,
     durationMs: row.durationMs,
     rules,
-    checks: parse(row.checks, [], row.id, "checks"),
+    checks: parse(row.checks, [], row.id, "checks").filter((c) => isKnownCheck(c.ruleId)),
     open: rules.reduce((n, r) => n + (r.count || 0), 0),
     high: rules.filter((r) => r.severity === "high").reduce((n, r) => n + (r.count || 0), 0),
     catalogTotal: row.catalogTotal || row.total,
