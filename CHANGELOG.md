@@ -20,6 +20,7 @@ Versions follow [semantic versioning](https://semver.org): the first number chan
 
 - The "Vendor not on your approved list" check and the Approved vendors box in Settings.
 - The four alt text checks, for a later version: Image has no alt text, All images share the same alt text, Alt text is a filename, and Alt text over 125 characters, with their fixes. The app no longer asks for the file permission they needed. Alt text fixes made before cannot be undone until the checks return. TidyUp now runs 61 checks.
+- The weekly email, for a later version: Quick Clean and Deep Clean no longer include it, so the Plans page does not list it and Settings does not show it. It comes back once it is sent from a verified domain.
 
 ## 0.10.0 - 2026-09-23
 

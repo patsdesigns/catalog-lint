@@ -38,8 +38,10 @@ export async function action({ request }) {
   // Settings the plan does not include are refused here as well as hidden in the page. The
   // dictionary and the ignored findings have pages of their own (app.dictionary.jsx, app.ignored.jsx).
   if (intent === "saveDigest" || intent === "sendTestDigest") {
+    const needed = planFor("weeklyDigest");
+    if (!needed) return { ok: false, error: "The weekly email is not available yet." };
     if (planUnknown) return { ok: false, digest: intent === "saveDigest" ? "save" : "test", error: PLAN_UNKNOWN };
-    if (!allowed.weeklyDigest) return { ok: false, error: `The weekly email is part of the ${planFor("weeklyDigest").name} plan and up.` };
+    if (!allowed.weeklyDigest) return { ok: false, error: `The weekly email is part of the ${needed.name} plan and up.` };
     const email = String(form.get("email") || "").trim();
     const valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
     if (intent === "saveDigest") {
@@ -109,8 +111,10 @@ function allowTest(shop) {
 const FAMILY_COLUMNS = "@container (inline-size > 720px) 1fr 1fr, 1fr";
 
 // Stands in for a section the plan does not include. `what` names the feature with its verb.
+// A feature no plan includes yet (the weekly email for now) is not offered at all.
 function UpgradeSection({ heading, feature, what, slot }) {
   const plan = planFor(feature);
+  if (!plan) return null;
   return (
     <s-section slot={slot} heading={heading}>
       <s-paragraph>
@@ -198,7 +202,7 @@ export default function Settings() {
             <s-search-field
               label="Filter checks"
               labelAccessibilityVisibility="exclusive"
-              placeholder="Filter checks, for example barcode or alt text"
+              placeholder="Filter checks, for example barcode or weight"
               value={query}
               onInput={(e) => setQuery(e.target.value)}
             ></s-search-field>

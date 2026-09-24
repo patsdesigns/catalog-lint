@@ -15,10 +15,13 @@ const NONE = {
   ignores: false,
   newProductScans: false,
   autoRescan: false,
+  // The weekly email is in no plan until it returns in a later version, sent from a verified domain.
+  // Its code stays (digest.server.js, cron.digest.jsx); Settings and the Plans page show it only
+  // while a plan includes it. To bring it back, set it true in QUICK_FEATURES.
   weeklyDigest: false,
   customRules: false,
 };
-const QUICK_FEATURES = { ...NONE, inlineEdits: true, dictionary: true, ignores: true, newProductScans: true, autoRescan: true, weeklyDigest: true };
+const QUICK_FEATURES = { ...NONE, inlineEdits: true, dictionary: true, ignores: true, newProductScans: true, autoRescan: true };
 const DEEP_FEATURES = { ...QUICK_FEATURES, customRules: true };
 
 export const PLANS = [

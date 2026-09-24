@@ -9,7 +9,7 @@ State on 2026-09-23, after the audit in `AUDIT.md`. "Done" means it is in the co
 | App name in the admin | Done | `name = "TidyUp"` in both tomls: short, so it never truncates in the admin navigation (a Built for Shopify rejection reason). |
 | Listing name | Needed | Set **TidyUp: Product Data Cleanup** as the listing name in the Partner Dashboard. |
 | App introduction (100 characters) and description | Needed | Written in the Partner Dashboard. Say what it does (scans product data, fixes it in place, undo), no outcome promises. |
-| Privacy policy URL | Needed | A public page that says what TidyUp stores: product data findings, fix logs, settings, the support form and the weekly email address; no customer data. Required for the listing. |
+| Privacy policy URL | Needed | A public page that says what TidyUp stores: product data findings, fix logs, settings and support form messages; no customer data. Required for the listing. Add the weekly email address when that feature returns. |
 | Support email and support URL | Needed | The in-app Support page stores messages and can forward them (`SUPPORT_WEBHOOK_URL`); the listing still needs an email address. |
 | App icon | Needed | 1200 by 1200, no Shopify branding. |
 | Screenshots | Needed | 1600 by 900, three to six, desktop, no browser chrome, no pricing in the images. Suggested: the home overview after a scan, an issue page with Quick apply, the Settings page, Recent fixes, the Plans page. Add one phone-width shot if mobile is claimed. |
@@ -23,9 +23,9 @@ State on 2026-09-23, after the audit in `AUDIT.md`. "Done" means it is in the co
 | Item | Status | Notes |
 | --- | --- | --- |
 | Public HTTPS host | Done | Render web service `catalog-lint` at https://catalog-lint.onrender.com (Docker, Oregon, deploys on every push to main). `shopify.app.production.toml` points there; push the config with `npm run deploy -- -c production`. |
-| Environment | Done on Render | `SHOPIFY_API_KEY`, `SHOPIFY_API_SECRET`, `SHOPIFY_APP_URL`, `SCOPES`, `DATABASE_URL=file:/data/tidyup.sqlite`, `NODE_ENV=production`, `BILLING_TEST=false`, `RESEND_API_KEY`, `DIGEST_FROM`, `CRON_SECRET`, optionally `SUPPORT_WEBHOOK_URL`. |
+| Environment | Done on Render | `SHOPIFY_API_KEY`, `SHOPIFY_API_SECRET`, `SHOPIFY_APP_URL`, `SCOPES`, `DATABASE_URL=file:/data/tidyup.sqlite`, `NODE_ENV=production`, `BILLING_TEST=false`, optionally `SUPPORT_WEBHOOK_URL`. The weekly email's `RESEND_API_KEY`, `DIGEST_FROM` and `CRON_SECRET` are not needed while it is in no plan. |
 | Database | Done on Render: 1 GB disk at `/data`. | A persistent disk mounted at `/data` (not over `prisma/`, which holds the schema and migrations), with `DATABASE_URL=file:/data/tidyup.sqlite`; or Postgres. The container applies migrations at start (checked on a fresh database). |
-| Weekly email schedule | Needs the secret | `.github/workflows/weekly-email.yml` calls `/cron/digest` every Monday at 14:00 UTC. Add `CRON_SECRET` (the same value as on Render) as a GitHub repository secret. |
+| Weekly email | Off for launch | In no plan until a later version, sent from `hello@patsdesigns.com`. To bring it back: verify patsdesigns.com in Resend; set `RESEND_API_KEY`, `DIGEST_FROM=TidyUp <hello@patsdesigns.com>` and `CRON_SECRET` on Render; add `CRON_SECRET` as a GitHub repository secret; turn the Monday schedule in `.github/workflows/weekly-email.yml` back on; set `weeklyDigest: true` in `QUICK_FEATURES` in `app/lib/plans.js`; add the email address to the privacy policy. |
 | Access scopes | Done | `write_products, read_inventory, write_inventory, read_publications, write_publications, read_locales`; nothing unused. `write_files` was dropped with the alt text checks on 2026-09-24 and comes back with them. |
 | Admin API version | Done | 2026-10 in the client (`@shopify/shopify-app-react-router` 3) and for webhooks. |
 
@@ -70,6 +70,6 @@ Result on 2026-09-23: 28 likely passing, none failing, 3 needing review. Two of 
 
 - Merchant utility prerequisites: 50 net installs on paid plans, five reviews and the minimum rating. Only time and merchants provide these.
 - Web Vitals in the admin (LCP under 2.5 s, CLS under 0.1, INP under 200 ms at the 75th percentile, measured by Shopify after 100 page loads). The home page reads stored results without parsing findings, which helps; measure after launch.
-- Contextual save bar: the weekly email form in Settings and the tracked metafield rows use their own Save buttons rather than the App Bridge save bar.
+- Contextual save bar: the tracked metafield rows use their own Save buttons rather than the App Bridge save bar, as will the weekly email form when it returns.
 - Two banners can appear close together on Home (a notice plus the scan progress or a plan banner); the guidelines prefer one.
 - Onboarding: the first-run page disappears after the first scan, which meets the "removable onboarding" rule; there is no setup guide beyond it.

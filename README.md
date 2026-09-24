@@ -8,7 +8,7 @@ TidyUp is a Shopify embedded app that scans a product catalog for missing, incon
 - **One page per check** listing the products it flagged, each with its current value, a suggestion and a correction field. Quick apply saves the suggestion in one click. Two checks have a bulk fix (vendor spelling and sale prices). Every change is read before it is written, logged with its previous value, and can be undone from Recent fixes.
 - **Scans any catalog size**: up to 250 products inline, paced on the API rate limit; larger catalogs through a Shopify bulk operation in the background.
 - **Keeps the stored result current**: product webhooks re-check a product as it changes (paid plans) or queue it (free plan); ignoring a finding, learning a word or turning a check off updates the result at once.
-- **Settings**: which checks run (by family or one by one), a spelling dictionary, ignored findings, tracked metafields (up to seven, each with a required flag and a pattern) and a weekly email.
+- **Settings**: which checks run (by family or one by one), a spelling dictionary, ignored findings and tracked metafields (up to seven, each with a required flag and a pattern). A weekly email is built but in no plan until a later version.
 
 ## Plans
 
@@ -17,7 +17,7 @@ Plans are defined once in `app/lib/plans.js` and billed through the Shopify Bill
 | Plan | Price | Products | Areas | Extras |
 | --- | --- | --- | --- | --- |
 | Dust Off | free | up to 20 | the five core areas: title and description, media, pricing, inventory, product organization | full scans, Fix all, undo |
-| Quick Clean | $10 | unlimited | the five core areas | inline edits, spelling dictionary, ignored findings, scans of new products, automatic re-check on product change, weekly email |
+| Quick Clean | $10 | unlimited | the five core areas | inline edits, spelling dictionary, ignored findings, scans of new products, automatic re-check on product change |
 | Deep Clean | $20 | unlimited | all eleven areas | everything in Quick Clean plus tracked metafields |
 
 The first 50 paying stores can take **Deep Clean Early Bird**: Deep Clean at the Quick Clean price for as long as the subscription stays active. Test stores see the offer but cannot choose it, and a test charge never takes a seat. Every feature and area is enforced in the loaders and actions as well as hidden in the pages; a plan check that fails falls back to Dust Off with a warning and blocks scans and writes until Shopify answers.
@@ -53,9 +53,10 @@ npm run lint
    - `NODE_ENV=production`.
    - `BILLING_TEST`: `false` for real charges. Unset, production means real charges and anything else means test charges. Development stores get test charges whatever this says: they accept no other kind, and they are where Shopify's reviewers and other Partners try the app. Any other value stops the app at startup.
    - `SUPPORT_WEBHOOK_URL` (optional): support form messages are also posted here as JSON with a `text` field, which suits a Slack incoming webhook, Zapier or Make.
-   - `RESEND_API_KEY`: the weekly email is sent with [Resend](https://resend.com). Without a key, Send test email in Settings reports that the key is missing and nothing is sent.
-   - `DIGEST_FROM` (optional): the sender, such as `TidyUp <hello@yourdomain.com>`, once that domain is verified in Resend. Unset, the Resend onboarding sender is used, which only delivers to the address of the Resend account.
-   - `CRON_SECRET`: the scheduler on the host calls `GET /cron/digest` once a week with this value as a bearer token or an `X-Cron-Secret` header. Unset, the route answers 503 and no weekly email goes out.
+   - The weekly email is in no plan until a later version (`app/lib/plans.js`), so it needs nothing at launch. When it returns it takes three more:
+     - `RESEND_API_KEY`: it is sent with [Resend](https://resend.com). Without a key, Send test email in Settings reports that the key is missing and nothing is sent.
+     - `DIGEST_FROM`: the sender, `TidyUp <hello@patsdesigns.com>` once patsdesigns.com is verified in Resend. Unset, the Resend onboarding sender is used, which only delivers to the address of the Resend account.
+     - `CRON_SECRET`: `.github/workflows/weekly-email.yml` calls `GET /cron/digest` with this value as a bearer token (an `X-Cron-Secret` header also works). Unset, the route answers 503 and no weekly email goes out. Add the same value as a GitHub repository secret and turn the workflow's Monday schedule back on.
 
    In development, put any of these in a `.env` file at the project root: the Shopify CLI loads it when `npm run dev` starts, so restart the dev server after changing it.
 3. Put the hosted URL in `shopify.app.production.toml` (`application_url` and `redirect_urls`), then `npm run deploy -- -c production` to push the config, the app name, the access scopes and the webhook subscriptions to Shopify. The plain `shopify.app.toml` is the localhost development config and carries no webhook subscriptions, because a localhost session cannot register them.
