@@ -8,6 +8,9 @@ Versions follow [semantic versioning](https://semver.org): the first number chan
 
 ### Changed
 
+- Home: the open findings split by severity, in red, orange and yellow tiles under Potential problems.
+- Home: the Show passed checks switch sits on the right, and the note about Ignore this check is gone.
+- Home: every table column is left-aligned, the finding counts included, and the columns line up from card to card at every width. They had drifted because Polaris split the Issue column's size rule at its comma.
 - The Early Bird offer is for paying stores only. Test stores still see it, so Shopify's reviewers can see what the listing describes, but they cannot choose it, and a test charge never takes one of the 50 seats.
 
 ### Removed

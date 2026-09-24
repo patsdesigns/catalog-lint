@@ -146,9 +146,11 @@ const START_HERE_ROWS = 5;
 // column is the one that takes the slack. The action tracks fit the Review and edit and the
 // Ignore this check buttons.
 // Below 900px of container width the fixed tracks give way, so the table fits a narrow card
-// (and a phone) instead of scrolling sideways.
+// (and a phone) instead of scrolling sideways. Polaris's responsive syntax splits on commas and
+// parentheses, so a value that holds them (minmax) is quoted to reach CSS whole; unquoted, the
+// track fell apart and every card sized its columns to its own text.
 const OVERVIEW_TRACKS = {
-  primary: "@container (inline-size > 900px) minmax(240px, 640px), minmax(160px, 1fr)",
+  primary: "@container (inline-size > 900px) 'minmax(240px, 640px)', 'minmax(160px, 320px)'",
   inline: "72px",
   numeric: "56px",
   action: "@container (inline-size > 900px) 160px, auto",
@@ -165,6 +167,11 @@ const HEADER_COLUMNS = "@container (inline-size <= 900px) 1fr, 11fr 9fr";
 const STAT_COLUMNS = "@container (inline-size <= 480px) 1fr, 176px 1fr";
 // A Start here row: rank, issue and area, finding count, action.
 const START_COLUMNS = "auto 1fr auto auto";
+// The area chips and, on the right, the Show passed checks switch; one column on a narrow screen.
+const FILTER_COLUMNS = "@container (inline-size <= 600px) 1fr, 1fr auto";
+// Open findings by severity, three tiles side by side (they fit on a phone); stacked only when the
+// summary is narrower than any phone.
+const SEVERITY_COLUMNS = "@container (inline-size <= 240px) 1fr, 1fr 1fr 1fr";
 const BLURB_COLUMNS = "@container (inline-size <= 700px) 1fr, 1fr 1fr 1fr";
 
 // "Description has junk (raw URL, empty tags, spam phrases)" -> the label and its aside, so the aside
@@ -272,6 +279,38 @@ function Stat({ label, value, text, tone, badge, locale, children }) {
 // 40px for the most. Polaris has no chart primitive, so the bars are plain boxes on a divider
 // baseline; they take the color of the info-tone text around them (currentColor), so the color is
 // Polaris's own.
+// The open findings by severity, one tile each, so the mix shows at a glance. Each tile is a tinted
+// surface with a stripe in the severity's fill color and its words in the severity's text tone.
+// Polaris has no tinted box, so the tile is a plain div; every color is a Polaris token, named
+// beside it. The counts add up to Potential problems.
+const SEVERITY_AREA = {
+  high: { label: "High", fill: "#c70a24", surface: "#fee8eb" }, // bg-fill-critical, bg-surface-critical
+  medium: { label: "Medium", fill: "#ffb800", surface: "#fff1e3" }, // bg-fill-warning, bg-surface-warning
+  low: { label: "Low", fill: "#ffe600", surface: "#fff8db" }, // bg-fill-caution, bg-surface-caution
+};
+const SEVERITY_NUMBER = { fontSize: "24px", lineHeight: 1.15, fontWeight: 650, fontVariantNumeric: "tabular-nums" };
+function SeverityArea({ rules, locale }) {
+  const counts = { high: 0, medium: 0, low: 0 };
+  for (const r of rules) if (r.severity in counts) counts[r.severity] += r.count || 0;
+  return (
+    <s-grid gridTemplateColumns={SEVERITY_COLUMNS} gap="small">
+      {["high", "medium", "low"].map((s) => (
+        <div
+          key={s}
+          style={{ background: SEVERITY_AREA[s].surface, borderLeft: `4px solid ${SEVERITY_AREA[s].fill}`, borderRadius: "8px", padding: "8px 12px" }}
+        >
+          <s-stack gap="small-500">
+            <s-text tone={TONE[s]}>{SEVERITY_AREA[s].label}</s-text>
+            <s-text tone={TONE[s]}>
+              <span style={SEVERITY_NUMBER}>{counts[s].toLocaleString(locale)}</span>
+            </s-text>
+          </s-stack>
+        </div>
+      ))}
+    </s-grid>
+  );
+}
+
 function Trend({ history, locale }) {
   if (!history || history.length < 2) return <s-text color="subdued">Scan again to start a trend.</s-text>;
   const most = history.reduce((m, h) => Math.max(m, h.open || 0), 0);
@@ -359,6 +398,7 @@ function Summary({ result, history, fixedWeek, fixedTotal, checksOn, checksTotal
             ) : null}
             <Trend history={history} locale={locale} />
           </Stat>
+          {open ? <SeverityArea rules={result.rules} locale={locale} /> : null}
           <s-divider></s-divider>
           <Stat label="Problems fixed" value={fixedTotal} tone={fixedTotal > 0 ? "success" : undefined} locale={locale}>
             <s-text color="subdued">{fixedWeek ? `${n(fixedWeek)} this week` : fixedTotal ? "None this week" : "Fixes you apply or save are counted here"}</s-text>
@@ -386,14 +426,12 @@ function Summary({ result, history, fixedWeek, fixedTotal, checksOn, checksTotal
 
 // ---------- overview ----------
 
-// A header cell of the shared overview column skeleton (see OVERVIEW_TRACKS). Numeric columns keep
-// their track, and the label inside it, at the end of the cell so the header sits over the
-// right-aligned numbers below it.
-function ColumnHeader({ track, listSlot, format, children }) {
-  const end = format === "numeric" ? "end" : undefined;
+// A header cell of the shared overview column skeleton (see OVERVIEW_TRACKS). Every column, the
+// finding counts included, is left-aligned, titles and entries alike.
+function ColumnHeader({ track, listSlot, children }) {
   return (
-    <s-table-header listSlot={listSlot} format={format}>
-      <s-grid gridTemplateColumns={OVERVIEW_TRACKS[track]} justifyContent={end} justifyItems={end}>
+    <s-table-header listSlot={listSlot}>
+      <s-grid gridTemplateColumns={OVERVIEW_TRACKS[track]}>
         {children}
       </s-grid>
     </s-table-header>
@@ -403,11 +441,12 @@ function ColumnHeader({ track, listSlot, format, children }) {
 function IssueHeaderRow() {
   return (
     <s-table-header-row>
-      <ColumnHeader track="numeric" listSlot="labeled" format="numeric">Findings</ColumnHeader>
+      <ColumnHeader track="numeric" listSlot="labeled">Findings</ColumnHeader>
       <ColumnHeader track="primary" listSlot="primary">Issue</ColumnHeader>
       <ColumnHeader track="inline" listSlot="inline">Severity</ColumnHeader>
       <ColumnHeader track="action" listSlot="secondary">Action</ColumnHeader>
-      <ColumnHeader track="ignore" listSlot="secondary">Ignore</ColumnHeader>
+      {/* Inset by the tertiary button's own padding, so the title starts where the button's words do. */}
+      <ColumnHeader track="ignore" listSlot="secondary"><s-box paddingInlineStart="small">Ignore</s-box></ColumnHeader>
     </s-table-header-row>
   );
 }
@@ -782,18 +821,18 @@ function Overview({ result, history, fixedWeek, fixedTotal, plan, newProducts, s
         </s-banner>
       ) : null}
 
-      <s-stack direction="inline" gap="base" alignItems="center" justifyContent="space-between">
-        <CategoryFilter result={result} locked={locked} filter={filter} onChange={setFilter} />
-        <s-stack direction="inline" gap="base" alignItems="center">
-          {/* Ignore this check, in every table, is the Settings switch for that check. */}
-          <s-text color="subdued">
-            Ignore this check turns it off in <s-link href="/app/settings">Settings</s-link>.
-          </s-text>
+      {/* The area chips on the left and the passed-checks switch on the right, even when the chips
+          run to a second line; stacked on a narrow screen. */}
+      <s-query-container>
+        <s-grid gridTemplateColumns={FILTER_COLUMNS} gap="base" alignItems="start">
+          <CategoryFilter result={result} locked={locked} filter={filter} onChange={setFilter} />
           {showChecks ? (
-            <s-switch label="Show passed checks" checked={showPassed || undefined} onInput={(e) => toggleShowPassed(e.target.checked)}></s-switch>
+            <s-stack direction="inline" justifyContent="end">
+              <s-switch label="Show passed checks" checked={showPassed || undefined} onInput={(e) => toggleShowPassed(e.target.checked)}></s-switch>
+            </s-stack>
           ) : null}
-        </s-stack>
-      </s-stack>
+        </s-grid>
+      </s-query-container>
 
       {/* One card per product-page section with anything to show: findings, or checks that ran
           clean. Scans saved before checks were recorded only have findings. */}
