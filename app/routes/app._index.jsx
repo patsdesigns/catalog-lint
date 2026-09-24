@@ -607,7 +607,11 @@ function StartHere({ result, locked, onFixAll, busy, fixing, locale }) {
                     {i + 1}
                   </s-text>
                   <s-stack gap="small-500">
-                    <s-link href={`/app/issues/${rule.ruleId}`}>{rule.label}</s-link>
+                    {/* The severity sits right after the title, as on the area cards. */}
+                    <s-stack direction="inline" gap="small-200" alignItems="center">
+                      <s-link href={`/app/issues/${rule.ruleId}`}>{rule.label}</s-link>
+                      <s-badge tone={TONE[rule.severity]}>{rule.severity}</s-badge>
+                    </s-stack>
                     <s-text color="subdued">{categoryOf(rule.category).label}</s-text>
                   </s-stack>
                   <s-text color="subdued" fontVariantNumeric="tabular-nums">
