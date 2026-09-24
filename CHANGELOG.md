@@ -6,6 +6,10 @@ Versions follow [semantic versioning](https://semver.org): the first number chan
 
 ## Unreleased
 
+## 0.11.0 - 2026-09-24
+
+Submitted to the Shopify App Store. TidyUp runs on its production host, comes back to Home after a plan approval, emails support messages to hello@patsdesigns.com and has a privacy policy. The alt text checks and the weekly email wait for a later version.
+
 ### Added
 
 - A privacy policy at `/privacy`, for the App Store listing: what TidyUp reads and stores, what it never collects, who processes it and when it is deleted.
