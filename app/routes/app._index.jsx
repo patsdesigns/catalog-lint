@@ -682,18 +682,25 @@ function CategoryFilter({ result, locked, filter, onChange }) {
       <s-clickable-chip color={filter ? "base" : "strong"} onClick={() => onChange(null)} accessibilityLabel={`Show all areas, ${total} findings`}>
         All areas · {total}
       </s-clickable-chip>
-      {cards.map(({ cat, count }) => (
-        <s-clickable-chip
-          key={cat.id}
-          color={filter === cat.id ? "strong" : "base"}
-          onClick={() => onChange(filter === cat.id ? null : cat.id)}
-          accessibilityLabel={`Show ${cat.label}, ${count} findings${locked.includes(cat.id) ? `, part of ${allAreasPlan().name}` : ""}`}
-        >
-          {locked.includes(cat.id) ? <s-icon slot="graphic" type="lock" /> : null}
-          {cat.label} · {count}
-          {locked.includes(cat.id) ? ` · ${allAreasPlan().name}` : ""}
-        </s-clickable-chip>
-      ))}
+      {cards.map(({ cat, count }) => {
+        const isLocked = locked.includes(cat.id);
+        const planNote = `Available on the ${allAreasPlan().name} plan`;
+        // A locked area shows a lock; the plan it needs is in a tooltip on hover and focus.
+        return (
+          <Fragment key={cat.id}>
+            <s-clickable-chip
+              color={filter === cat.id ? "strong" : "base"}
+              onClick={() => onChange(filter === cat.id ? null : cat.id)}
+              interestFor={isLocked ? `area-plan-${cat.id}` : undefined}
+              accessibilityLabel={`Show ${cat.label}, ${count} findings${isLocked ? `. ${planNote}` : ""}`}
+            >
+              {isLocked ? <s-icon slot="graphic" type="lock" /> : null}
+              {cat.label} · {count}
+            </s-clickable-chip>
+            {isLocked ? <s-tooltip id={`area-plan-${cat.id}`}>{planNote}</s-tooltip> : null}
+          </Fragment>
+        );
+      })}
     </s-stack>
   );
 }
