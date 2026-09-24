@@ -167,19 +167,35 @@ export function isEarlyBirdSubscription(subscription) {
   return Boolean(subscription && subscription.name === EARLY_BIRD.name);
 }
 
-// Keeps the claim in step with the live subscription: an approved Early Bird subscription with no
-// claim gets one (the merchant may never come back to the Plans page), and an active claim whose
-// subscription is no longer Early Bird lapses (a plan change replaces the subscription, and the
-// webhook that says so may not arrive). Returns an error message when the seat could not be
-// claimed, for the caller to act on; never throws.
-export async function syncEarlyBird(shop, plan, subscription) {
+// Keeps the claim in step with the live subscription, on whichever page the merchant lands (Shopify
+// brings them back to Home after an approval): an approved Early Bird subscription with no claim
+// gets one, and an active claim whose subscription is no longer Early Bird lapses (a plan change
+// replaces the subscription, and the webhook that says so may not arrive). When the seat cannot be
+// claimed (the seats ran out between the request and the approval), the subscription is canceled
+// again, so nothing is charged. Returns a notice for the page when that happened, else null; never
+// throws. `canceled` says whether the store is back on Dust Off.
+export async function settleEarlyBird(billing, shop, plan, subscription) {
+  let claim;
   try {
-    const claim = await earlyBirdClaim(shop);
-    // Only a real, paid subscription takes a seat.
-    if (plan.id === EARLY_BIRD.id && subscription && !subscription.test && !claim) await claimEarlyBird(shop, subscription.id);
-    else if (claim?.status === "active" && plan.id !== EARLY_BIRD.id) await lapseEarlyBird(shop);
+    claim = await earlyBirdClaim(shop);
+    if (claim?.status === "active" && plan.id !== EARLY_BIRD.id) await lapseEarlyBird(shop);
+  } catch (err) {
+    console.error(`Early Bird check failed for ${shop}: ${err?.message || err}`);
+    return null;
+  }
+  // Only a real, paid subscription takes a seat.
+  if (plan.id !== EARLY_BIRD.id || !subscription || subscription.test || claim) return null;
+  try {
+    await claimEarlyBird(shop, subscription.id);
     return null;
   } catch (err) {
-    return err.message || String(err);
+    const heading = "The Early Bird offer is no longer available";
+    try {
+      await billing.cancel({ subscriptionId: subscription.id, isTest: subscription.test, prorate: false });
+      forgetPlan(shop);
+      return { canceled: true, tone: "critical", heading, text: `${err.message} The subscription was canceled and nothing is charged.` };
+    } catch (cancelErr) {
+      return { canceled: false, tone: "critical", heading, text: `${err.message} The subscription could not be canceled automatically (${cancelErr.message}); choose Dust Off on the Plans page.` };
+    }
   }
 }

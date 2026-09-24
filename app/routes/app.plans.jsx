@@ -2,42 +2,28 @@ import { useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { PLANS, DEFAULT_PLAN, EARLY_BIRD, EARLY_BIRD_SEATS, FEATURE_LABELS, COMING_SOON, ALL_AREAS } from "../lib/plans";
-import { PLAN_UNKNOWN, EARLY_BIRD_PAYING_ONLY, currentPlan, forgetPlan, testCharges, earlyBirdSeatsLeft, earlyBirdClaim, claimEarlyBird, lapseEarlyBird, isEarlyBirdSubscription } from "../lib/billing.server";
+import { PLAN_UNKNOWN, EARLY_BIRD_PAYING_ONLY, currentPlan, forgetPlan, testCharges, earlyBirdSeatsLeft, earlyBirdClaim, settleEarlyBird, lapseEarlyBird, isEarlyBirdSubscription } from "../lib/billing.server";
 import { shopInfo } from "../lib/shop.server";
 
 // The three plans, plus the Early Bird offer while seats remain. Choosing a paid plan sends the
-// merchant to Shopify's approval screen and back here; choosing Dust Off cancels the subscription.
+// merchant to Shopify's approval screen and back to Home; choosing Dust Off cancels the subscription.
 
 export async function loader({ request }) {
   const { admin, billing, session } = await authenticate.admin(request);
   const shop = session.shop;
-  // Read fresh: this page is where the merchant comes back after approving a change.
+  // Read fresh: the merchant may have just changed plans.
   const { plan, subscription, planUnknown } = await currentPlan(billing, admin.graphql, shop, { fresh: true });
-  let claim = await earlyBirdClaim(shop);
   let notice = planUnknown ? { tone: "warning", heading: "Could not confirm your plan", text: PLAN_UNKNOWN } : null;
   let currentId = plan.id;
 
-  // Back from approving the Early Bird subscription: the seat is claimed now. If the seats ran out
-  // between the request and the approval, the subscription is canceled again and nothing is charged.
-  // A test subscription never takes a seat: the offer is for paying stores.
-  if (plan.id === EARLY_BIRD.id && subscription && !subscription.test && !claim) {
-    try {
-      claim = await claimEarlyBird(shop, subscription.id);
-    } catch (err) {
-      try {
-        await billing.cancel({ subscriptionId: subscription.id, isTest: subscription.test, prorate: false });
-        forgetPlan(shop);
-        currentId = DEFAULT_PLAN.id;
-        notice = { tone: "critical", heading: "The Early Bird offer is no longer available", text: `${err.message} The subscription was canceled and nothing is charged.` };
-      } catch (cancelErr) {
-        notice = { tone: "critical", heading: "The Early Bird offer is no longer available", text: `${err.message} The subscription could not be canceled automatically (${cancelErr.message}); choose Dust Off below.` };
-      }
-    }
-  } else if (claim?.status === "active" && plan.id !== EARLY_BIRD.id && !planUnknown) {
-    // The subscription is no longer Early Bird (a plan change replaced it): the seat lapses.
-    await lapseEarlyBird(shop);
-    claim = await earlyBirdClaim(shop);
+  // The Early Bird seat follows the subscription: claimed, lapsed, or the subscription canceled
+  // again when the seats ran out during the approval (Home does the same; approvals return there).
+  if (!planUnknown) {
+    const settled = await settleEarlyBird(billing, shop, plan, subscription);
+    if (settled) notice = settled;
+    if (settled?.canceled) currentId = DEFAULT_PLAN.id;
   }
+  const claim = await earlyBirdClaim(shop);
 
   // Test charges on this store: a development store, or a deployment without real billing. Said on
   // the page only where it is true, and it keeps the Early Bird offer out of reach. Unknown counts as
@@ -85,12 +71,11 @@ export async function action({ request }) {
       if (await earlyBirdClaim(shop)) return { ok: false, error: "This store has already used the Early Bird offer." };
       if ((await earlyBirdSeatsLeft()) <= 0) return { ok: false, error: "All Early Bird seats are taken." };
     }
-    // Throws a redirect to the approval screen; Shopify sends the merchant back to this page after.
-    // The app URL (https) is the base: the request URL behind the dev proxy is plain http.
-    // eslint-disable-next-line no-undef
-    const base = process.env.SHOPIFY_APP_URL || new URL(request.url).origin;
+    // Throws a redirect to the approval screen. Shopify then brings the merchant back to Home inside
+    // the admin, the library's default return URL. A URL on the app's own host would open the app
+    // outside the admin, where it cannot tell which store it is in.
     // Development stores (Shopify's reviewers, other Partners) get a test charge; see billing.server.js.
-    await billing.request({ plan: target.name, isTest: await testCharges(admin.graphql, shop), returnUrl: `${base}/app/plans` });
+    await billing.request({ plan: target.name, isTest: await testCharges(admin.graphql, shop) });
     return { ok: true };
   } catch (err) {
     // The redirect itself is thrown as a Response; anything else is a billing error to show.

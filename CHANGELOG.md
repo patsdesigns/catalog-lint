@@ -22,6 +22,10 @@ Versions follow [semantic versioning](https://semver.org): the first number chan
 - The four alt text checks, for a later version: Image has no alt text, All images share the same alt text, Alt text is a filename, and Alt text over 125 characters, with their fixes. The app no longer asks for the file permission they needed. Alt text fixes made before cannot be undone until the checks return. TidyUp now runs 61 checks.
 - The weekly email, for a later version: Quick Clean and Deep Clean no longer include it, so the Plans page does not list it and Settings does not show it. It comes back once it is sent from a verified domain.
 
+### Fixed
+
+- After approving a plan, Shopify brought the merchant back to TidyUp outside the Shopify admin, where the page showed only an error. It now returns to Home inside the admin. Home also settles the Early Bird seat: it claims the seat, or, if the seats ran out during the approval, cancels the subscription again and says so.
+
 ## 0.10.0 - 2026-09-23
 
 Ready for Shopify's review: billing works on the development stores reviewers use, no page asks for a store address, and the home page has its color back.

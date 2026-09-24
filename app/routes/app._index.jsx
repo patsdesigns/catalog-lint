@@ -9,9 +9,9 @@ import { cleanStreak } from "../lib/snapshots.server";
 import { applyFix, undoFix, fixedCount } from "../lib/fixes.server";
 import { ignoreCheck, restoreCheck } from "../lib/checks.server";
 import { latestScan, latestScanSummary, scanHistory, saveScan } from "../lib/scans.server";
-import { currentPlan, syncEarlyBird, PLAN_UNKNOWN } from "../lib/billing.server";
+import { currentPlan, settleEarlyBird, PLAN_UNKNOWN } from "../lib/billing.server";
 import { withShopLock } from "../lib/lock.server";
-import { planFor, lockedAreas, areaLocked, allAreasPlan } from "../lib/plans";
+import { DEFAULT_PLAN, planFor, lockedAreas, areaLocked, allAreasPlan } from "../lib/plans";
 import { RULE_CATALOG } from "../lib/rules.server";
 import { CATEGORIES, categoryOf } from "../lib/categories";
 import { PASS_LABELS, SETUP_LABELS } from "../lib/checkLabels";
@@ -36,9 +36,14 @@ async function loadState(shop) {
 
 export async function loader({ request }) {
   const { admin, session, billing } = await authenticate.admin(request);
-  const { plan, subscription, planUnknown } = await currentPlan(billing, admin.graphql, session.shop);
-  // The Early Bird seat follows the live subscription, whichever page the merchant lands on.
-  if (!planUnknown) await syncEarlyBird(session.shop, plan, subscription);
+  // Shopify brings the merchant here after approving a plan (charge_id in the URL): read it fresh.
+  const fresh = new URL(request.url).searchParams.has("charge_id");
+  const current = await currentPlan(billing, admin.graphql, session.shop, { fresh });
+  const { planUnknown } = current;
+  // The Early Bird seat follows the live subscription, whichever page the merchant lands on. If the
+  // seats ran out during the approval, the subscription is canceled again and the page says so.
+  const earlyBirdNotice = planUnknown ? null : await settleEarlyBird(billing, session.shop, current.plan, current.subscription);
+  const plan = earlyBirdNotice?.canceled ? DEFAULT_PLAN : current.plan;
   // Moves a background scan along (and finishes it) every time the page loads or polls.
   const job = await advanceJob(admin.graphql, session.shop, plan.productLimit);
   const state = await loadState(session.shop);
@@ -53,7 +58,7 @@ export async function loader({ request }) {
   const overLimit = Boolean(!planUnknown && plan.productLimit && state.result && state.result.total > plan.productLimit);
   // Numbers and times read in the store language.
   const { locale } = await shopInfo(admin.graphql, session.shop);
-  return { ...state, job, plan, planUnknown, overLimit, newProducts, pending, streak, locked, locale };
+  return { ...state, job, plan, planUnknown, earlyBirdNotice, overLimit, newProducts, pending, streak, locked, locale };
 }
 
 async function countNewProducts(graphql, since) {
@@ -912,7 +917,7 @@ export default function Index() {
   const data = fetcher.data;
   // The loader is revalidated after every action and while a background scan runs, so it is the
   // source of truth for the page; the fetcher's data only carries the action's notices.
-  const { result, history, fixedWeek, fixedTotal, job, checkCount, plan, planUnknown, overLimit, newProducts, pending, streak, locked, locale } = initial;
+  const { result, history, fixedWeek, fixedTotal, job, checkCount, plan, planUnknown, earlyBirdNotice, overLimit, newProducts, pending, streak, locked, locale } = initial;
   const revalidator = useRevalidator();
   const scanning = job?.status === "running";
 
@@ -975,6 +980,11 @@ export default function Index() {
         // Shopify did not answer the plan check: the free plan shows until it does, and nothing runs.
         <s-banner tone="warning" heading="Could not confirm your plan">
           <s-paragraph>Shopify did not answer the plan check. The free plan features show for now; reload in a moment.</s-paragraph>
+        </s-banner>
+      ) : null}
+      {earlyBirdNotice ? (
+        <s-banner tone={earlyBirdNotice.tone} heading={earlyBirdNotice.heading}>
+          <s-paragraph>{earlyBirdNotice.text}</s-paragraph>
         </s-banner>
       ) : null}
       {overLimit && result ? (
