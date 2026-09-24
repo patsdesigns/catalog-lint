@@ -1,8 +1,8 @@
 # Production configuration: deploy with `npm run deploy -- -c production`.
-# Set application_url and redirect_urls to the hosted app before deploying. Webhook subscriptions
+# Hosted on Render at https://catalog-lint.onrender.com (service catalog-lint). Webhook subscriptions
 # live here and not in shopify.app.toml because a localhost dev session cannot register them.
 client_id = "a4108e281b2a36735a7df89a42fef412"
-application_url = "https://example.com"
+application_url = "https://catalog-lint.onrender.com"
 embedded = true
 name = "TidyUp"
 
@@ -44,7 +44,7 @@ api_version = "2026-10"
   compliance_topics = [ "customers/data_request", "customers/redact", "shop/redact" ]
 
 [auth]
-redirect_urls = [ "https://example.com/auth/callback" ]
+redirect_urls = [ "https://catalog-lint.onrender.com/auth/callback" ]
 
 [build]
 automatically_update_urls_on_dev = true

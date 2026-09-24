@@ -22,10 +22,10 @@ State on 2026-09-23, after the audit in `AUDIT.md`. "Done" means it is in the co
 
 | Item | Status | Notes |
 | --- | --- | --- |
-| Public HTTPS host | Needed | `application_url` and `redirect_urls` in `shopify.app.production.toml`, then `npm run deploy -- -c production`. |
-| Environment | Needed | `SHOPIFY_API_KEY`, `SHOPIFY_API_SECRET`, `SHOPIFY_APP_URL`, `SCOPES`, `DATABASE_URL=file:/data/tidyup.sqlite`, `NODE_ENV=production`, `BILLING_TEST=false`, `RESEND_API_KEY`, `DIGEST_FROM`, `CRON_SECRET`, optionally `SUPPORT_WEBHOOK_URL`. |
-| Database | Needed | A persistent disk mounted at `/data` (not over `prisma/`, which holds the schema and migrations), with `DATABASE_URL=file:/data/tidyup.sqlite`; or Postgres. The container applies migrations at start (checked on a fresh database). |
-| Weekly email schedule | Needed | A scheduler that calls `GET /cron/digest` once a week with the secret. |
+| Public HTTPS host | Done | Render web service `catalog-lint` at https://catalog-lint.onrender.com (Docker, Oregon, deploys on every push to main). `shopify.app.production.toml` points there; push the config with `npm run deploy -- -c production`. |
+| Environment | Done on Render | `SHOPIFY_API_KEY`, `SHOPIFY_API_SECRET`, `SHOPIFY_APP_URL`, `SCOPES`, `DATABASE_URL=file:/data/tidyup.sqlite`, `NODE_ENV=production`, `BILLING_TEST=false`, `RESEND_API_KEY`, `DIGEST_FROM`, `CRON_SECRET`, optionally `SUPPORT_WEBHOOK_URL`. |
+| Database | Done on Render: 1 GB disk at `/data`. | A persistent disk mounted at `/data` (not over `prisma/`, which holds the schema and migrations), with `DATABASE_URL=file:/data/tidyup.sqlite`; or Postgres. The container applies migrations at start (checked on a fresh database). |
+| Weekly email schedule | Needs the secret | `.github/workflows/weekly-email.yml` calls `/cron/digest` every Monday at 14:00 UTC. Add `CRON_SECRET` (the same value as on Render) as a GitHub repository secret. |
 | Access scopes | Done | `write_products, read_inventory, write_inventory, read_publications, write_publications, read_locales`; nothing unused. `write_files` was dropped with the alt text checks on 2026-09-24 and comes back with them. |
 | Admin API version | Done | 2026-10 in the client (`@shopify/shopify-app-react-router` 3) and for webhooks. |
 

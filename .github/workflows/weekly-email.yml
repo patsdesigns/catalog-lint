@@ -1,0 +1,23 @@
+# The weekly email: once a week GitHub asks the live app to send it to every store that turned it
+# on in Settings (app/routes/cron.digest.jsx). Needs the repository secret CRON_SECRET, the same value
+# as CRON_SECRET on Render. Run it by hand from the Actions tab with "Run workflow".
+name: Weekly email
+
+on:
+  schedule:
+    - cron: "0 14 * * 1" # Mondays at 14:00 UTC
+  workflow_dispatch:
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ask TidyUp to send the weekly email
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "CRON_SECRET is not set in this repository's secrets, so nothing was sent."
+            exit 0
+          fi
+          curl -fsS --max-time 300 -H "Authorization: Bearer $CRON_SECRET" https://catalog-lint.onrender.com/cron/digest
