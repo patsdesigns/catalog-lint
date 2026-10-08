@@ -6,6 +6,13 @@ Versions follow [semantic versioning](https://semver.org): the first number chan
 
 ## Unreleased
 
+## 0.11.2 - 2026-10-08
+
+### Fixed
+
+- A paid plan chosen on one of Shopify's app review stores did not unlock: the store stayed on Dust Off and scanned 20 products. Shopify made the approved charge a test charge, and TidyUp only counted test subscriptions on development stores, which review stores are not. Any active subscription to a TidyUp plan now counts, test or not. The Early Bird seat still needs a real one.
+- After approving a bigger plan, Home now scans the whole catalog again on its own when the last scan stopped at the old product limit, and the "Scanned 20 of ..." notice no longer asks a paid store to upgrade.
+
 ## 0.11.1 - 2026-09-24
 
 ### Fixed

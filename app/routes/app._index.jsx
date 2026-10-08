@@ -56,9 +56,12 @@ export async function loader({ request }) {
   const locked = lockedAreas(plan);
   // A stored scan bigger than the plan allows (after a downgrade) stays until Scan again.
   const overLimit = Boolean(!planUnknown && plan.productLimit && state.result && state.result.total > plan.productLimit);
+  // Back from approving a bigger plan with a scan the old limit cut short: the page scans again on
+  // its own, so the new plan shows at once.
+  const rescanForPlan = Boolean(fresh && !planUnknown && !job && state.result?.truncated && (!plan.productLimit || plan.productLimit > state.result.total));
   // Numbers and times read in the store language.
   const { locale } = await shopInfo(admin.graphql, session.shop);
-  return { ...state, job, plan, planUnknown, earlyBirdNotice, overLimit, newProducts, pending, streak, locked, locale };
+  return { ...state, job, plan, planUnknown, earlyBirdNotice, overLimit, rescanForPlan, newProducts, pending, streak, locked, locale };
 }
 
 async function countNewProducts(graphql, since) {
@@ -831,8 +834,13 @@ function Overview({ result, history, fixedWeek, fixedTotal, plan, newProducts, s
         // The plan's product limit left products out of the scan.
         <s-banner tone="warning" heading={`Scanned ${result.total.toLocaleString(locale)} of ${result.catalogTotal.toLocaleString(locale)} products`}>
           <s-paragraph>
-            {plan.productLimit ? `The ${plan.name} plan scans up to ${plan.productLimit.toLocaleString(locale)} products. ` : "Scan again to include every product. "}
-            <s-link href="/app/plans">Upgrade to scan everything.</s-link>
+            {plan.productLimit ? (
+              <>
+                The {plan.name} plan scans up to {plan.productLimit.toLocaleString(locale)} products. <s-link href="/app/plans">Upgrade to scan everything.</s-link>
+              </>
+            ) : (
+              `Your ${plan.name} plan covers every product. Scan again to include them all.`
+            )}
           </s-paragraph>
         </s-banner>
       ) : null}
@@ -917,7 +925,7 @@ export default function Index() {
   const data = fetcher.data;
   // The loader is revalidated after every action and while a background scan runs, so it is the
   // source of truth for the page; the fetcher's data only carries the action's notices.
-  const { result, history, fixedWeek, fixedTotal, job, checkCount, plan, planUnknown, earlyBirdNotice, overLimit, newProducts, pending, streak, locked, locale } = initial;
+  const { result, history, fixedWeek, fixedTotal, job, checkCount, plan, planUnknown, earlyBirdNotice, overLimit, rescanForPlan, newProducts, pending, streak, locked, locale } = initial;
   const revalidator = useRevalidator();
   const scanning = job?.status === "running";
 
@@ -940,6 +948,13 @@ export default function Index() {
     fetcher.submit(payload, { method: "post" });
   };
   const runScan = () => submit({ intent: "scan" });
+  // Once per visit after an upgrade (see rescanForPlan in the loader).
+  const rescanned = useRef(false);
+  useEffect(() => {
+    if (!rescanForPlan || rescanned.current) return;
+    rescanned.current = true;
+    runScan();
+  });
   const runUndo = (batchId) => submit({ intent: "undo", batchId });
   // Quick ignore from a table row, and its undo from the notice that follows.
   const runIgnore = (ruleId) => submit({ intent: "ignoreRule", ruleId });
