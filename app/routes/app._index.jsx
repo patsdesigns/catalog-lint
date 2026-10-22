@@ -18,6 +18,7 @@ import { PASS_LABELS, SETUP_LABELS } from "../lib/checkLabels";
 import { shopInfo } from "../lib/shop.server";
 import { timeAgo } from "../lib/format";
 import { TONE, Notices, Dot, hasNotice } from "../lib/ui";
+import { askForReview } from "../lib/review";
 
 // ---------- server ----------
 
@@ -962,6 +963,12 @@ export default function Index() {
   const runIgnore = (ruleId) => submit({ intent: "ignoreRule", ruleId });
   const runRestore = (ruleId, scanId) => submit({ intent: "restoreRule", ruleId, scanId: scanId ?? "" });
   const runFixAll = (ruleId) => submit({ intent: "fixAll", ruleId });
+  // A Fix all that fixed everything it touched, with none failed or left for the next run, is the
+  // end of a piece of work: Shopify's review prompt may follow (lib/review.js).
+  useEffect(() => {
+    const fix = data?.ok ? data.fix : null;
+    if (!busy && fix && fix.fixed > 0 && !fix.errors.length && !fix.overBudget) askForReview();
+  }, [busy, data]);
   const runScanNew = () => submit({ intent: "scanNew" });
   const scanningNew = busy && fetcher.formData?.get("intent") === "scanNew";
   // The Start here row whose Fix all is running, so its button shows it.

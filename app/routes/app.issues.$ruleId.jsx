@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { redirect, useFetcher, useLoaderData } from "react-router";
+import { redirect, useFetcher, useLoaderData, useParams } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { refreshAfter } from "../lib/rescan.server";
@@ -19,6 +19,7 @@ import { categoryOf } from "../lib/categories";
 import { shopInfo } from "../lib/shop.server";
 import { adminUrl, truncate } from "../lib/format";
 import { TONE, CategoryChip, Notices, passesWhen } from "../lib/ui";
+import { askForReview } from "../lib/review";
 
 // One check's findings: the products it flagged, each correctable in place, with Refresh to
 // re-check them. Its own route, so the home page never carries every finding of every check.
@@ -544,6 +545,26 @@ export default function IssuePage() {
   const ignoreCheck = () => submit({ intent: "disableRule" });
   const refreshing = busy && fetcher.formData?.get("intent") === "refresh";
   const fixing = busy && fetcher.formData?.get("intent") === "fix";
+  // The end of the work on this check: something was fixed on it in this visit (a Fix all, a saved
+  // or applied row, or a Refresh that resolved findings) and nothing is left open, or every row
+  // still listed was fixed in place. That is when Shopify's review prompt may follow (lib/review.js).
+  // The check is remembered with the fix, because moving to another check keeps this page mounted
+  // and the fetcher's last result with it.
+  const { ruleId } = useParams();
+  const fixedOn = useRef(null);
+  const seenData = useRef(null);
+  useEffect(() => {
+    if (data === seenData.current) return;
+    seenData.current = data;
+    if (data?.ok && ((data.fix && data.fix.fixed > 0) || data.edit?.ok || (data.refresh && data.refresh.before > data.refresh.after))) {
+      fixedOn.current = ruleId;
+    }
+  }, [data, ruleId]);
+  // Turning the whole check off also empties the list, but that is not finishing the work.
+  const nothingOpen = findings.every((f) => f.saved) && !data?.disabledRule;
+  useEffect(() => {
+    if (!busy && nothingOpen && fixedOn.current === ruleId) askForReview();
+  }, [busy, nothingOpen, ruleId, data]);
 
   return (
     <s-page heading={label} inlineSize="large">
