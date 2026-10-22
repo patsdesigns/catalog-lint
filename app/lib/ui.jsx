@@ -54,6 +54,13 @@ export function CategoryChip({ id, color = "base" }) {
   );
 }
 
+// Whether the last action left a notice for Notices to show.
+export function hasNotice(data) {
+  if (!data) return false;
+  if (!data.ok) return true;
+  return Boolean(data.fix || data.undo || data.refresh || data.scanNew || data.ignored || data.restored || (data.edit && !data.edit.ok));
+}
+
 // Banners for the outcome of the last action: a bulk fix (with Undo), an undo, a refresh, a failed
 // save, or any error.
 export function Notices({ data, onUndo, onRestore, busy }) {

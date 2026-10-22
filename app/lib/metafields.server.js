@@ -57,18 +57,22 @@ export async function trackMetafield(shop, def) {
   return view(row);
 }
 
-export async function updateTracked(shop, id, fields) {
-  const data = {};
-  if (fields.required !== undefined) data.required = Boolean(fields.required);
-  if (fields.pattern !== undefined) {
-    const pattern = String(fields.pattern || "").trim();
+// The save bar saves every changed row at once: all patterns are checked first, naming the
+// metafield whose pattern fails, so either every change is saved or none is.
+export async function updateTrackedMany(shop, changes) {
+  const list = Array.isArray(changes) ? changes : [];
+  const rows = await listTracked(shop);
+  const updates = [];
+  for (const change of list) {
+    const row = rows.find((r) => r.id === Number(change?.id));
+    if (!row) throw new Error("A metafield on this page is no longer tracked. Reload the page and try again.");
+    const pattern = String(change.pattern || "").trim();
     const problem = await patternError(pattern);
-    if (problem) throw new Error(problem);
-    data.pattern = pattern;
+    if (problem) throw new Error(`${row.name}: ${problem}`);
+    updates.push({ id: row.id, data: { required: Boolean(change.required), pattern, productType: String(change.productType || "").trim().slice(0, 255) } });
   }
-  if (fields.productType !== undefined) data.productType = String(fields.productType || "").trim().slice(0, 255);
-  if (!Number.isInteger(Number(id))) throw new Error("That metafield was not understood. Reload the page and try again.");
-  await prisma.trackedMetafield.updateMany({ where: { shop, id: Number(id) }, data });
+  await prisma.$transaction(updates.map(({ id, data }) => prisma.trackedMetafield.updateMany({ where: { shop, id }, data })));
+  return updates.length;
 }
 
 export async function untrackMetafield(shop, id) {

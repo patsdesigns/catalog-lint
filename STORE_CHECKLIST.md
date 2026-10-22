@@ -77,6 +77,6 @@ Result on 2026-09-23: 28 likely passing, none failing, 3 needing review. Two of 
 
 - Merchant utility prerequisites: 50 net installs on paid plans, five reviews and the minimum rating. Only time and merchants provide these.
 - Web Vitals in the admin (LCP under 2.5 s, CLS under 0.1, INP under 200 ms at the 75th percentile, measured by Shopify after 100 page loads). The home page reads stored results without parsing findings, which helps; measure after launch.
-- Contextual save bar: the tracked metafield rows use their own Save buttons rather than the App Bridge save bar, as will the weekly email form when it returns.
-- Two banners can appear close together on Home (a notice plus the scan progress or a plan banner); the guidelines prefer one.
+- Contextual save bar: done in 1.1.2 for tracked metafields (one App Bridge save bar for every row). The weekly email form still has its own Save button; move it to the save bar when the email returns.
+- One banner at a time on Home: done in 1.1.2 (the most important shows; the rest wait).
 - Onboarding: the first-run page disappears after the first scan, which meets the "removable onboarding" rule; there is no setup guide beyond it.

@@ -17,7 +17,7 @@ import { CATEGORIES, categoryOf } from "../lib/categories";
 import { PASS_LABELS, SETUP_LABELS } from "../lib/checkLabels";
 import { shopInfo } from "../lib/shop.server";
 import { timeAgo } from "../lib/format";
-import { TONE, Notices, Dot } from "../lib/ui";
+import { TONE, Notices, Dot, hasNotice } from "../lib/ui";
 
 // ---------- server ----------
 
@@ -785,7 +785,7 @@ function CategoryCard({ cat, rules, checks, showChecks, showPassed, locked, onSe
 // Remembered per browser: whether the cards list every passed check or just the count.
 const SHOW_PASSED_KEY = "catalog-lint:show-passed";
 
-function Overview({ result, history, fixedWeek, fixedTotal, plan, newProducts, streak, locked, locale, onSelect, onIgnore, onFixAll, busy, fixing }) {
+function Overview({ result, history, fixedWeek, fixedTotal, plan, newProducts, streak, locked, locale, onSelect, onIgnore, onFixAll, busy, fixing, quiet }) {
   const [filter, setFilter] = useState(null);
   const [showPassed, setShowPassed] = useState(false);
   const checks = result.checks || [];
@@ -820,7 +820,9 @@ function Overview({ result, history, fixedWeek, fixedTotal, plan, newProducts, s
       </s-query-container>
       </s-box>
 
-      {newProducts > 0 && !plan.features.newProductScans ? (
+      {/* One banner on the page at a time: these wait while the page shows another (quiet), and a
+          scan the plan cut short comes before the new-products hint. */}
+      {!quiet && !result.truncated && newProducts > 0 && !plan.features.newProductScans ? (
         // The free plan can only run a full scan; the paid plans get a Scan New Products button.
         <s-banner tone="info" heading={`${newProducts.toLocaleString(locale)} ${newProducts === 1 ? "product" : "products"} added since your last scan`}>
           <s-paragraph>
@@ -830,7 +832,7 @@ function Overview({ result, history, fixedWeek, fixedTotal, plan, newProducts, s
         </s-banner>
       ) : null}
 
-      {result.truncated ? (
+      {!quiet && result.truncated ? (
         // The plan's product limit left products out of the scan.
         <s-banner tone="warning" heading={`Scanned ${result.total.toLocaleString(locale)} of ${result.catalogTotal.toLocaleString(locale)} products`}>
           <s-paragraph>
@@ -966,6 +968,19 @@ export default function Index() {
   const fixing = busy && fetcher.formData?.get("intent") === "fixAll" ? fetcher.formData.get("ruleId") : null;
   // Each check has a page of its own (app.issues.$ruleId.jsx) with the products it flagged.
   const openIssue = (ruleId) => navigate(`/app/issues/${ruleId}`);
+  // Shopify's design guidelines ask for one banner at a time, so the page shows the most important:
+  // a plan Shopify did not confirm, the Early Bird offer canceled, an action that failed, a scan
+  // running or failed, the outcome of the last action, a scan over the plan's limit. The overview's
+  // own banners (a scan the limit cut short, new products) wait until none of these shows.
+  const banner =
+    [
+      planUnknown && "planUnknown",
+      earlyBirdNotice && "earlyBird",
+      data && !data.ok && "notice",
+      job && (job.status === "running" || job.status === "failed") && "scan",
+      hasNotice(data) && "notice",
+      overLimit && result && "overLimit",
+    ].find(Boolean) || null;
 
   return (
     <s-page heading="TidyUp: Product Data Cleanup" inlineSize="large">
@@ -990,24 +1005,24 @@ export default function Index() {
         </s-button>
       ) : null}
 
-      <Notices data={data} onUndo={runUndo} onRestore={runRestore} busy={busy} />
-      {planUnknown ? (
+      {banner === "notice" ? <Notices data={data} onUndo={runUndo} onRestore={runRestore} busy={busy} /> : null}
+      {banner === "planUnknown" ? (
         // Shopify did not answer the plan check: the free plan shows until it does, and nothing runs.
         <s-banner tone="warning" heading="Could not confirm your plan">
           <s-paragraph>Shopify did not answer the plan check. The free plan features show for now; reload in a moment.</s-paragraph>
         </s-banner>
       ) : null}
-      {earlyBirdNotice ? (
+      {banner === "earlyBird" ? (
         <s-banner tone={earlyBirdNotice.tone} heading={earlyBirdNotice.heading}>
           <s-paragraph>{earlyBirdNotice.text}</s-paragraph>
         </s-banner>
       ) : null}
-      {overLimit && result ? (
+      {banner === "overLimit" ? (
         <s-banner tone="warning" heading={`The ${plan.name} plan scans up to ${plan.productLimit.toLocaleString(locale)} products`}>
           <s-paragraph>The last scan covered {result.total.toLocaleString(locale)}. Run a full scan to apply the limit.</s-paragraph>
         </s-banner>
       ) : null}
-      <ScanProgress job={job} locale={locale} />
+      {banner === "scan" ? <ScanProgress job={job} locale={locale} /> : null}
 
       {!result ? (
         <Welcome checkCount={checkCount} onScan={runScan} busy={busy} scanning={scanning} />
@@ -1029,6 +1044,7 @@ export default function Index() {
           onFixAll={runFixAll}
           busy={busy}
           fixing={fixing}
+          quiet={Boolean(banner)}
         />
       )}
     </s-page>

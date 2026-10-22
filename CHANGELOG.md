@@ -6,6 +6,11 @@ Versions follow [semantic versioning](https://semver.org): the first number chan
 
 ## Unreleased
 
+### Changed
+
+- Tracked metafields save through Shopify's save bar: change any row and Save or Discard at the top of the page, instead of a Save button on each row. Every change is saved together, or none is when a pattern is not valid.
+- Home shows one banner at a time, the most important first: a plan Shopify could not confirm, an action that failed, a scan in progress, the outcome of the last action, then the plan's product limit and new products.
+
 ## 1.1.1 - 2026-10-22
 
 ### Removed

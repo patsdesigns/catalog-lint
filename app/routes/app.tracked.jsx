@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useFetcher, useLoaderData } from "react-router";
+import { SaveBar } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
-import { listTracked, trackMetafield, updateTracked, untrackMetafield, fetchDefinitions, MAX_TRACKED } from "../lib/metafields.server";
+import { listTracked, trackMetafield, updateTrackedMany, untrackMetafield, fetchDefinitions, MAX_TRACKED } from "../lib/metafields.server";
 import { refreshAfter } from "../lib/rescan.server";
 import { currentPlan, PLAN_UNKNOWN } from "../lib/billing.server";
 import { describeError } from "../lib/graphql.server";
@@ -45,11 +46,14 @@ export async function action({ request }) {
       name = t.name;
     }
     if (intent === "update") {
-      await updateTracked(session.shop, form.get("id"), {
-        required: form.get("required") === "true",
-        pattern: form.get("pattern"),
-        productType: form.get("productType"),
-      });
+      let changes;
+      try {
+        changes = JSON.parse(String(form.get("changes") || "[]"));
+      } catch {
+        changes = null;
+      }
+      if (!Array.isArray(changes)) throw new Error("The changes were not understood. Reload the page and try again.");
+      await updateTrackedMany(session.shop, changes);
     }
     if (intent === "untrack") await untrackMetafield(session.shop, form.get("id"));
     // Checks that no longer exist (a metafield untracked, a setting turned off) lose their findings now.
@@ -63,11 +67,18 @@ export async function action({ request }) {
 const TWO_COLUMNS = "@container (inline-size <= 760px) 1fr, 1fr 1fr";
 const ADD_COLUMNS = "@container (inline-size <= 560px) 1fr, 1fr auto";
 
-// One tracked metafield: its settings, saved together, and Remove.
-function TrackedRow({ t, busy, saving, removing, onSave, onRemove }) {
-  const [form, setForm] = useState({ required: t.required, pattern: t.pattern, productType: t.productType });
-  const changed = form.required !== t.required || form.pattern !== t.pattern || form.productType !== t.productType;
-  const set = (patch) => setForm({ ...form, ...patch });
+const SAVE_BAR_ID = "tracked-metafields-save-bar";
+
+function settingsOf(t) {
+  return { required: t.required, pattern: t.pattern, productType: t.productType };
+}
+function differs(a, b) {
+  return a.required !== b.required || a.pattern !== b.pattern || a.productType !== b.productType;
+}
+
+// One tracked metafield: its settings, kept by the page until the save bar saves them, and Remove.
+function TrackedRow({ t, form, busy, removing, onChange, onRemove }) {
+  const set = (patch) => onChange({ ...form, ...patch });
   return (
     <s-box padding="base" border="base" borderRadius="base">
       <s-stack gap="small">
@@ -91,9 +102,6 @@ function TrackedRow({ t, busy, saving, removing, onSave, onRemove }) {
           onInput={(e) => set({ productType: e.target.value })}
         ></s-text-field>
         <s-stack direction="inline" gap="small">
-          <s-button variant="primary" onClick={() => onSave(t.id, form)} disabled={!changed || busy || undefined} loading={saving || undefined}>
-            Save
-          </s-button>
           <s-button variant="tertiary" onClick={() => onRemove(t.id)} disabled={busy || undefined} loading={removing || undefined} accessibilityLabel={`Stop tracking ${t.name}`}>
             Remove
           </s-button>
@@ -114,6 +122,28 @@ export default function TrackedPage() {
   const submit = (payload) => fetcher.submit(payload, { method: "post" });
   const available = definitions.filter((d) => !tracked.some((t) => t.namespace === d.namespace && t.key === d.key));
   const [pick, setPick] = useState("");
+  // Unsaved settings by metafield id. Any change opens Shopify's save bar; Save sends every changed
+  // row in one request and Discard puts them back.
+  const [edits, setEdits] = useState({});
+  // Discard redraws the rows: a Polaris text field keeps what was typed even when its value
+  // attribute changes back, so the rows start over from the saved values instead.
+  const [round, setRound] = useState(0);
+  const changed = tracked.filter((t) => edits[t.id] && differs(edits[t.id], settingsOf(t)));
+  const dirty = changed.length > 0;
+  const saving = active === "update";
+  const saveAll = () => {
+    if (!dirty || busy) return;
+    const changes = changed.map((t) => ({ id: t.id, ...edits[t.id] }));
+    submit({ intent: "update", changes: JSON.stringify(changes) });
+  };
+  const discard = () => {
+    setEdits({});
+    setRound((r) => r + 1);
+  };
+  // A save that went through clears the edits: the reloaded rows hold the saved values.
+  useEffect(() => {
+    if (fetcher.state === "idle" && fetcher.data?.ok && fetcher.data.done === "update") setEdits({});
+  }, [fetcher.state, fetcher.data]);
   const chosen = available.find((d) => d.id === pick) || available[0] || null;
   const add = () => {
     if (!chosen) return;
@@ -139,6 +169,14 @@ export default function TrackedPage() {
   return (
     <s-page heading="Tracked metafields" inlineSize="large">
       <s-link slot="breadcrumb-actions" href="/app/settings">Settings</s-link>
+      <SaveBar id={SAVE_BAR_ID} open={dirty}>
+        <button variant="primary" onClick={saveAll} loading={saving ? "" : undefined} disabled={busy ? "" : undefined}>
+          Save
+        </button>
+        <button onClick={discard} disabled={busy ? "" : undefined}>
+          Discard
+        </button>
+      </SaveBar>
       {outcome && !outcome.ok ? (
         <s-banner tone="critical" heading="Something went wrong">
           <s-paragraph>{outcome.error}</s-paragraph>
@@ -211,13 +249,20 @@ export default function TrackedPage() {
             <s-grid gridTemplateColumns={TWO_COLUMNS} gap="base">
               {tracked.map((t) => (
                 <TrackedRow
-                  key={t.id}
+                  key={`${t.id}-${round}`}
                   t={t}
+                  form={edits[t.id] || settingsOf(t)}
                   busy={busy}
-                  saving={active === "update" && activeId === String(t.id)}
                   removing={active === "untrack" && activeId === String(t.id)}
-                  onSave={(id, form) => submit({ intent: "update", id: String(id), required: String(form.required), pattern: form.pattern, productType: form.productType })}
-                  onRemove={(id) => submit({ intent: "untrack", id: String(id) })}
+                  onChange={(form) => setEdits((all) => ({ ...all, [t.id]: form }))}
+                  onRemove={(id) => {
+                    setEdits((all) => {
+                      const rest = { ...all };
+                      delete rest[id];
+                      return rest;
+                    });
+                    submit({ intent: "untrack", id: String(id) });
+                  }}
                 />
               ))}
             </s-grid>
