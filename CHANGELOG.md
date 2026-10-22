@@ -6,6 +6,12 @@ Versions follow [semantic versioning](https://semver.org): the first number chan
 
 ## Unreleased
 
+## 1.0.1 - 2026-10-22
+
+### Security
+
+- Updated packages with known security issues: Vite 6.4.5, source-map-js 1.2.2 and the session storage for Prisma 11.0.1, and deepmerge-ts 8.0.2 inside Prisma's command-line tool (pinned through `overrides`, so Prisma stays on version 6). The production packages now have no known vulnerabilities. Build tools used only in development were updated where a fix exists without a major upgrade (shell-quote, lodash and others).
+
 ## 1.0.0 - 2026-10-22
 
 Listed in the Shopify App Store at https://apps.shopify.com/tidyup. The same app as 0.11.2; support emails now come from hello@patsdesigns.com.
