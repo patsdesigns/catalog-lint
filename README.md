@@ -8,7 +8,7 @@ TidyUp is a Shopify embedded app that scans a product catalog for missing, incon
 - **One page per check** listing the products it flagged, each with its current value, a suggestion and a correction field. Quick apply saves the suggestion in one click. Two checks have a bulk fix (vendor spelling and sale prices). Every change is read before it is written, logged with its previous value, and can be undone from Recent fixes.
 - **Scans any catalog size**: up to 250 products inline, paced on the API rate limit; larger catalogs through a Shopify bulk operation in the background.
 - **Keeps the stored result current**: product webhooks re-check a product as it changes (paid plans) or queue it (free plan); ignoring a finding, learning a word or turning a check off updates the result at once.
-- **Settings**: which checks run (by family or one by one), a spelling dictionary, ignored findings and tracked metafields (up to seven, each with a required flag and a pattern). A weekly email is built but in no plan until a later version.
+- **Settings**: which checks run (by family or one by one), a spelling dictionary, ignored findings and tracked metafields (up to seven, each with a required flag and a pattern). Quick Clean and Deep Clean add a weekly email: potential problems, the change since last week and the five issues to start with, sent on Mondays.
 
 ## Plans
 
@@ -52,11 +52,11 @@ npm run lint
    - `DATABASE_URL`: where the SQLite file lives, `file:/data/tidyup.sqlite` on the persistent disk. Without it the app stops at start rather than keep data in a throwaway file.
    - `NODE_ENV=production`.
    - `BILLING_TEST`: `false` for real charges. Unset, production means real charges and anything else means test charges. Development stores get test charges whatever this says: they accept no other kind, and they are where Partners try the app. An active subscription counts whether or not it is a test, because Shopify's app review stores turn approved charges into test charges. Any other value stops the app at startup.
-   - `RESEND_API_KEY`: the app sends email with [Resend](https://resend.com) (`app/lib/email.server.js`): support form messages now, the weekly email when it returns. Without a key nothing is emailed; support messages are still stored, and posted to `SUPPORT_WEBHOOK_URL` if that is set.
+   - `RESEND_API_KEY`: the app sends email with [Resend](https://resend.com) (`app/lib/email.server.js`): support form messages and the weekly email. Without a key nothing is emailed; support messages are still stored, and posted to `SUPPORT_WEBHOOK_URL` if that is set.
    - `EMAIL_FROM` (optional): the sender, `TidyUp <hello@patsdesigns.com>` once patsdesigns.com is verified in Resend. Unset, the Resend onboarding sender is used, which only delivers to the address the Resend account was opened with, so open the account with hello@patsdesigns.com.
    - `SUPPORT_EMAIL` (optional): where support form messages are emailed, with the merchant's address as the reply-to. Unset, hello@patsdesigns.com.
    - `SUPPORT_WEBHOOK_URL` (optional): support form messages are also posted here as JSON with a `text` field, which suits a Slack incoming webhook, Zapier or Make.
-   - `CRON_SECRET`: for the weekly email, which is in no plan until a later version (`app/lib/plans.js`) and needs nothing until then. When it returns, `.github/workflows/weekly-email.yml` calls `GET /cron/digest` with this value as a bearer token (an `X-Cron-Secret` header also works); unset, the route answers 503 and no weekly email goes out. Add the same value as a GitHub repository secret and turn the workflow's Monday schedule back on.
+   - `CRON_SECRET`: for the weekly email. Every Monday at 14:00 UTC `.github/workflows/weekly-email.yml` calls `GET /cron/digest` with this value as a bearer token (an `X-Cron-Secret` header also works); unset, the route answers 503 and no weekly email goes out. The same value must be the GitHub repository secret `CRON_SECRET`.
 
    In development, put any of these in a `.env` file at the project root: the Shopify CLI loads it when `npm run dev` starts, so restart the dev server after changing it.
 3. Put the hosted URL in `shopify.app.production.toml` (`application_url` and `redirect_urls`), then `npm run deploy -- -c production` to push the config, the app name, the access scopes and the webhook subscriptions to Shopify. The plain `shopify.app.toml` is the localhost development config and carries no webhook subscriptions, because a localhost session cannot register them.

@@ -6,6 +6,10 @@ Versions follow [semantic versioning](https://semver.org): the first number chan
 
 ## Unreleased
 
+### Added
+
+- The weekly email is back on Quick Clean and Deep Clean: every Monday, potential problems, the change since last week and the five issues to start with, sent from hello@patsdesigns.com. Turn it on in Settings, with a test email button. The privacy policy lists the email address it is sent to.
+
 ## 1.0.2 - 2026-10-22
 
 ### Fixed
