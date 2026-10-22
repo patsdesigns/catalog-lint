@@ -6,6 +6,8 @@ Versions follow [semantic versioning](https://semver.org): the first number chan
 
 ## Unreleased
 
+## 1.2.0 - 2026-10-22
+
 ### Added
 
 - Shopify's review prompt can appear at the end of a piece of work: after a Fix all that fixed every product it touched, or when an issue page has nothing left open after your fixes. Shopify decides whether it shows: not in the first day after install, at most once every 60 days and three times a year, not on mobile, and never once the store has reviewed the app. It never appears when the app opens.
