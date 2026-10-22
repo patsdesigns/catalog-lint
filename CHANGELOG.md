@@ -6,9 +6,15 @@ Versions follow [semantic versioning](https://semver.org): the first number chan
 
 ## Unreleased
 
+## 1.0.2 - 2026-10-22
+
 ### Fixed
 
 - An app page opened straight in the browser, outside the Shopify admin (a bookmark or a shared link), showed an empty page. It now shows the page that says to open TidyUp from the admin, which links to the App Store listing.
+
+### Security
+
+- Development tools updated: typescript-eslint 8 (the code checker) and Shopify's GraphQL type generator 3. The remaining audit findings are in the GraphQL type generator's own dependencies, which have no fixed version yet; it only runs on a developer's machine, never in the live app.
 
 ## 1.0.1 - 2026-10-22
 
