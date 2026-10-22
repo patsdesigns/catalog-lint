@@ -71,6 +71,8 @@ The version is in `package.json`, shows on the Support page in the app and is ta
 2. Run `npm version minor` (or `patch` for fixes only, `major` for a break merchants would notice). It updates `package.json` and `package-lock.json`, commits them and creates the tag.
 3. Push with `git push --follow-tags`.
 
+The Support page reads the version from `package.json` when the app starts, so it shows whatever Render last deployed. A version commit must therefore deploy: never put `[skip render]` in it, or the Support page keeps the old number.
+
 Versions stayed below 1.0.0 until the app was listed in the App Store on 2026-10-22; 1.0.0 is the listed app. The first version, 0.9.0, was set and tagged by hand.
 
 ## Webhooks

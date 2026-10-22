@@ -18,4 +18,4 @@ Use the [Shopify AI Toolkit](https://shopify.dev/docs/apps/build/ai-toolkit) for
 - Schema changes need a migration under `prisma/migrations/` (see the README); stop the dev server first.
 - The dev config `shopify.app.toml` has no webhook subscriptions on purpose; production ones live in `shopify.app.production.toml`. Keep the API version in `app/shopify.server.js` and both tomls the same.
 - Copy: American English, sentence case, "compare-at price", "weekly email", "Fix all".
-- Versions: the number lives in `package.json` only (the Support page reads it); note user-visible changes under Unreleased in `CHANGELOG.md`. Cut a version as the README describes: commit the changelog first, then `npm version`, then push with tags.
+- Versions: the number lives in `package.json` only (the Support page reads it); note user-visible changes under Unreleased in `CHANGELOG.md`. Cut a version as the README describes: commit the changelog first, then `npm version`, then push with tags. Never put `[skip render]` in a version commit: the Support page shows the deployed version, so every version must deploy.
