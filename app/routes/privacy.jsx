@@ -32,7 +32,6 @@ export default function Privacy() {
         <li>A record of each change TidyUp makes, with the value it replaced, so the change can be undone.</li>
         <li>The merchant’s settings: which checks run, dictionary words, ignored findings and tracked metafields.</li>
         <li>Plan details, including whether the store took an Early Bird seat.</li>
-        <li>The email address for the weekly email, if the merchant turns it on in Settings.</li>
         <li>
           Support messages sent from the app: the name, email address and message the merchant enters. They are also
           emailed to hello@patsdesigns.com so we can reply.
@@ -52,13 +51,13 @@ export default function Privacy() {
       <h2>How the information is used</h2>
       <p>
         Only to provide TidyUp: running checks, showing and applying fixes, undoing changes, applying the merchant’s plan
-        sending the weekly email to merchants who turn it on and answering support messages. We don’t sell it, share it for advertising or use it for anything else.
+        and answering support messages. We don’t sell it, share it for advertising or use it for anything else.
       </p>
 
       <h2>Where it is stored and who processes it</h2>
       <ul>
         <li>Render hosts the app and its database in the United States.</li>
-        <li>Resend delivers support messages and the weekly email.</li>
+        <li>Resend delivers support messages by email.</li>
         <li>Shopify provides the store data, installation and billing.</li>
       </ul>
 

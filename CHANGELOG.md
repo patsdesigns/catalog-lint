@@ -6,6 +6,12 @@ Versions follow [semantic versioning](https://semver.org): the first number chan
 
 ## Unreleased
 
+## 1.1.1 - 2026-10-22
+
+### Removed
+
+- The weekly email is off again: it is in no plan, Settings does not show it and nothing is sent. It returns in a later version.
+
 ## 1.1.0 - 2026-10-22
 
 ### Added
