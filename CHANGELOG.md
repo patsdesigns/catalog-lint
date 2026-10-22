@@ -6,6 +6,8 @@ Versions follow [semantic versioning](https://semver.org): the first number chan
 
 ## Unreleased
 
+## 1.1.2 - 2026-10-22
+
 ### Changed
 
 - Tracked metafields save through Shopify's save bar: change any row and Save or Discard at the top of the page, instead of a Save button on each row. Every change is saved together, or none is when a pattern is not valid.
