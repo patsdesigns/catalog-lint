@@ -2,9 +2,13 @@
 
 Every version of TidyUp and what changed in it. The number is in `package.json`, shows on the Support page in the app and is tagged in git as `vX.Y.Z` (the README says how to cut one).
 
-Versions follow [semantic versioning](https://semver.org): the first number changes when merchants would notice a break, the second when something new is added, the third for fixes only. Versions stay below 1.0.0 until the app is listed in the Shopify App Store; 1.0.0 is the listed app.
+Versions follow [semantic versioning](https://semver.org): the first number changes when merchants would notice a break, the second when something new is added, the third for fixes only. Versions stayed below 1.0.0 until the app was listed in the Shopify App Store; 1.0.0 is the listed app.
 
 ## Unreleased
+
+## 1.0.0 - 2026-10-22
+
+Listed in the Shopify App Store at https://apps.shopify.com/tidyup. The same app as 0.11.2; support emails now come from hello@patsdesigns.com.
 
 ## 0.11.2 - 2026-10-08
 
