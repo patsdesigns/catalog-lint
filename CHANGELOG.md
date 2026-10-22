@@ -6,6 +6,10 @@ Versions follow [semantic versioning](https://semver.org): the first number chan
 
 ## Unreleased
 
+### Fixed
+
+- An app page opened straight in the browser, outside the Shopify admin (a bookmark or a shared link), showed an empty page. It now shows the page that says to open TidyUp from the admin, which links to the App Store listing.
+
 ## 1.0.1 - 2026-10-22
 
 ### Security

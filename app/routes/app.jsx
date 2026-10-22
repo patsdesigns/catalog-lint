@@ -1,9 +1,19 @@
-import { Outlet, isRouteErrorResponse, useLoaderData, useRouteError, useRouteLoaderData } from "react-router";
+import { Outlet, isRouteErrorResponse, redirect, useLoaderData, useRouteError, useRouteLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { AppProvider } from "@shopify/shopify-app-react-router/react";
 import { authenticate } from "../shopify.server";
 
+// An app page opened straight in the browser (a bookmark, a shared link) carries nothing from the
+// admin: no store, no host, no session token. The library would answer with an empty page that waits
+// for the admin forever, so the visit goes to the page that says to open TidyUp from the admin.
+function outsideAdmin(request) {
+  const params = new URL(request.url).searchParams;
+  if (request.headers.get("authorization")) return false;
+  return !["shop", "host", "id_token", "embedded"].some((key) => params.has(key));
+}
+
 export const loader = async ({ request }) => {
+  if (outsideAdmin(request)) throw redirect("/auth/login");
   await authenticate.admin(request);
 
   // eslint-disable-next-line no-undef
